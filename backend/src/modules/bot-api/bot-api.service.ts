@@ -1,5 +1,4 @@
-import { Pool } from "pg";
-import { env } from "../../config/env";
+import type { FastifyInstance } from "fastify";
 
 interface UserRow {
   id: string;
@@ -17,29 +16,18 @@ interface SubmissionRow {
   created_at: string;
 }
 
-export interface AuthenticatedTelegramUser {
+export interface BotUser {
   id: string;
   role: "student" | "reviewer" | "admin";
   email: string;
   fullName: string | null;
 }
 
-export class UpmsService {
-  private readonly pool: Pool;
+export class BotApiService {
+  constructor(private readonly app: FastifyInstance) {}
 
-  constructor() {
-    this.pool = new Pool({
-      connectionString: env.SUPABASE_DB_URL,
-      ssl: { rejectUnauthorized: false },
-    });
-  }
-
-  async close(): Promise<void> {
-    await this.pool.end();
-  }
-
-  async findUserByTelegramId(telegramUserId: number): Promise<AuthenticatedTelegramUser | null> {
-    const result = await this.pool.query<UserRow>(
+  async findUserByTelegramId(telegramUserId: number): Promise<BotUser | null> {
+    const result = await this.app.db.query<UserRow>(
       `
       SELECT id, role, email, full_name, telegram_user_id
       FROM users
@@ -49,21 +37,19 @@ export class UpmsService {
       [telegramUserId],
     );
 
-    const user = result.rows[0];
-    if (!user) {
-      return null;
-    }
+    const row = result.rows[0];
+    if (!row) return null;
 
     return {
-      id: user.id,
-      role: user.role,
-      email: user.email,
-      fullName: user.full_name,
+      id: row.id,
+      role: row.role,
+      email: row.email,
+      fullName: row.full_name,
     };
   }
 
-  async linkTelegramByEmail(email: string, telegramUserId: number): Promise<AuthenticatedTelegramUser | null> {
-    const result = await this.pool.query<UserRow>(
+  async linkTelegramByEmail(email: string, telegramUserId: number): Promise<BotUser | null> {
+    const result = await this.app.db.query<UserRow>(
       `
       UPDATE users
       SET telegram_user_id = $2, updated_at = NOW()
@@ -73,16 +59,14 @@ export class UpmsService {
       [email, telegramUserId],
     );
 
-    const user = result.rows[0];
-    if (!user) {
-      return null;
-    }
+    const row = result.rows[0];
+    if (!row) return null;
 
     return {
-      id: user.id,
-      role: user.role,
-      email: user.email,
-      fullName: user.full_name,
+      id: row.id,
+      role: row.role,
+      email: row.email,
+      fullName: row.full_name,
     };
   }
 
@@ -92,7 +76,7 @@ export class UpmsService {
     details: string;
     proofFileUrl: string;
   }): Promise<{ submissionId: string }> {
-    const client = await this.pool.connect();
+    const client = await this.app.db.connect();
     try {
       await client.query("BEGIN");
 
@@ -102,11 +86,7 @@ export class UpmsService {
         VALUES ($1, $2, $3, 'submitted', NOW())
         RETURNING id
         `,
-        [
-          input.userId,
-          `Achievement: ${input.category}`,
-          input.details,
-        ],
+        [input.userId, `Achievement: ${input.category}`, input.details],
       );
 
       const submissionId = submissionResult.rows[0].id;
@@ -146,7 +126,7 @@ export class UpmsService {
   }
 
   async getUserSubmissions(userId: string): Promise<SubmissionRow[]> {
-    const result = await this.pool.query<SubmissionRow>(
+    const result = await this.app.db.query<SubmissionRow>(
       `
       SELECT id, title, status, total_points, created_at
       FROM submissions
@@ -160,8 +140,8 @@ export class UpmsService {
     return result.rows;
   }
 
-  async getUserPoints(userId: string): Promise<number> {
-    const result = await this.pool.query<{ total: string }>(
+  async getUserApprovedPoints(userId: string): Promise<number> {
+    const result = await this.app.db.query<{ total: string }>(
       `
       SELECT COALESCE(SUM(total_points), 0)::text AS total
       FROM submissions

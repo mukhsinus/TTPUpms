@@ -10,7 +10,6 @@ async function bootstrapBot(): Promise<void> {
 
   const shutdown = async (): Promise<void> => {
     bot.stop("SIGTERM");
-    await upmsService.close();
     process.exit(0);
   };
 

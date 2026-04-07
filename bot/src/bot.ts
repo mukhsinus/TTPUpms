@@ -1,5 +1,5 @@
 import { Markup, Scenes, Telegraf, session } from "telegraf";
-import { env } from "../config/env";
+import { env } from "./config/env";
 import { mainMenuKeyboard } from "./keyboards";
 import { createSubmitAchievementScene } from "./scenes/submit-achievement.scene";
 import { UpmsService } from "./services/upms.service";

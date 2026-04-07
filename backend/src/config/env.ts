@@ -19,6 +19,7 @@ const envSchema = z.object({
   STORAGE_BUCKET: z.string().default("submission-files"),
   STORAGE_SIGNED_URL_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
   TELEGRAM_BOT_TOKEN: z.string().min(1, "TELEGRAM_BOT_TOKEN is required"),
+  BOT_API_KEY: z.string().min(16, "BOT_API_KEY is required and must be at least 16 chars"),
   DB_POOL_MAX: z.coerce.number().int().positive().default(20),
   DB_POOL_IDLE_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
   DB_POOL_CONNECTION_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),

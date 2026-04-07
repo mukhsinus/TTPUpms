@@ -1,0 +1,21 @@
+{
+  "name": "ttpupms-bot",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/start-bot.js",
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/start-bot.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/start-bot.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.1",
+    "telegraf": "^4.16.3",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^6.0.2"
+  }
+}
