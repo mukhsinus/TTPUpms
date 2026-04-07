@@ -1,0 +1,187 @@
+:root {
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #0f172a;
+  background: #f8fafc;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.app-shell {
+  min-height: 100vh;
+  padding-bottom: 76px;
+}
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 12px 16px;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.app-main {
+  padding: 14px;
+}
+
+.stack {
+  display: grid;
+  gap: 12px;
+}
+
+.grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.metric strong {
+  font-size: 1.4rem;
+  display: block;
+  margin-top: 6px;
+}
+
+.row-between {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.muted {
+  color: #475569;
+  font-size: 0.9rem;
+}
+
+.input {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 10px;
+  font-size: 0.95rem;
+}
+
+.filters {
+  display: grid;
+  gap: 8px;
+}
+
+.button,
+.button-link {
+  border: 0;
+  background: #2563eb;
+  color: #ffffff;
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 0.9rem;
+  text-decoration: none;
+  display: inline-block;
+  cursor: pointer;
+}
+
+.button.success {
+  background: #16a34a;
+}
+
+.button.danger {
+  background: #dc2626;
+}
+
+.actions-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.item-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.status {
+  border-radius: 999px;
+  font-size: 0.78rem;
+  padding: 5px 9px;
+  color: #ffffff;
+}
+
+.status-submitted,
+.status-under_review {
+  background: #2563eb;
+}
+
+.status-approved {
+  background: #16a34a;
+}
+
+.status-rejected {
+  background: #dc2626;
+}
+
+.status-needs_revision {
+  background: #d97706;
+}
+
+.status-draft {
+  background: #64748b;
+}
+
+.error {
+  color: #b91c1c;
+}
+
+.bottom-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-top: 1px solid #e2e8f0;
+  background: #ffffff;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.nav-item {
+  text-align: center;
+  padding: 12px 8px;
+  text-decoration: none;
+  color: #334155;
+  font-size: 0.88rem;
+}
+
+.nav-item.active {
+  color: #2563eb;
+  font-weight: 600;
+}
+
+@media (min-width: 768px) {
+  .app-main {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 20px;
+  }
+
+  .filters {
+    grid-template-columns: 2fr 1fr;
+  }
+}
