@@ -1,4 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { failure } from "../utils/http-response";
 
 type Role = "student" | "reviewer" | "admin";
 
@@ -15,23 +16,19 @@ function parseBearerToken(authorizationHeader?: string): string | null {
   return token.trim();
 }
 
-function toRole(value: unknown): Role {
+function toRole(value: unknown): Role | null {
   if (value === "admin" || value === "reviewer" || value === "student") {
     return value;
   }
 
-  // Default to least-privileged role when role claim is absent/invalid.
-  return "student";
+  return null;
 }
 
 export async function authMiddleware(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const token = parseBearerToken(request.headers.authorization);
 
   if (!token) {
-    reply.status(401).send({
-      success: false,
-      message: "Missing or invalid Authorization header",
-    });
+    reply.status(401).send(failure("Missing or invalid Authorization header", "UNAUTHORIZED"));
     return;
   }
 
@@ -39,19 +36,29 @@ export async function authMiddleware(request: FastifyRequest, reply: FastifyRepl
 
   if (error || !data.user) {
     request.log.warn({ err: error }, "JWT validation failed");
-    reply.status(401).send({
-      success: false,
-      message: "Unauthorized",
-    });
+    reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
     return;
   }
 
   const appRole = data.user.app_metadata?.role;
-  const userRole = data.user.user_metadata?.role;
+  let role: Role = "student";
+
+  if (appRole === undefined || appRole === null) {
+    // Missing role metadata must never escalate privileges.
+    request.log.warn({ userId: data.user.id }, "Missing app_metadata.role; defaulting to student");
+  } else {
+    const parsedRole = toRole(appRole);
+    if (!parsedRole) {
+      request.log.warn({ userId: data.user.id, appRole }, "Invalid app_metadata.role");
+      reply.status(403).send(failure("Forbidden", "FORBIDDEN"));
+      return;
+    }
+    role = parsedRole;
+  }
 
   request.user = {
     id: data.user.id,
     email: data.user.email ?? null,
-    role: toRole(appRole ?? userRole),
+    role,
   };
 }

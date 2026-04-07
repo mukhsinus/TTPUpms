@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { ZodError } from "zod";
+import { errorCodeFromStatus, failure, success } from "../../utils/http-response";
 import {
   createSubmissionBodySchema,
   getUserSubmissionsQuerySchema,
@@ -12,7 +13,7 @@ export class SubmissionsController {
 
   createSubmission = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (!request.user) {
-      reply.status(401).send({ success: false, message: "Unauthorized" });
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
       return;
     }
 
@@ -20,10 +21,7 @@ export class SubmissionsController {
       const body = createSubmissionBodySchema.parse(request.body);
       const data = await this.service.createSubmission(request.user, body);
 
-      reply.status(201).send({
-        success: true,
-        data,
-      });
+      reply.status(201).send(success(data));
     } catch (error) {
       this.handleError(reply, error);
     }
@@ -31,7 +29,7 @@ export class SubmissionsController {
 
   getUserSubmissions = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (!request.user) {
-      reply.status(401).send({ success: false, message: "Unauthorized" });
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
       return;
     }
 
@@ -39,10 +37,7 @@ export class SubmissionsController {
       const query = getUserSubmissionsQuerySchema.parse(request.query);
       const data = await this.service.getUserSubmissions(request.user, query.userId);
 
-      reply.status(200).send({
-        success: true,
-        data,
-      });
+      reply.status(200).send(success(data));
     } catch (error) {
       this.handleError(reply, error);
     }
@@ -50,7 +45,7 @@ export class SubmissionsController {
 
   getSubmissionById = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (!request.user) {
-      reply.status(401).send({ success: false, message: "Unauthorized" });
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
       return;
     }
 
@@ -58,10 +53,7 @@ export class SubmissionsController {
       const params = submissionParamsSchema.parse(request.params);
       const data = await this.service.getSubmissionById(request.user, params.id);
 
-      reply.status(200).send({
-        success: true,
-        data,
-      });
+      reply.status(200).send(success(data));
     } catch (error) {
       this.handleError(reply, error);
     }
@@ -69,7 +61,7 @@ export class SubmissionsController {
 
   submitSubmission = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (!request.user) {
-      reply.status(401).send({ success: false, message: "Unauthorized" });
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
       return;
     }
 
@@ -77,10 +69,7 @@ export class SubmissionsController {
       const params = submissionParamsSchema.parse(request.params);
       const data = await this.service.submitSubmission(request.user, params.id);
 
-      reply.status(200).send({
-        success: true,
-        data,
-      });
+      reply.status(200).send(success(data));
     } catch (error) {
       this.handleError(reply, error);
     }
@@ -88,11 +77,7 @@ export class SubmissionsController {
 
   private handleError(reply: FastifyReply, error: unknown): void {
     if (error instanceof ZodError) {
-      reply.status(400).send({
-        success: false,
-        message: "Validation error",
-        errors: error.issues,
-      });
+      reply.status(400).send(failure("Validation error", "VALIDATION_ERROR"));
       return;
     }
 
@@ -104,12 +89,7 @@ export class SubmissionsController {
         ? ((error as { statusCode: number }).statusCode ?? 500)
         : 500;
 
-    const message =
-      error instanceof Error ? error.message : statusCode === 500 ? "Internal server error" : "Error";
-
-    reply.status(statusCode).send({
-      success: false,
-      message,
-    });
+    const message = statusCode >= 500 ? "Internal Server Error" : error instanceof Error ? error.message : "Error";
+    reply.status(statusCode).send(failure(message, errorCodeFromStatus(statusCode)));
   }
 }

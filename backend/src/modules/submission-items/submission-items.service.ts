@@ -5,6 +5,7 @@ import type {
 } from "./submission-items.repository";
 import type { AddSubmissionItemBody, UpdateSubmissionItemBody } from "./submission-items.schema";
 import type { AntiFraudService } from "../validation/anti-fraud.service";
+import { env } from "../../config/env";
 
 type Role = "student" | "reviewer" | "admin";
 
@@ -21,6 +22,14 @@ class ServiceError extends Error {
     this.statusCode = statusCode;
     this.name = "ServiceError";
   }
+}
+
+function isUnsafeTelegramProofUrl(url: string): boolean {
+  return /api\.telegram\.org\/file\/bot/i.test(url);
+}
+
+function isSafeStorageUrl(url: string): boolean {
+  return url.startsWith(env.SUPABASE_PROJECT_URL) && url.includes("/storage/v1/object/");
 }
 
 export class SubmissionItemsService {
@@ -83,6 +92,12 @@ export class SubmissionItemsService {
   ): Promise<SubmissionItemEntity> {
     await this.assertSubmissionCanBeModified(user, submissionId);
     const item = await this.assertItemBelongsToSubmission(itemId, submissionId);
+    if (isUnsafeTelegramProofUrl(proofFileUrl)) {
+      throw new ServiceError(400, "Telegram file URLs are not allowed");
+    }
+    if (!isSafeStorageUrl(proofFileUrl)) {
+      throw new ServiceError(400, "proof_file_url must be a safe storage URL");
+    }
 
     return this.repository.updateProofFileUrl(item.id, proofFileUrl);
   }
@@ -95,6 +110,9 @@ export class SubmissionItemsService {
   ): Promise<SubmissionItemEntity> {
     await this.assertSubmissionCanBeModified(user, submissionId);
     const item = await this.assertItemBelongsToSubmission(itemId, submissionId);
+    if (isUnsafeTelegramProofUrl(externalLinkUrl)) {
+      throw new ServiceError(400, "Telegram file URLs are not allowed");
+    }
 
     return this.repository.updateProofFileUrl(item.id, externalLinkUrl);
   }

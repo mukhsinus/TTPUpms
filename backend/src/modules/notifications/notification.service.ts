@@ -4,7 +4,7 @@ import { env } from "../../config/env";
 type SubmissionNotificationStatus = "submitted" | "approved" | "rejected" | "needs_revision";
 
 interface TelegramUserRow {
-  telegram_user_id: string | null;
+  telegram_id: string | null;
 }
 
 export class NotificationService {
@@ -51,7 +51,7 @@ export class NotificationService {
   private async getTelegramChatIdByUserId(userId: string): Promise<string | null> {
     const result = await this.app.db.query<TelegramUserRow>(
       `
-      SELECT telegram_user_id
+      SELECT telegram_id
       FROM users
       WHERE id = $1
       LIMIT 1
@@ -59,7 +59,7 @@ export class NotificationService {
       [userId],
     );
 
-    const chatId = result.rows[0]?.telegram_user_id;
+    const chatId = result.rows[0]?.telegram_id;
     return chatId ?? null;
   }
 

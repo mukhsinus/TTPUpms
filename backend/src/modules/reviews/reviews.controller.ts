@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { ZodError } from "zod";
+import { errorCodeFromStatus, failure, success } from "../../utils/http-response";
 import {
   completeSubmissionReviewBodySchema,
   reviewItemBodySchema,
@@ -13,13 +14,13 @@ export class ReviewsController {
 
   getReviewableSubmissions = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (!request.user) {
-      reply.status(401).send({ success: false, message: "Unauthorized" });
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
       return;
     }
 
     try {
       const data = await this.service.getReviewableSubmissions(request.user);
-      reply.status(200).send({ success: true, data });
+      reply.status(200).send(success(data));
     } catch (error) {
       this.handleError(reply, error);
     }
@@ -27,14 +28,14 @@ export class ReviewsController {
 
   getSubmissionItems = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (!request.user) {
-      reply.status(401).send({ success: false, message: "Unauthorized" });
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
       return;
     }
 
     try {
       const params = reviewSubmissionParamsSchema.parse(request.params);
       const data = await this.service.getSubmissionItemsForReview(request.user, params.submissionId);
-      reply.status(200).send({ success: true, data });
+      reply.status(200).send(success(data));
     } catch (error) {
       this.handleError(reply, error);
     }
@@ -42,7 +43,7 @@ export class ReviewsController {
 
   reviewItem = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (!request.user) {
-      reply.status(401).send({ success: false, message: "Unauthorized" });
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
       return;
     }
 
@@ -57,7 +58,7 @@ export class ReviewsController {
         body,
       );
 
-      reply.status(200).send({ success: true, data });
+      reply.status(200).send(success(data));
     } catch (error) {
       this.handleError(reply, error);
     }
@@ -65,7 +66,7 @@ export class ReviewsController {
 
   completeReview = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (!request.user) {
-      reply.status(401).send({ success: false, message: "Unauthorized" });
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
       return;
     }
 
@@ -74,7 +75,7 @@ export class ReviewsController {
       const body = completeSubmissionReviewBodySchema.parse(request.body);
       const data = await this.service.completeSubmissionReview(request.user, params.submissionId, body);
 
-      reply.status(200).send({ success: true, data });
+      reply.status(200).send(success(data));
     } catch (error) {
       this.handleError(reply, error);
     }
@@ -82,25 +83,22 @@ export class ReviewsController {
 
   private handleError(reply: FastifyReply, error: unknown): void {
     if (error instanceof ZodError) {
-      reply.status(400).send({
-        success: false,
-        message: "Validation error",
-        errors: error.issues,
-      });
+      reply.status(400).send(failure("Validation error", "VALIDATION_ERROR"));
       return;
     }
 
     if (error instanceof ReviewsServiceError) {
-      reply.status(error.statusCode).send({
-        success: false,
-        message: error.message,
-      });
+      reply
+        .status(error.statusCode)
+        .send(
+          failure(
+            error.statusCode >= 500 ? "Internal Server Error" : error.message,
+            errorCodeFromStatus(error.statusCode),
+          ),
+        );
       return;
     }
 
-    reply.status(500).send({
-      success: false,
-      message: "Internal server error",
-    });
+    reply.status(500).send(failure("Internal Server Error", "INTERNAL_SERVER_ERROR"));
   }
 }

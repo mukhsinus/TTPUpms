@@ -35,6 +35,12 @@ body {
   padding: 14px;
 }
 
+.auth-shell {
+  max-width: 720px;
+  margin: 40px auto;
+  padding: 0 14px;
+}
+
 .stack {
   display: grid;
   gap: 12px;
@@ -77,6 +83,11 @@ body {
   border-radius: 10px;
   padding: 10px;
   font-size: 0.95rem;
+}
+
+textarea.input {
+  resize: vertical;
+  font-family: inherit;
 }
 
 .filters {

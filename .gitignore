@@ -1,4 +1,5 @@
 .env
+**/.env
 backend/.env
 bot/.env
 frontend/.env
@@ -7,3 +8,4 @@ dist
 backend/dist
 frontend/dist
 bot/dist
+*.log

@@ -9,6 +9,13 @@ interface AuthenticatedUser {
   role: Role;
 }
 
+interface IdempotencyContext {
+  key: string;
+  hash: string;
+  scope: string;
+  replayed: boolean;
+}
+
 declare module "fastify" {
   interface FastifyInstance {
     db: Pool;
@@ -17,5 +24,6 @@ declare module "fastify" {
 
   interface FastifyRequest {
     user?: AuthenticatedUser;
+    idempotencyContext?: IdempotencyContext;
   }
 }

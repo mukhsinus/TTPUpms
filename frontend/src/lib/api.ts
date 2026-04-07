@@ -1,37 +1,127 @@
 import type { Submission, SubmissionItem, SubmissionStatus, User } from "../types";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000";
+const API_BASE_URL = import.meta.env.VITE_API_URL ?? import.meta.env.VITE_API_BASE_URL ?? "";
 const AUTH_TOKEN_KEY = "upms_admin_token";
 
 interface ApiResponse<T> {
-  success: boolean;
-  data: T;
-  message?: string;
+  data: T | null;
+  error: {
+    message: string;
+    code: string;
+  } | null;
+}
+
+export class ApiError extends Error {
+  statusCode: number;
+
+  constructor(message: string, statusCode: number) {
+    super(message);
+    this.statusCode = statusCode;
+    this.name = "ApiError";
+  }
+}
+
+interface ApiResult<T> {
+  data: T | null;
+  error: string | null;
+  statusCode: number;
 }
 
 function getAuthToken(): string {
   return localStorage.getItem(AUTH_TOKEN_KEY) ?? "";
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${getAuthToken()}`,
-      ...(init?.headers ?? {}),
-    },
-  });
+function setAuthToken(token: string): void {
+  localStorage.setItem(AUTH_TOKEN_KEY, token);
+}
 
-  const payload = (await response.json()) as ApiResponse<T>;
-  if (!response.ok || !payload.success) {
-    throw new Error(payload.message ?? "Request failed");
+function parseUnknownResponseBody(rawText: string): unknown {
+  if (!rawText.trim()) return null;
+  try {
+    return JSON.parse(rawText) as unknown;
+  } catch {
+    return rawText;
+  }
+}
+
+async function requestResult<T>(path: string, init?: RequestInit, token?: string): Promise<ApiResult<T>> {
+  const headers = new Headers(init?.headers);
+  const authToken = token ?? getAuthToken();
+
+  if (init?.body && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  if (authToken) {
+    headers.set("Authorization", `Bearer ${authToken}`);
   }
 
-  return payload.data;
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers,
+  });
+
+  const rawText = await response.text();
+  const parsed = parseUnknownResponseBody(rawText);
+  const payload =
+    parsed && typeof parsed === "object" ? (parsed as ApiResponse<T>) : null;
+
+  const messageFromPayload =
+    payload?.error?.message ?? (typeof parsed === "string" ? parsed : undefined);
+  const fallbackMessage = response.statusText || "Request failed";
+  const message = messageFromPayload || fallbackMessage;
+
+  if (!response.ok || payload?.error) {
+    if (response.status === 401) {
+      return { data: null, error: "Unauthorized. Please login again.", statusCode: 401 };
+    }
+    if (response.status === 403) {
+      return { data: null, error: "Forbidden. You do not have access to this action.", statusCode: 403 };
+    }
+    return { data: null, error: message, statusCode: response.status };
+  }
+
+  if (!payload || payload.error !== null) {
+    return {
+      data: null,
+      error: "Invalid API response format",
+      statusCode: response.status,
+    };
+  }
+
+  return { data: payload.data as T, error: null, statusCode: response.status };
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const result = await requestResult<T>(path, init);
+  if (result.error) {
+    throw new ApiError(result.error, result.statusCode);
+  }
+  return result.data as T;
 }
 
 export const api = {
+  isLoggedIn(): boolean {
+    return Boolean(getAuthToken());
+  },
+
+  logout(): void {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+  },
+
+  async login(token: string): Promise<void> {
+    const normalized = token.trim();
+    if (!normalized) {
+      throw new ApiError("Token is required", 400);
+    }
+
+    const result = await requestResult<Submission[]>("/api/submissions", { method: "GET" }, normalized);
+    if (result.error) {
+      throw new ApiError(result.error, result.statusCode);
+    }
+
+    setAuthToken(normalized);
+  },
+
   async getDashboardStats(): Promise<{
     totalSubmissions: number;
     pendingReview: number;
@@ -104,11 +194,8 @@ export const api = {
     });
   },
 
-  async getUsers(): Promise<User[]> {
-    try {
-      return await request<User[]>("/api/admin/users");
-    } catch {
-      return [];
-    }
+  getUsers(): Promise<User[]> {
+    // Backend does not provide /api/admin/users yet.
+    throw new ApiError("Users endpoint is not available on backend", 501);
   },
 };

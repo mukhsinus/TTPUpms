@@ -24,9 +24,9 @@ async function startServer(): Promise<void> {
 
   try {
     await app.listen({ host: env.HOST, port: env.PORT });
-    app.log.info(`Server started on http://${env.HOST}:${env.PORT}`);
+    app.log.info({ port: env.PORT, host: env.HOST }, "Server started");
   } catch (error) {
-    app.log.error(error, "Failed to start server");
+    app.log.error({ err: error }, "Failed to start server");
     process.exit(1);
   }
 }

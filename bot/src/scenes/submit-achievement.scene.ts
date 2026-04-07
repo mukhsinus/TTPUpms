@@ -17,7 +17,7 @@ export function createSubmitAchievementScene(upmsService: UpmsService): Scenes.W
   return new Scenes.WizardScene<BotContext>(
     "submit-achievement",
     async (ctx) => {
-      if (!ctx.session.authenticatedUserId) {
+      if (!ctx.session.authenticatedTelegramId) {
         await ctx.reply("Please use /start first to authenticate.");
         await ctx.scene.leave();
         return;
@@ -87,12 +87,14 @@ export function createSubmitAchievementScene(upmsService: UpmsService): Scenes.W
       let fileId: string | undefined;
       let fileSize = 0;
       let mimeType: string | undefined;
+      let filename = "proof-file";
 
       if (ctx.message && "document" in ctx.message && ctx.message.document) {
         const doc = ctx.message.document;
         fileId = doc.file_id;
         fileSize = doc.file_size ?? 0;
         mimeType = doc.mime_type;
+        filename = doc.file_name ?? `proof-${doc.file_unique_id}`;
 
         if (!hasAllowedDocumentType(mimeType)) {
           await ctx.reply("Invalid file type. Please upload only PDF, JPG, or PNG.");
@@ -103,6 +105,7 @@ export function createSubmitAchievementScene(upmsService: UpmsService): Scenes.W
         fileId = largestPhoto.file_id;
         fileSize = largestPhoto.file_size ?? 0;
         mimeType = "image/jpeg";
+        filename = `photo-${largestPhoto.file_unique_id}.jpg`;
       } else {
         await ctx.reply("Please upload a file (PDF/JPG/PNG).");
         return;
@@ -113,9 +116,29 @@ export function createSubmitAchievementScene(upmsService: UpmsService): Scenes.W
         return;
       }
 
+      const authenticatedTelegramId = ctx.session.authenticatedTelegramId;
+      if (!authenticatedTelegramId || !mimeType) {
+        await ctx.reply("Authentication or file metadata is missing. Please restart with /start.");
+        await ctx.scene.leave();
+        return;
+      }
+
       const link = await ctx.telegram.getFileLink(fileId);
+      const downloadResponse = await fetch(link.toString());
+      if (!downloadResponse.ok) {
+        await ctx.reply("Failed to download file from Telegram. Please try again.");
+        return;
+      }
+
+      const bytes = Buffer.from(await downloadResponse.arrayBuffer());
       const state = getWizardState(ctx);
-      state.proofFileUrl = link.toString();
+      const uploadResult = await upmsService.uploadProofFile({
+        telegramId: authenticatedTelegramId,
+        filename,
+        mimeType: mimeType as "application/pdf" | "image/jpeg" | "image/png",
+        bytes,
+      });
+      state.proofFileUrl = uploadResult.proofFileUrl;
 
       await ctx.reply(
         `Step 4/5 - Confirm submission:\n\nCategory: ${state.category}\nDetails: ${state.details}\nFile: attached`,
@@ -145,7 +168,7 @@ export function createSubmitAchievementScene(upmsService: UpmsService): Scenes.W
       const state = getWizardState(ctx);
 
       if (
-        !ctx.session.authenticatedUserId ||
+        !ctx.session.authenticatedTelegramId ||
         !state.category ||
         !state.details ||
         !state.proofFileUrl
@@ -159,7 +182,7 @@ export function createSubmitAchievementScene(upmsService: UpmsService): Scenes.W
       await ctx.answerCbQuery("Submitting...");
 
       const result = await upmsService.createAchievementSubmission({
-        userId: ctx.session.authenticatedUserId,
+        telegramId: ctx.session.authenticatedTelegramId,
         category: state.category,
         details: state.details,
         proofFileUrl: state.proofFileUrl,

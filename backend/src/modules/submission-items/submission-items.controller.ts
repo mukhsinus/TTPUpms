@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { ZodError } from "zod";
+import { errorCodeFromStatus, failure, success } from "../../utils/http-response";
 import {
   addExternalLinkBodySchema,
   addSubmissionItemBodySchema,
@@ -14,7 +15,7 @@ export class SubmissionItemsController {
 
   addItem = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (!request.user) {
-      reply.status(401).send({ success: false, message: "Unauthorized" });
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
       return;
     }
 
@@ -23,7 +24,7 @@ export class SubmissionItemsController {
       const body = addSubmissionItemBodySchema.parse(request.body);
       const data = await this.service.addItem(request.user, params.submissionId, body);
 
-      reply.status(201).send({ success: true, data });
+      reply.status(201).send(success(data));
     } catch (error) {
       this.handleError(reply, error);
     }
@@ -31,7 +32,7 @@ export class SubmissionItemsController {
 
   updateItem = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (!request.user) {
-      reply.status(401).send({ success: false, message: "Unauthorized" });
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
       return;
     }
 
@@ -40,7 +41,7 @@ export class SubmissionItemsController {
       const body = updateSubmissionItemBodySchema.parse(request.body);
       const data = await this.service.updateItem(request.user, params.submissionId, params.itemId, body);
 
-      reply.status(200).send({ success: true, data });
+      reply.status(200).send(success(data));
     } catch (error) {
       this.handleError(reply, error);
     }
@@ -48,7 +49,7 @@ export class SubmissionItemsController {
 
   deleteItem = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (!request.user) {
-      reply.status(401).send({ success: false, message: "Unauthorized" });
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
       return;
     }
 
@@ -56,10 +57,7 @@ export class SubmissionItemsController {
       const params = submissionItemParamsSchema.parse(request.params);
       await this.service.deleteItem(request.user, params.submissionId, params.itemId);
 
-      reply.status(200).send({
-        success: true,
-        message: "Submission item deleted",
-      });
+      reply.status(200).send(success({ message: "Submission item deleted" }));
     } catch (error) {
       this.handleError(reply, error);
     }
@@ -67,7 +65,7 @@ export class SubmissionItemsController {
 
   attachFile = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (!request.user) {
-      reply.status(401).send({ success: false, message: "Unauthorized" });
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
       return;
     }
 
@@ -81,7 +79,7 @@ export class SubmissionItemsController {
         body.proof_file_url,
       );
 
-      reply.status(200).send({ success: true, data });
+      reply.status(200).send(success(data));
     } catch (error) {
       this.handleError(reply, error);
     }
@@ -89,7 +87,7 @@ export class SubmissionItemsController {
 
   addExternalLink = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (!request.user) {
-      reply.status(401).send({ success: false, message: "Unauthorized" });
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
       return;
     }
 
@@ -103,7 +101,7 @@ export class SubmissionItemsController {
         body.proof_file_url,
       );
 
-      reply.status(200).send({ success: true, data });
+      reply.status(200).send(success(data));
     } catch (error) {
       this.handleError(reply, error);
     }
@@ -111,11 +109,7 @@ export class SubmissionItemsController {
 
   private handleError(reply: FastifyReply, error: unknown): void {
     if (error instanceof ZodError) {
-      reply.status(400).send({
-        success: false,
-        message: "Validation error",
-        errors: error.issues,
-      });
+      reply.status(400).send(failure("Validation error", "VALIDATION_ERROR"));
       return;
     }
 
@@ -127,12 +121,8 @@ export class SubmissionItemsController {
         ? ((error as { statusCode: number }).statusCode ?? 500)
         : 500;
 
-    const message =
-      error instanceof Error ? error.message : statusCode === 500 ? "Internal server error" : "Error";
+    const message = statusCode >= 500 ? "Internal Server Error" : error instanceof Error ? error.message : "Error";
 
-    reply.status(statusCode).send({
-      success: false,
-      message,
-    });
+    reply.status(statusCode).send(failure(message, errorCodeFromStatus(statusCode)));
   }
 }

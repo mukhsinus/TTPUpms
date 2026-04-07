@@ -1,6 +1,7 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { utils, write } from "xlsx";
 import { ZodError } from "zod";
+import { failure, success } from "../../utils/http-response";
 import {
   dateRangeQuerySchema,
   exportQuerySchema,
@@ -38,7 +39,7 @@ export class AnalyticsController {
     try {
       const query = topStudentsQuerySchema.parse(request.query);
       const data = await this.service.getTopStudents(query.limit);
-      reply.status(200).send({ success: true, data });
+      reply.status(200).send(success(data));
     } catch (error) {
       this.handleError(reply, error);
     }
@@ -48,7 +49,7 @@ export class AnalyticsController {
     try {
       const query = dateRangeQuerySchema.parse(request.query);
       const data = await this.service.getScoresByCategory(query.from, query.to);
-      reply.status(200).send({ success: true, data });
+      reply.status(200).send(success(data));
     } catch (error) {
       this.handleError(reply, error);
     }
@@ -58,7 +59,7 @@ export class AnalyticsController {
     try {
       const query = dateRangeQuerySchema.parse(request.query);
       const data = await this.service.getActivityStats(query.from, query.to);
-      reply.status(200).send({ success: true, data });
+      reply.status(200).send(success(data));
     } catch (error) {
       this.handleError(reply, error);
     }
@@ -123,17 +124,10 @@ export class AnalyticsController {
 
   private handleError(reply: FastifyReply, error: unknown): void {
     if (error instanceof ZodError) {
-      reply.status(400).send({
-        success: false,
-        message: "Validation error",
-        errors: error.issues,
-      });
+      reply.status(400).send(failure("Validation error", "VALIDATION_ERROR"));
       return;
     }
 
-    reply.status(500).send({
-      success: false,
-      message: error instanceof Error ? error.message : "Internal server error",
-    });
+    reply.status(500).send(failure("Internal Server Error", "INTERNAL_SERVER_ERROR"));
   }
 }

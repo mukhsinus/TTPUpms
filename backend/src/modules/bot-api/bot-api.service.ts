@@ -1,19 +1,21 @@
 import type { FastifyInstance } from "fastify";
+import { createHash, randomUUID } from "crypto";
+import { env } from "../../config/env";
 
 interface UserRow {
   id: string;
   role: "student" | "reviewer" | "admin";
   email: string;
   full_name: string | null;
-  telegram_user_id: string | null;
+  telegram_id: string | null;
 }
 
 interface SubmissionRow {
   id: string;
   title: string;
   status: string;
-  total_points: string;
-  created_at: string;
+  totalPoints: string;
+  createdAt: string;
 }
 
 export interface BotUser {
@@ -23,23 +25,28 @@ export interface BotUser {
   fullName: string | null;
 }
 
+const TEN_MB = 10 * 1024 * 1024;
+const ALLOWED_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
+
+function isUnsafeTelegramProofUrl(url: string): boolean {
+  return /api\.telegram\.org\/file\/bot/i.test(url);
+}
+
+function isSafeProofStorageUrl(url: string): boolean {
+  return (
+    url.startsWith(env.SUPABASE_PROJECT_URL) &&
+    url.includes("/storage/v1/object/public/proofs/")
+  );
+}
+
+function toSafeFilename(filename: string): string {
+  return filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
 export class BotApiService {
   constructor(private readonly app: FastifyInstance) {}
 
-  async findUserByTelegramId(telegramUserId: number): Promise<BotUser | null> {
-    const result = await this.app.db.query<UserRow>(
-      `
-      SELECT id, role, email, full_name, telegram_user_id
-      FROM users
-      WHERE telegram_user_id = $1
-      LIMIT 1
-      `,
-      [telegramUserId],
-    );
-
-    const row = result.rows[0];
-    if (!row) return null;
-
+  private toBotUser(row: UserRow): BotUser {
     return {
       id: row.id,
       role: row.role,
@@ -48,34 +55,107 @@ export class BotApiService {
     };
   }
 
-  async linkTelegramByEmail(email: string, telegramUserId: number): Promise<BotUser | null> {
+  async findUserByTelegramId(telegramId: string): Promise<BotUser | null> {
+    const result = await this.app.db.query<UserRow>(
+      `
+      SELECT id, role, email, full_name, telegram_id
+      FROM users
+      WHERE telegram_id = $1::bigint
+      LIMIT 1
+      `,
+      [telegramId],
+    );
+
+    const row = result.rows[0];
+    if (!row) return null;
+
+    return this.toBotUser(row);
+  }
+
+  async findOrCreateUserByTelegramId(telegramId: string): Promise<BotUser> {
+    const existing = await this.findUserByTelegramId(telegramId);
+    if (existing) {
+      this.app.log.info(
+        { telegram_id: telegramId, user_id: existing.id, source: "existing" },
+        "Resolved bot user mapping",
+      );
+      return existing;
+    }
+
+    const generatedEmail = `tg_${telegramId}@telegram.local`;
+    const createdAuth = await this.app.supabaseAdmin.auth.admin.createUser({
+      email: generatedEmail,
+      email_confirm: true,
+      app_metadata: {
+        role: "student",
+      },
+    });
+
+    if (createdAuth.error || !createdAuth.data.user) {
+      throw new Error(`Failed to create auth user for telegram_id=${telegramId}`);
+    }
+
+    const inserted = await this.app.db.query<UserRow>(
+      `
+      INSERT INTO users (id, email, role, telegram_id)
+      VALUES ($1, $2, 'student', $3::bigint)
+      RETURNING id, role, email, full_name, telegram_id
+      `,
+      [createdAuth.data.user.id, generatedEmail, telegramId],
+    );
+
+    const row = inserted.rows[0];
+    this.app.log.info(
+      { telegram_id: telegramId, user_id: row.id, source: "created" },
+      "Resolved bot user mapping",
+    );
+    return this.toBotUser(row);
+  }
+
+  async linkTelegramByEmail(email: string, telegramId: string): Promise<BotUser | null> {
     const result = await this.app.db.query<UserRow>(
       `
       UPDATE users
-      SET telegram_user_id = $2, updated_at = NOW()
+      SET telegram_id = $2::bigint, updated_at = NOW()
       WHERE lower(email) = lower($1)
-      RETURNING id, role, email, full_name, telegram_user_id
+      RETURNING id, role, email, full_name, telegram_id
       `,
-      [email, telegramUserId],
+      [email, telegramId],
     );
 
     const row = result.rows[0];
     if (!row) return null;
 
-    return {
-      id: row.id,
-      role: row.role,
-      email: row.email,
-      fullName: row.full_name,
-    };
+    this.app.log.info(
+      { telegram_id: telegramId, user_id: row.id, source: "linked_by_email" },
+      "Resolved bot user mapping",
+    );
+    return this.toBotUser(row);
   }
 
   async createAchievementSubmission(input: {
-    userId: string;
+    telegramId: string;
     category: string;
     details: string;
     proofFileUrl: string;
   }): Promise<{ submissionId: string }> {
+    if (isUnsafeTelegramProofUrl(input.proofFileUrl)) {
+      this.app.log.warn(
+        { telegram_id: input.telegramId },
+        "Blocked unsafe Telegram proof URL payload",
+      );
+      throw new Error("Unsafe proof URL is not allowed");
+    }
+
+    if (!isSafeProofStorageUrl(input.proofFileUrl)) {
+      this.app.log.warn(
+        { telegram_id: input.telegramId },
+        "Blocked non-storage proof URL payload",
+      );
+      throw new Error("Proof URL must be a safe storage URL");
+    }
+
+    const user = await this.findOrCreateUserByTelegramId(input.telegramId);
     const client = await this.app.db.connect();
     try {
       await client.query("BEGIN");
@@ -86,7 +166,7 @@ export class BotApiService {
         VALUES ($1, $2, $3, 'submitted', NOW())
         RETURNING id
         `,
-        [input.userId, `Achievement: ${input.category}`, input.details],
+        [user.id, `Achievement: ${input.category}`, input.details],
       );
 
       const submissionId = submissionResult.rows[0].id;
@@ -106,7 +186,7 @@ export class BotApiService {
         `,
         [
           submissionId,
-          input.userId,
+          user.id,
           input.category,
           `Achievement: ${input.category}`,
           input.details,
@@ -116,6 +196,10 @@ export class BotApiService {
       );
 
       await client.query("COMMIT");
+      this.app.log.info(
+        { telegram_id: input.telegramId, user_id: user.id, submission_id: submissionId },
+        "Created submission from bot request",
+      );
       return { submissionId };
     } catch (error) {
       await client.query("ROLLBACK");
@@ -125,22 +209,24 @@ export class BotApiService {
     }
   }
 
-  async getUserSubmissions(userId: string): Promise<SubmissionRow[]> {
+  async getUserSubmissions(telegramId: string): Promise<SubmissionRow[]> {
+    const user = await this.findOrCreateUserByTelegramId(telegramId);
     const result = await this.app.db.query<SubmissionRow>(
       `
-      SELECT id, title, status, total_points, created_at
+      SELECT id, title, status, total_points::text AS "totalPoints", created_at AS "createdAt"
       FROM submissions
       WHERE user_id = $1
       ORDER BY created_at DESC
       LIMIT 10
       `,
-      [userId],
+      [user.id],
     );
 
     return result.rows;
   }
 
-  async getUserApprovedPoints(userId: string): Promise<number> {
+  async getUserApprovedPoints(telegramId: string): Promise<number> {
+    const user = await this.findOrCreateUserByTelegramId(telegramId);
     const result = await this.app.db.query<{ total: string }>(
       `
       SELECT COALESCE(SUM(total_points), 0)::text AS total
@@ -148,9 +234,62 @@ export class BotApiService {
       WHERE user_id = $1
         AND status = 'approved'
       `,
-      [userId],
+      [user.id],
     );
 
     return Number(result.rows[0]?.total ?? "0");
+  }
+
+  async uploadProofFileByTelegramId(input: {
+    telegramId: string;
+    filename: string;
+    mimeType: string;
+    bytes: Buffer;
+  }): Promise<{ proofFileUrl: string; mimeType: string; sizeBytes: number }> {
+    if (!ALLOWED_MIME_TYPES.has(input.mimeType)) {
+      throw new Error("Only PDF, JPG, and PNG files are allowed");
+    }
+
+    if (input.bytes.byteLength > TEN_MB) {
+      throw new Error("File exceeds maximum size of 10MB");
+    }
+
+    const user = await this.findOrCreateUserByTelegramId(input.telegramId);
+    const checksum = createHash("sha256").update(input.bytes).digest("hex");
+    const safeFilename = toSafeFilename(input.filename);
+    const storagePath = `${user.id}/proofs/${randomUUID()}-${safeFilename}`;
+
+    const uploadResult = await this.app.supabaseAdmin.storage.from("proofs").upload(storagePath, input.bytes, {
+      contentType: input.mimeType,
+      upsert: false,
+    });
+
+    if (uploadResult.error) {
+      this.app.log.error(
+        { telegram_id: input.telegramId, user_id: user.id, err: uploadResult.error.message },
+        "Proof upload failed",
+      );
+      throw new Error("Storage upload failed");
+    }
+
+    const publicUrlResult = this.app.supabaseAdmin.storage.from("proofs").getPublicUrl(storagePath);
+    const proofFileUrl = publicUrlResult.data.publicUrl;
+
+    this.app.log.info(
+      {
+        telegram_id: input.telegramId,
+        user_id: user.id,
+        size_bytes: input.bytes.byteLength,
+        mime_type: input.mimeType,
+        checksum_sha256: checksum,
+      },
+      "Proof uploaded successfully",
+    );
+
+    return {
+      proofFileUrl,
+      mimeType: input.mimeType,
+      sizeBytes: input.bytes.byteLength,
+    };
   }
 }

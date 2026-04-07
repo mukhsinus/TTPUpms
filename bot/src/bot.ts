@@ -23,9 +23,9 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
       return;
     }
 
-    const linkedUser = await upmsService.findUserByTelegramId(telegramUserId);
+    const linkedUser = await upmsService.findUserByTelegramId(String(telegramUserId));
     if (linkedUser) {
-      ctx.session.authenticatedUserId = linkedUser.id;
+      ctx.session.authenticatedTelegramId = String(telegramUserId);
       await ctx.reply(
         `Welcome back, ${linkedUser.fullName ?? linkedUser.email}.\nUse the menu below.`,
         mainMenuKeyboard(),
@@ -44,7 +44,7 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
       return;
     }
 
-    if (ctx.session.authenticatedUserId) {
+    if (ctx.session.authenticatedTelegramId) {
       await next();
       return;
     }
@@ -61,13 +61,13 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
       return;
     }
 
-    const linkedUser = await upmsService.linkTelegramByEmail(text, telegramUserId);
+    const linkedUser = await upmsService.linkTelegramByEmail(text, String(telegramUserId));
     if (!linkedUser) {
       await ctx.reply("Email not found. Please use the email registered in UPMS.");
       return;
     }
 
-    ctx.session.authenticatedUserId = linkedUser.id;
+    ctx.session.authenticatedTelegramId = String(telegramUserId);
     await ctx.reply(
       `Authentication successful. Hello ${linkedUser.fullName ?? linkedUser.email}.`,
       mainMenuKeyboard(),
@@ -75,7 +75,7 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
   });
 
   bot.action("menu_submit", async (ctx) => {
-    if (!ctx.session.authenticatedUserId) {
+    if (!ctx.session.authenticatedTelegramId) {
       await ctx.answerCbQuery();
       await ctx.reply("Please authenticate first using /start.");
       return;
@@ -87,12 +87,12 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
 
   bot.action("menu_submissions", async (ctx) => {
     await ctx.answerCbQuery();
-    if (!ctx.session.authenticatedUserId) {
+    if (!ctx.session.authenticatedTelegramId) {
       await ctx.reply("Please authenticate first using /start.");
       return;
     }
 
-    const submissions = await upmsService.getUserSubmissions(ctx.session.authenticatedUserId);
+    const submissions = await upmsService.getUserSubmissions(ctx.session.authenticatedTelegramId);
     if (submissions.length === 0) {
       await ctx.reply("You do not have any submissions yet.", mainMenuKeyboard());
       return;
@@ -100,7 +100,7 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
 
     const lines = submissions.map(
       (item, index) =>
-        `${index + 1}. ${item.title}\nStatus: ${item.status}\nPoints: ${item.total_points}\nCreated: ${new Date(item.created_at).toLocaleDateString("en-US")}`,
+        `${index + 1}. ${item.title}\nStatus: ${item.status}\nPoints: ${item.totalPoints}\nCreated: ${new Date(item.createdAt).toLocaleDateString("en-US")}`,
     );
 
     await ctx.reply(`Your latest submissions:\n\n${lines.join("\n\n")}`, mainMenuKeyboard());
@@ -108,12 +108,12 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
 
   bot.action("menu_points", async (ctx) => {
     await ctx.answerCbQuery();
-    if (!ctx.session.authenticatedUserId) {
+    if (!ctx.session.authenticatedTelegramId) {
       await ctx.reply("Please authenticate first using /start.");
       return;
     }
 
-    const totalPoints = await upmsService.getUserPoints(ctx.session.authenticatedUserId);
+    const totalPoints = await upmsService.getUserPoints(ctx.session.authenticatedTelegramId);
     await ctx.reply(
       `Your approved points: ${totalPoints.toFixed(2)}`,
       Markup.inlineKeyboard([[Markup.button.callback("Back to Menu", "menu_back")]]),
@@ -126,7 +126,7 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
   });
 
   bot.catch(async (error, ctx) => {
-    console.error("Telegram bot error:", error);
+    process.stderr.write(`Telegram bot error: ${String(error)}\n`);
     try {
       await ctx.reply("Something went wrong. Please try again.");
     } catch {

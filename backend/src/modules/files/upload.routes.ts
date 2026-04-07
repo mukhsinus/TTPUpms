@@ -1,12 +1,21 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { authMiddleware } from "../../middleware/auth.middleware";
+import { errorCodeFromStatus, failure, success } from "../../utils/http-response";
 import { AntiFraudService } from "../validation/anti-fraud.service";
 import { FileService, FileServiceError } from "./file.service";
 
 const uploadFieldsSchema = z.object({
   submissionId: z.string().uuid(),
   submissionItemId: z.string().uuid().optional(),
+});
+
+const uploadJsonSchema = z.object({
+  submissionId: z.string().uuid(),
+  submissionItemId: z.string().uuid().optional(),
+  filename: z.string().min(1).max(255),
+  mimeType: z.enum(["application/pdf", "image/jpeg", "image/png"]),
+  fileBase64: z.string().min(1),
 });
 
 function getMultipartFieldValue(
@@ -40,71 +49,110 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
       config: { rateLimit: { max: 30, timeWindow: "1 minute" } },
     },
     async (request, reply) => {
-    if (!request.user) {
-      reply.status(401).send({ success: false, message: "Unauthorized" });
-      return;
-    }
-
-    try {
-      const multipartFile = await request.file();
-
-      if (!multipartFile) {
-        reply.status(400).send({
-          success: false,
-          message: "No file uploaded",
-        });
+      if (!request.user) {
+        reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
         return;
       }
 
-      const parsedFields = uploadFieldsSchema.parse({
-        submissionId: getMultipartFieldValue(
-          multipartFile.fields as unknown as Record<string, unknown>,
-          "submissionId",
-        ),
-        submissionItemId: getMultipartFieldValue(
-          multipartFile.fields as unknown as Record<string, unknown>,
-          "submissionItemId",
-        ),
-      });
+      try {
+        const isJsonUpload = request.headers["content-type"]?.includes("application/json");
 
-      const bytes = await multipartFile.toBuffer();
+        if (isJsonUpload) {
+          const body = uploadJsonSchema.parse(request.body);
+          const bytes = Buffer.from(body.fileBase64, "base64");
 
-      const result = await fileService.uploadFile({
-        user: request.user,
-        submissionId: parsedFields.submissionId,
-        submissionItemId: parsedFields.submissionItemId,
-        filename: multipartFile.filename,
-        mimeType: multipartFile.mimetype,
-        bytes,
-      });
+          if (bytes.byteLength === 0) {
+            reply.status(400).send(failure("Empty file payload", "BAD_REQUEST"));
+            return;
+          }
 
-      reply.status(201).send({
-        success: true,
-        data: result,
-      });
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        reply.status(400).send({
-          success: false,
-          message: "Validation error",
-          errors: error.issues,
+          const result = await fileService.uploadFile({
+            user: request.user,
+            submissionId: body.submissionId,
+            submissionItemId: body.submissionItemId,
+            filename: body.filename,
+            mimeType: body.mimeType,
+            bytes,
+          });
+
+          request.log.info(
+            {
+              user_id: request.user.id,
+              submission_id: body.submissionId,
+              filename: body.filename,
+              size_bytes: bytes.byteLength,
+            },
+            "File uploaded via JSON payload",
+          );
+
+          reply.status(201).send(success(result));
+          return;
+        }
+
+        const multipartFile = await request.file();
+
+        if (!multipartFile) {
+          reply.status(400).send(failure("No file uploaded", "BAD_REQUEST"));
+          return;
+        }
+
+        const parsedFields = uploadFieldsSchema.parse({
+          submissionId: getMultipartFieldValue(
+            multipartFile.fields as unknown as Record<string, unknown>,
+            "submissionId",
+          ),
+          submissionItemId: getMultipartFieldValue(
+            multipartFile.fields as unknown as Record<string, unknown>,
+            "submissionItemId",
+          ),
         });
-        return;
-      }
 
-      if (error instanceof FileServiceError) {
-        reply.status(error.statusCode).send({
-          success: false,
-          message: error.message,
+        const bytes = await multipartFile.toBuffer();
+
+        const result = await fileService.uploadFile({
+          user: request.user,
+          submissionId: parsedFields.submissionId,
+          submissionItemId: parsedFields.submissionItemId,
+          filename: multipartFile.filename,
+          mimeType: multipartFile.mimetype,
+          bytes,
         });
-        return;
-      }
 
-      reply.status(500).send({
-        success: false,
-        message: "Internal server error",
-      });
-    }
+        request.log.info(
+          {
+            user_id: request.user.id,
+            submission_id: parsedFields.submissionId,
+            filename: multipartFile.filename,
+            size_bytes: bytes.byteLength,
+          },
+          "File uploaded via multipart payload",
+        );
+
+        reply.status(201).send(success(result));
+      } catch (error) {
+        request.log.warn(
+          { err: error, user_id: request.user.id },
+          "File upload failed",
+        );
+        if (error instanceof z.ZodError) {
+          reply.status(400).send(failure("Validation error", "VALIDATION_ERROR"));
+          return;
+        }
+
+        if (error instanceof FileServiceError) {
+          reply
+            .status(error.statusCode)
+            .send(
+              failure(
+                error.statusCode >= 500 ? "Internal Server Error" : error.message,
+                errorCodeFromStatus(error.statusCode),
+              ),
+            );
+          return;
+        }
+
+        reply.status(500).send(failure("Internal Server Error", "INTERNAL_SERVER_ERROR"));
+      }
     },
   );
 }

@@ -103,7 +103,8 @@ export class FileService {
       });
 
     if (uploadResult.error) {
-      throw new ServiceError(500, `Storage upload failed: ${uploadResult.error.message}`);
+      this.app.log.error({ err: uploadResult.error }, "Storage upload failed");
+      throw new ServiceError(500, "Storage upload failed");
     }
 
     const signedUrlResult = await this.app.supabaseAdmin.storage

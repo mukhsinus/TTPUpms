@@ -1,11 +1,20 @@
 import type { PropsWithChildren, ReactElement } from "react";
 import { NavLink } from "react-router-dom";
 
-export function AppLayout({ children }: PropsWithChildren): ReactElement {
+interface AppLayoutProps extends PropsWithChildren {
+  onLogout: () => void;
+}
+
+export function AppLayout({ children, onLogout }: AppLayoutProps): ReactElement {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <h1>UPMS Admin</h1>
+        <div className="row-between">
+          <h1>UPMS Admin</h1>
+          <button className="button danger" onClick={onLogout} type="button">
+            Logout
+          </button>
+        </div>
       </header>
 
       <main className="app-main">{children}</main>

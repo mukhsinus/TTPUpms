@@ -9,11 +9,21 @@ export async function registerDatabase(app: FastifyInstance): Promise<void> {
     idleTimeoutMillis: env.DB_POOL_IDLE_TIMEOUT_MS,
     connectionTimeoutMillis: env.DB_POOL_CONNECTION_TIMEOUT_MS,
     ssl: {
-      rejectUnauthorized: false,
+      rejectUnauthorized: true,
     },
   });
 
-  await pool.query("SELECT 1");
+  try {
+    await pool.query("SELECT 1");
+  } catch (error) {
+    app.log.error(
+      { err: error },
+      "Database initialization failed with strict TLS verification enabled",
+    );
+    await pool.end();
+    throw new Error("Database connection failed with secure TLS configuration");
+  }
+
   app.decorate("db", pool);
 
   app.addHook("onClose", async () => {

@@ -6,7 +6,7 @@ async function bootstrapBot(): Promise<void> {
   const bot = createBot(upmsService);
 
   await bot.launch();
-  console.info("Telegram bot is running");
+  process.stdout.write("Telegram bot is running\n");
 
   const shutdown = async (): Promise<void> => {
     bot.stop("SIGTERM");

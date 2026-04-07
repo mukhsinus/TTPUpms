@@ -38,8 +38,13 @@ export function SubmissionDetailPage(): ReactElement {
 
   const changeStatus = async (status: SubmissionStatus): Promise<void> => {
     if (!submissionId) return;
-    await api.setSubmissionStatus({ submissionId, status });
-    await reload();
+    try {
+      setError(null);
+      await api.setSubmissionStatus({ submissionId, status });
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update submission status");
+    }
   };
 
   const assignScore = async (): Promise<void> => {
@@ -49,8 +54,13 @@ export function SubmissionDetailPage(): ReactElement {
       setError("Score must be a positive number.");
       return;
     }
-    await api.setSubmissionScore({ submissionId, totalScore: value });
-    await reload();
+    try {
+      setError(null);
+      await api.setSubmissionScore({ submissionId, totalScore: value });
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to assign score");
+    }
   };
 
   const reviewItem = async (item: SubmissionItem, decision: "approved" | "rejected"): Promise<void> => {
@@ -64,13 +74,18 @@ export function SubmissionDetailPage(): ReactElement {
       return;
     }
 
-    await api.reviewSubmissionItem({
-      submissionId,
-      itemId: item.id,
-      score,
-      decision,
-    });
-    await reload();
+    try {
+      setError(null);
+      await api.reviewSubmissionItem({
+        submissionId,
+        itemId: item.id,
+        score,
+        decision,
+      });
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to review submission item");
+    }
   };
 
   if (loading) return <p>Loading submission detail...</p>;

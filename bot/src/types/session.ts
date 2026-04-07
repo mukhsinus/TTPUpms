@@ -7,7 +7,7 @@ export interface SubmitWizardSession extends Scenes.WizardSessionData {
 }
 
 export interface BotSession extends Scenes.WizardSession<SubmitWizardSession> {
-  authenticatedUserId?: string;
+  authenticatedTelegramId?: string;
 }
 
 export interface BotContext extends Context {

@@ -66,14 +66,47 @@ create table if not exists public.users (
   id uuid primary key references auth.users(id) on delete cascade,
   email citext not null unique,
   full_name text,
-  telegram_user_id bigint unique,
+  telegram_id bigint unique,
   role public.user_role not null default 'student',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
 alter table public.users
-  add column if not exists telegram_user_id bigint;
+  add column if not exists telegram_id bigint;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'users_telegram_id_unique'
+      and conrelid = 'public.users'::regclass
+  ) then
+    alter table public.users
+      add constraint users_telegram_id_unique unique (telegram_id);
+  end if;
+end
+$$;
+
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'users'
+      and column_name = 'telegram_user_id'
+  ) then
+    execute '
+      update public.users
+      set telegram_id = telegram_user_id
+      where telegram_id is null
+        and telegram_user_id is not null
+    ';
+  end if;
+end
+$$;
 
 create table if not exists public.submissions (
   id uuid primary key default gen_random_uuid(),
@@ -164,6 +197,19 @@ create table if not exists public.audit_logs (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.idempotency_keys (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.users(id) on delete cascade,
+  scope text not null,
+  idempotency_key text not null,
+  request_hash text not null,
+  response_status integer,
+  response_body jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (user_id, scope, idempotency_key)
+);
+
 -- -----------------------------
 -- Data integrity helpers
 -- -----------------------------
@@ -251,6 +297,11 @@ create trigger trg_audit_logs_set_updated_at
 before update on public.audit_logs
 for each row execute function public.set_updated_at();
 
+drop trigger if exists trg_idempotency_keys_set_updated_at on public.idempotency_keys;
+create trigger trg_idempotency_keys_set_updated_at
+before update on public.idempotency_keys
+for each row execute function public.set_updated_at();
+
 drop trigger if exists trg_submission_items_sync_user_id on public.submission_items;
 create trigger trg_submission_items_sync_user_id
 before insert or update of submission_id on public.submission_items
@@ -270,7 +321,7 @@ for each row execute function public.sync_review_user_id();
 -- Indexes
 -- -----------------------------
 create index if not exists idx_users_role on public.users(role);
-create index if not exists idx_users_telegram_user_id on public.users(telegram_user_id);
+create index if not exists idx_users_telegram_id on public.users(telegram_id);
 
 create index if not exists idx_submissions_user_id on public.submissions(user_id);
 create index if not exists idx_submissions_status on public.submissions(status);
@@ -307,6 +358,10 @@ create index if not exists idx_audit_logs_user_id_created_at
   on public.audit_logs(user_id, created_at desc);
 create index if not exists idx_audit_logs_entity
   on public.audit_logs(entity_table, entity_id, created_at desc);
+create index if not exists idx_idempotency_keys_created_at
+  on public.idempotency_keys(created_at desc);
+create index if not exists idx_idempotency_keys_user_scope
+  on public.idempotency_keys(user_id, scope);
 
 -- -----------------------------
 -- Row Level Security (tenant-safe by user_id)

@@ -9,11 +9,11 @@ import { uploadRoutes } from "./modules/files/upload.routes";
 import { reviewsRoutes } from "./modules/reviews/reviews.routes";
 import { submissionItemsRoutes } from "./modules/submission-items/submission-items.routes";
 import { submissionsRoutes } from "./modules/submissions/submissions.routes";
-import { testRoutes } from "./modules/test/test.route";
 import { registerDatabase } from "./plugins/database";
 import { registerSecurityPlugins } from "./plugins/security";
 import { registerSupabase } from "./plugins/supabase";
 import { registerUploadPlugin } from "./plugins/upload";
+import { failure } from "./utils/http-response";
 import { logger } from "./utils/logger";
 
 export async function buildApp(): Promise<FastifyInstance> {
@@ -54,14 +54,12 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   setGlobalErrorHandler(app);
   app.setNotFoundHandler(async (request, reply) => {
-    reply.status(404).send({
-      success: false,
-      message: `Route not found: ${request.method} ${request.url}`,
-    });
+    reply
+      .status(404)
+      .send(failure(`Route not found: ${request.method} ${request.url}`, "NOT_FOUND"));
   });
 
   await app.register(healthRoutes);
-  await app.register(testRoutes, { prefix: "/api" });
   await app.register(submissionsRoutes, { prefix: "/api/submissions" });
   await app.register(submissionItemsRoutes, { prefix: "/api/submissions/:submissionId/items" });
   await app.register(uploadRoutes, { prefix: "/api/files" });

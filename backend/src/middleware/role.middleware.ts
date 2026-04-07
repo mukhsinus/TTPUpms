@@ -1,4 +1,5 @@
 import type { FastifyReply, FastifyRequest, preHandlerHookHandler } from "fastify";
+import { failure } from "../utils/http-response";
 
 type Role = "student" | "reviewer" | "admin";
 
@@ -10,18 +11,12 @@ interface SubmissionAccessContext {
 export function allowRoles(allowedRoles: Role[]): preHandlerHookHandler {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (!request.user) {
-      reply.status(401).send({
-        success: false,
-        message: "Unauthorized",
-      });
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
       return;
     }
 
     if (!allowedRoles.includes(request.user.role)) {
-      reply.status(403).send({
-        success: false,
-        message: "Forbidden",
-      });
+      reply.status(403).send(failure("Forbidden", "FORBIDDEN"));
       return;
     }
   };
