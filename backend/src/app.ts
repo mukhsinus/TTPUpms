@@ -14,11 +14,11 @@ import { registerSecurityPlugins } from "./plugins/security";
 import { registerSupabase } from "./plugins/supabase";
 import { registerUploadPlugin } from "./plugins/upload";
 import { failure } from "./utils/http-response";
-import { logger } from "./utils/logger";
+import { loggerOptions } from "./utils/logger";
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
-    logger,
+    logger: loggerOptions,
     trustProxy: env.TRUST_PROXY,
     bodyLimit: env.BODY_LIMIT_BYTES,
     requestTimeout: env.REQUEST_TIMEOUT_MS,

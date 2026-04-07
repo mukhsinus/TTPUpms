@@ -24,6 +24,15 @@ function toRole(value: unknown): Role | null {
   return null;
 }
 
+function isRetryableAuthError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const maybe = error as { name?: unknown; status?: unknown };
+  return maybe.name === "AuthRetryableFetchError" || maybe.status === 0;
+}
+
 export async function authMiddleware(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const token = parseBearerToken(request.headers.authorization);
 
@@ -35,6 +44,12 @@ export async function authMiddleware(request: FastifyRequest, reply: FastifyRepl
   const { data, error } = await request.server.supabaseAdmin.auth.getUser(token);
 
   if (error || !data.user) {
+    if (isRetryableAuthError(error)) {
+      request.log.error({ err: error }, "Supabase auth service unavailable");
+      reply.status(503).send(failure("Authentication service unavailable", "AUTH_SERVICE_UNAVAILABLE"));
+      return;
+    }
+
     request.log.warn({ err: error }, "JWT validation failed");
     reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
     return;

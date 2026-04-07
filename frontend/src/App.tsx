@@ -3,6 +3,7 @@ import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { AppLayout } from "./components/AppLayout";
 import { RequireAuth } from "./components/RequireAuth";
 import { api } from "./lib/api";
+import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
 import { SubmissionDetailPage } from "./pages/SubmissionDetailPage";
@@ -29,7 +30,9 @@ export default function App(): ReactElement {
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/submissions" element={<SubmissionsPage />} />
+          <Route path="/reviews" element={<SubmissionsPage />} />
           <Route path="/submissions/:submissionId" element={<SubmissionDetailPage />} />
+          <Route path="/analytics" element={<AnalyticsPage />} />
           <Route path="/users" element={<UsersPage />} />
         </Route>
       </Route>

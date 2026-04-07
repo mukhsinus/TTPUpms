@@ -1,6 +1,8 @@
 import type { Submission, SubmissionItem, SubmissionStatus, User } from "../types";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? import.meta.env.VITE_API_BASE_URL ?? "";
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ?? "";
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY ?? "";
 const AUTH_TOKEN_KEY = "upms_admin_token";
 
 interface ApiResponse<T> {
@@ -19,6 +21,47 @@ export class ApiError extends Error {
     this.statusCode = statusCode;
     this.name = "ApiError";
   }
+}
+
+export interface SessionUser {
+  email: string | null;
+  role: string;
+  fullName: string | null;
+}
+
+interface SupabaseAuthResponse {
+  access_token?: string;
+  user?: {
+    email?: string;
+    user_metadata?: {
+      full_name?: string;
+      name?: string;
+    };
+    app_metadata?: {
+      role?: string;
+    };
+  };
+  error_description?: string;
+  msg?: string;
+}
+
+interface TopStudent {
+  userId: string;
+  email: string;
+  fullName: string | null;
+  approvedPoints: number;
+  approvedSubmissions: number;
+}
+
+interface ScoreByCategory {
+  category: string;
+  approvedPoints: number;
+  approvedItems: number;
+}
+
+interface ActivityStat {
+  status: string;
+  count: number;
 }
 
 interface ApiResult<T> {
@@ -41,6 +84,17 @@ function parseUnknownResponseBody(rawText: string): unknown {
     return JSON.parse(rawText) as unknown;
   } catch {
     return rawText;
+  }
+}
+
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  const parts = token.split(".");
+  if (parts.length < 2) return null;
+  try {
+    const json = atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"));
+    return JSON.parse(json) as Record<string, unknown>;
+  } catch {
+    return null;
   }
 }
 
@@ -108,18 +162,56 @@ export const api = {
     localStorage.removeItem(AUTH_TOKEN_KEY);
   },
 
-  async login(token: string): Promise<void> {
-    const normalized = token.trim();
-    if (!normalized) {
-      throw new ApiError("Token is required", 400);
+  getSessionUser(): SessionUser | null {
+    const token = getAuthToken();
+    if (!token) return null;
+    const payload = decodeJwtPayload(token);
+    if (!payload) return null;
+
+    const appMetadata = (payload.app_metadata as Record<string, unknown> | undefined) ?? {};
+    const userMetadata = (payload.user_metadata as Record<string, unknown> | undefined) ?? {};
+
+    return {
+      email: typeof payload.email === "string" ? payload.email : null,
+      role: typeof appMetadata.role === "string" ? appMetadata.role : "student",
+      fullName:
+        typeof userMetadata.full_name === "string"
+          ? userMetadata.full_name
+          : typeof userMetadata.name === "string"
+            ? userMetadata.name
+            : null,
+    };
+  },
+
+  async loginWithCredentials(email: string, password: string): Promise<void> {
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+      throw new ApiError("Supabase auth is not configured in frontend env", 500);
     }
 
-    const result = await requestResult<Submission[]>("/api/submissions", { method: "GET" }, normalized);
+    const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ email, password }),
+    });
+
+    const payload = (await response.json().catch(() => null)) as SupabaseAuthResponse | null;
+    if (!response.ok || !payload?.access_token) {
+      throw new ApiError(
+        payload?.error_description ?? payload?.msg ?? "Invalid email or password",
+        response.status || 401,
+      );
+    }
+
+    const token = payload.access_token;
+    const result = await requestResult<Submission[]>("/api/submissions", { method: "GET" }, token);
     if (result.error) {
       throw new ApiError(result.error, result.statusCode);
     }
 
-    setAuthToken(normalized);
+    setAuthToken(token);
   },
 
   async getDashboardStats(): Promise<{
@@ -128,7 +220,7 @@ export const api = {
     approved: number;
     rejected: number;
   }> {
-    const submissions = await request<Submission[]>("/api/reviews/submissions");
+    const submissions = await request<Submission[]>("/api/submissions");
     const pending = submissions.filter((item) => item.status === "submitted" || item.status === "under_review").length;
     const approved = submissions.filter((item) => item.status === "approved").length;
     const rejected = submissions.filter((item) => item.status === "rejected").length;
@@ -142,7 +234,7 @@ export const api = {
   },
 
   getSubmissions(): Promise<Submission[]> {
-    return request<Submission[]>("/api/reviews/submissions");
+    return request<Submission[]>("/api/submissions");
   },
 
   getSubmissionById(submissionId: string): Promise<Submission> {
@@ -197,5 +289,17 @@ export const api = {
   getUsers(): Promise<User[]> {
     // Backend does not provide /api/admin/users yet.
     throw new ApiError("Users endpoint is not available on backend", 501);
+  },
+
+  getTopStudents(limit = 8): Promise<TopStudent[]> {
+    return request<TopStudent[]>(`/api/analytics/top-students?limit=${limit}`);
+  },
+
+  getScoresByCategory(): Promise<ScoreByCategory[]> {
+    return request<ScoreByCategory[]>("/api/analytics/scores-by-category");
+  },
+
+  getActivityStats(): Promise<ActivityStat[]> {
+    return request<ActivityStat[]>("/api/analytics/activity-stats");
   },
 };

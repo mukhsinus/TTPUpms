@@ -1,7 +1,6 @@
-import pino from "pino";
 import { env } from "../config/env";
 
-export const logger = pino({
+export const loggerOptions = {
   level: env.LOG_LEVEL,
   redact: {
     paths: [
@@ -23,7 +22,7 @@ export const logger = pino({
       "SUPABASE_SERVICE_ROLE_KEY",
       "TELEGRAM_BOT_TOKEN",
       "BOT_API_KEY",
-    ],
+    ] as string[],
     censor: "[REDACTED]",
   },
-});
+};

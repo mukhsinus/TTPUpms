@@ -1,7 +1,10 @@
 import { useEffect, useState, type ReactElement } from "react";
 import { useParams } from "react-router-dom";
-import { StatusBadge } from "../components/StatusBadge";
 import { api } from "../lib/api";
+import { StatusBadge } from "../components/ui/Badge";
+import { Button } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
+import { Input } from "../components/ui/Input";
 import type { Submission, SubmissionItem, SubmissionStatus } from "../types";
 
 export function SubmissionDetailPage(): ReactElement {
@@ -93,75 +96,77 @@ export function SubmissionDetailPage(): ReactElement {
   if (!submission) return <p>Submission not found.</p>;
 
   return (
-    <section className="stack">
-      <article className="card">
-        <div className="row-between">
-          <h2>{submission.title}</h2>
-          <StatusBadge status={submission.status} />
-        </div>
-        <p>{submission.description ?? "-"}</p>
-        <p className="muted">User: {submission.userId}</p>
-        <p className="muted">Total points: {submission.totalPoints}</p>
-      </article>
+    <section className="detail-layout">
+      <div className="detail-main">
+        <Card>
+          <div className="row-between">
+            <h2>{submission.title}</h2>
+            <StatusBadge status={submission.status} />
+          </div>
+          <p>{submission.description ?? "-"}</p>
+          <p className="muted">Student: {submission.userId}</p>
+          <p className="muted">Total points: {submission.totalPoints}</p>
+        </Card>
 
-      <article className="card">
-        <h3>Admin Actions</h3>
-        <div className="filters">
-          <input
-            className="input"
-            value={scoreInput}
-            onChange={(event) => setScoreInput(event.target.value)}
-            type="number"
-            min={0}
-            placeholder="Assign total score"
-          />
-          <button className="button" onClick={() => void assignScore()}>
-            Assign Score
-          </button>
-        </div>
-        <div className="actions-wrap">
-          <button className="button success" onClick={() => void changeStatus("approved")}>
-            Approve
-          </button>
-          <button className="button danger" onClick={() => void changeStatus("rejected")}>
-            Reject
-          </button>
-          <button className="button" onClick={() => void changeStatus("needs_revision")}>
-            Needs Revision
-          </button>
-        </div>
-      </article>
+        <Card title="Submission Items">
+          <div className="items-stack">
+            {items.map((item) => (
+              <article className="item-card" key={item.id}>
+                <div className="row-between">
+                  <h4>{item.title}</h4>
+                  <span className="muted">{item.category}</span>
+                </div>
+                <p>{item.description ?? "-"}</p>
+                <p className="muted">Proposed score: {item.proposedScore}</p>
+                <p className="muted">Reviewer score: {item.reviewerScore ?? "-"}</p>
+                <p className="muted">Decision: {item.reviewDecision ?? "pending"}</p>
+                {item.proofFileUrl ? (
+                  <a className="ui-link" href={item.proofFileUrl} target="_blank" rel="noreferrer">
+                    View File
+                  </a>
+                ) : null}
+                <div className="actions-wrap">
+                  <Button type="button" variant="secondary" onClick={() => void reviewItem(item, "approved")}>
+                    Approve Item
+                  </Button>
+                  <Button type="button" variant="danger" onClick={() => void reviewItem(item, "rejected")}>
+                    Reject Item
+                  </Button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </Card>
+      </div>
 
-      <article className="card">
-        <h3>Submission Items</h3>
-        <div className="stack">
-          {items.map((item) => (
-            <div className="item-card" key={item.id}>
-              <div className="row-between">
-                <h4>{item.title}</h4>
-                <span className="muted">{item.category}</span>
-              </div>
-              <p>{item.description ?? "-"}</p>
-              <p className="muted">Proposed score: {item.proposedScore}</p>
-              <p className="muted">Reviewer score: {item.reviewerScore ?? "-"}</p>
-              <p className="muted">Decision: {item.reviewDecision ?? "pending"}</p>
-              {item.proofFileUrl ? (
-                <a className="button-link" href={item.proofFileUrl} target="_blank" rel="noreferrer">
-                  View File
-                </a>
-              ) : null}
-              <div className="actions-wrap">
-                <button className="button success" onClick={() => void reviewItem(item, "approved")}>
-                  Approve Item
-                </button>
-                <button className="button danger" onClick={() => void reviewItem(item, "rejected")}>
-                  Reject Item
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </article>
+      <aside className="detail-actions">
+        <Card title="Reviewer Actions">
+          <div className="filters">
+            <Input
+              value={scoreInput}
+              onChange={(event) => setScoreInput(event.target.value)}
+              type="number"
+              min={0}
+              placeholder="Assign total score"
+            />
+            <Button type="button" onClick={() => void assignScore()}>
+              Assign Score
+            </Button>
+          </div>
+          <div className="actions-wrap">
+            <Button type="button" variant="secondary" onClick={() => void changeStatus("approved")}>
+              Approve
+            </Button>
+            <Button type="button" variant="danger" onClick={() => void changeStatus("rejected")}>
+              Reject
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => void changeStatus("needs_revision")}>
+              Needs Revision
+            </Button>
+          </div>
+        </Card>
+        {error ? <p className="error">{error}</p> : null}
+      </aside>
     </section>
   );
 }

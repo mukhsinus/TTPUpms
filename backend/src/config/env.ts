@@ -30,8 +30,9 @@ const envSchema = z.object({
   DB_POOL_MAX: z.coerce.number().int().positive().default(20),
   DB_POOL_IDLE_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
   DB_POOL_CONNECTION_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+  DB_SSL_CA: z.string().optional(),
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
-  SUPABASE_DB_URL: z.string().min(1, "SUPABASE_DB_URL is required"),
+  SUPABASE_DB_URL: z.string().min(1).optional(),
   SUPABASE_PROJECT_URL: z.string().url("SUPABASE_PROJECT_URL must be a valid URL"),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1, "SUPABASE_SERVICE_ROLE_KEY is required"),
 });

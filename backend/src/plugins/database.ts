@@ -4,24 +4,21 @@ import { env } from "../config/env";
 
 export async function registerDatabase(app: FastifyInstance): Promise<void> {
   const pool = new Pool({
-    connectionString: env.SUPABASE_DB_URL,
+    connectionString: env.DATABASE_URL,
     max: env.DB_POOL_MAX,
     idleTimeoutMillis: env.DB_POOL_IDLE_TIMEOUT_MS,
     connectionTimeoutMillis: env.DB_POOL_CONNECTION_TIMEOUT_MS,
     ssl: {
-      rejectUnauthorized: true,
+      rejectUnauthorized: false,
     },
   });
 
   try {
     await pool.query("SELECT 1");
   } catch (error) {
-    app.log.error(
-      { err: error },
-      "Database initialization failed with strict TLS verification enabled",
-    );
+    app.log.error({ err: error }, "Database initialization failed");
     await pool.end();
-    throw new Error("Database connection failed with secure TLS configuration");
+    throw new Error("Database connection failed");
   }
 
   app.decorate("db", pool);
