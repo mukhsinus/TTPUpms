@@ -5,6 +5,8 @@ import type {
 } from "./reviews.repository";
 import type { CompleteSubmissionReviewBody, ReviewItemBody } from "./reviews.schema";
 import type { NotificationService } from "../notifications/notification.service";
+import { assertValidTransition } from "../submissions/submission-transitions";
+import { ServiceError } from "../../utils/service-error";
 
 type Role = "student" | "reviewer" | "admin";
 type SubmissionStatus = "draft" | "submitted" | "under_review" | "approved" | "rejected" | "needs_revision";
@@ -14,17 +16,8 @@ export interface AuthUser {
   role: Role;
 }
 
-class ServiceError extends Error {
-  statusCode: number;
-
-  constructor(statusCode: number, message: string) {
-    super(message);
-    this.statusCode = statusCode;
-    this.name = "ServiceError";
-  }
-}
-
-const REVIEWABLE_STATUSES = new Set<SubmissionStatus>(["submitted", "under_review", "needs_revision"]);
+/** Item-level review: owner must have submitted; under_review continues in-progress review. */
+const ITEM_REVIEW_STATUSES = new Set<SubmissionStatus>(["submitted", "under_review"]);
 
 export class ReviewsService {
   constructor(
@@ -56,7 +49,7 @@ export class ReviewsService {
   ): Promise<ReviewSubmissionItemEntity> {
     const submission = await this.assertReviewerAccess(user, submissionId);
 
-    if (!REVIEWABLE_STATUSES.has(submission.status)) {
+    if (!ITEM_REVIEW_STATUSES.has(submission.status)) {
       throw new ServiceError(
         409,
         `Submission in status "${submission.status}" cannot be reviewed`,
@@ -75,6 +68,18 @@ export class ReviewsService {
       );
     }
 
+    if (submission.status === "submitted") {
+      assertValidTransition("submitted", "under_review");
+      return this.repository.reviewItemPromotingFromSubmitted({
+        submissionId,
+        itemId,
+        reviewerId: user.id,
+        score: body.score,
+        comment: body.comment,
+        decision: body.decision,
+      });
+    }
+
     return this.repository.reviewItem({
       itemId,
       reviewerId: user.id,
@@ -91,12 +96,14 @@ export class ReviewsService {
   ): Promise<ReviewSubmissionEntity> {
     const submission = await this.assertReviewerAccess(user, submissionId);
 
-    if (!REVIEWABLE_STATUSES.has(submission.status)) {
+    if (submission.status !== "under_review") {
       throw new ServiceError(
         409,
-        `Submission in status "${submission.status}" cannot be reviewed`,
+        "Submission review can only be completed while status is under_review",
       );
     }
+
+    assertValidTransition(submission.status, body.decision);
 
     const items = await this.repository.findSubmissionItems(submissionId);
     if (items.length === 0) {
@@ -121,7 +128,11 @@ export class ReviewsService {
       comment: body.comment,
     });
 
-    const updated = await this.repository.updateSubmissionStatus(submissionId, body.decision);
+    const updated = await this.repository.setSubmissionWorkflowStatus(
+      submissionId,
+      body.decision,
+      true,
+    );
 
     if (body.decision === "approved" || body.decision === "rejected" || body.decision === "needs_revision") {
       this.notifications.notifySubmissionStatusChanged({
@@ -156,4 +167,4 @@ export class ReviewsService {
   }
 }
 
-export { ServiceError as ReviewsServiceError };
+export { ServiceError as ReviewsServiceError } from "../../utils/service-error";

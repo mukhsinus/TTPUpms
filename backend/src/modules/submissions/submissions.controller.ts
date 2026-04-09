@@ -1,10 +1,14 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { ZodError } from "zod";
+import { assertAuthenticated } from "../../utils/assert-authenticated";
 import { errorCodeFromStatus, failure, success } from "../../utils/http-response";
+import { ServiceError } from "../../utils/service-error";
 import {
   createSubmissionBodySchema,
   getUserSubmissionsQuerySchema,
   submissionParamsSchema,
+  submitSubmissionBodySchema,
+  submitSubmissionParamsSchema,
 } from "./submissions.schema";
 import type { SubmissionsService } from "./submissions.service";
 
@@ -12,14 +16,13 @@ export class SubmissionsController {
   constructor(private readonly service: SubmissionsService) {}
 
   createSubmission = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
-    if (!request.user) {
-      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
-      return;
-    }
-
     try {
+      const user = assertAuthenticated(request);
       const body = createSubmissionBodySchema.parse(request.body);
-      const data = await this.service.createSubmission(request.user, body);
+      const data = await this.service.createSubmission(
+        { id: user.id, role: user.role },
+        body,
+      );
 
       reply.status(201).send(success(data));
     } catch (error) {
@@ -28,14 +31,13 @@ export class SubmissionsController {
   };
 
   getUserSubmissions = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
-    if (!request.user) {
-      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
-      return;
-    }
-
     try {
+      const user = assertAuthenticated(request);
       const query = getUserSubmissionsQuerySchema.parse(request.query);
-      const data = await this.service.getUserSubmissions(request.user, query.userId);
+      const data = await this.service.getUserSubmissions(
+        { id: user.id, role: user.role },
+        query.userId,
+      );
 
       reply.status(200).send(success(data));
     } catch (error) {
@@ -44,14 +46,13 @@ export class SubmissionsController {
   };
 
   getSubmissionById = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
-    if (!request.user) {
-      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
-      return;
-    }
-
     try {
+      const user = assertAuthenticated(request);
       const params = submissionParamsSchema.parse(request.params);
-      const data = await this.service.getSubmissionById(request.user, params.id);
+      const data = await this.service.getSubmissionById(
+        { id: user.id, role: user.role },
+        params.id,
+      );
 
       reply.status(200).send(success(data));
     } catch (error) {
@@ -60,14 +61,17 @@ export class SubmissionsController {
   };
 
   submitSubmission = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
-    if (!request.user) {
-      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
-      return;
-    }
-
     try {
-      const params = submissionParamsSchema.parse(request.params);
-      const data = await this.service.submitSubmission(request.user, params.id);
+      const user = assertAuthenticated(request);
+      const params = submitSubmissionParamsSchema.parse(request.params);
+      const rawBody =
+        typeof request.body === "object" && request.body !== null ? request.body : {};
+      submitSubmissionBodySchema.parse(rawBody);
+
+      const data = await this.service.submitSubmission(
+        { id: user.id, role: user.role },
+        params.id,
+      );
 
       reply.status(200).send(success(data));
     } catch (error) {
@@ -78,6 +82,13 @@ export class SubmissionsController {
   private handleError(reply: FastifyReply, error: unknown): void {
     if (error instanceof ZodError) {
       reply.status(400).send(failure("Validation error", "VALIDATION_ERROR"));
+      return;
+    }
+
+    if (error instanceof ServiceError) {
+      reply
+        .status(error.statusCode)
+        .send(failure(error.message, errorCodeFromStatus(error.statusCode)));
       return;
     }
 

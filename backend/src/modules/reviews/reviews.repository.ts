@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { ServiceError } from "../../utils/service-error";
 
 type SubmissionStatus = "draft" | "submitted" | "under_review" | "approved" | "rejected" | "needs_revision";
 type ItemDecision = "approved" | "rejected" | null;
@@ -219,6 +220,91 @@ export class ReviewsRepository {
     return mapItem(result.rows[0] as SubmissionItemRow);
   }
 
+  /**
+   * Atomically moves submitted → under_review (if still submitted) and records the item review.
+   */
+  async reviewItemPromotingFromSubmitted(input: {
+    submissionId: string;
+    itemId: string;
+    reviewerId: string;
+    score: number;
+    comment?: string;
+    decision: "approved" | "rejected";
+  }): Promise<ReviewSubmissionItemEntity> {
+    const client = await this.app.db.connect();
+    try {
+      await client.query("BEGIN");
+
+      const locked = await client.query<{ status: SubmissionStatus }>(
+        `
+        SELECT status
+        FROM submissions
+        WHERE id = $1
+        FOR UPDATE
+        `,
+        [input.submissionId],
+      );
+
+      const rowStatus = locked.rows[0]?.status;
+      if (!rowStatus) {
+        throw new ServiceError(404, "Submission not found");
+      }
+
+      if (rowStatus !== "submitted" && rowStatus !== "under_review") {
+        throw new ServiceError(
+          409,
+          `Submission in status "${rowStatus}" cannot be reviewed`,
+        );
+      }
+
+      if (rowStatus === "submitted") {
+        await client.query(
+          `
+          UPDATE submissions
+          SET status = $2, updated_at = NOW()
+          WHERE id = $1
+          `,
+          [input.submissionId, "under_review"],
+        );
+      }
+
+      const result = await client.query<SubmissionItemRow>(
+        `
+        UPDATE submission_items
+        SET
+          reviewer_score = $2,
+          reviewer_comment = $3,
+          review_decision = $4,
+          reviewed_by = $5,
+          reviewed_at = NOW(),
+          updated_at = NOW()
+        WHERE id = $1
+        RETURNING id, submission_id, user_id, category, subcategory, title, description, proposed_score,
+                  reviewer_score, reviewer_comment, review_decision, reviewed_by, reviewed_at, created_at, updated_at
+        `,
+        [
+          input.itemId,
+          input.score,
+          input.comment ?? null,
+          input.decision,
+          input.reviewerId,
+        ],
+      );
+
+      await client.query("COMMIT");
+      return mapItem(result.rows[0] as SubmissionItemRow);
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // ignore rollback failures
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async countUnreviewedItems(submissionId: string): Promise<number> {
     const result = await this.app.db.query<{ count: string }>(
       `
@@ -256,21 +342,22 @@ export class ReviewsRepository {
     );
   }
 
-  async updateSubmissionStatus(
+  async setSubmissionWorkflowStatus(
     submissionId: string,
-    status: "approved" | "rejected" | "needs_revision",
+    status: SubmissionStatus,
+    touchReviewedAt: boolean,
   ): Promise<ReviewSubmissionEntity> {
     const result = await this.app.db.query<SubmissionRow>(
       `
       UPDATE submissions
       SET
         status = $2,
-        reviewed_at = NOW(),
+        reviewed_at = CASE WHEN $3::boolean THEN NOW() ELSE reviewed_at END,
         updated_at = NOW()
       WHERE id = $1
       RETURNING id, user_id, status, title, description, total_points, created_at, updated_at
       `,
-      [submissionId, status],
+      [submissionId, status, touchReviewedAt],
     );
 
     return mapSubmission(result.rows[0] as SubmissionRow);

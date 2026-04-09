@@ -1,6 +1,9 @@
-import type { SubmissionsRepository, SubmissionEntity } from "./submissions.repository";
+import { ServiceError } from "../../utils/service-error";
 import type { NotificationService } from "../notifications/notification.service";
 import type { AntiFraudService } from "../validation/anti-fraud.service";
+import { assertValidTransition } from "./submission-transitions";
+import type { SubmissionsRepository, SubmissionEntity } from "./submissions.repository";
+import type { CreateSubmissionBody } from "./submissions.schema";
 
 type Role = "student" | "reviewer" | "admin";
 
@@ -9,24 +12,6 @@ export interface AuthUser {
   role: Role;
 }
 
-export interface CreateSubmissionInput {
-  title: string;
-  description?: string;
-  userId?: string;
-}
-
-class ServiceError extends Error {
-  statusCode: number;
-
-  constructor(statusCode: number, message: string) {
-    super(message);
-    this.statusCode = statusCode;
-    this.name = "ServiceError";
-  }
-}
-
-const SUBMITTABLE_STATUSES = new Set(["draft", "needs_revision"]);
-
 export class SubmissionsService {
   constructor(
     private readonly repository: SubmissionsRepository,
@@ -34,7 +19,7 @@ export class SubmissionsService {
     private readonly antiFraud: AntiFraudService,
   ) {}
 
-  async createSubmission(user: AuthUser, input: CreateSubmissionInput): Promise<SubmissionEntity> {
+  async createSubmission(user: AuthUser, input: CreateSubmissionBody): Promise<SubmissionEntity> {
     const targetUserId = user.role === "admin" && input.userId ? input.userId : user.id;
 
     if (user.role !== "admin" && input.userId && input.userId !== user.id) {
@@ -71,48 +56,19 @@ export class SubmissionsService {
   }
 
   async getSubmissionById(user: AuthUser, submissionId: string): Promise<SubmissionEntity> {
-    const submission = await this.repository.findById(submissionId);
-
-    if (!submission) {
-      throw new ServiceError(404, "Submission not found");
-    }
-
-    if (user.role === "admin") {
-      return submission;
-    }
-
-    if (user.role === "student") {
-      if (submission.userId !== user.id) {
-        throw new ServiceError(403, "You can only access your own submissions");
-      }
-      return submission;
-    }
-
-    const assignedSubmission = await this.repository.findReviewerAssignedById(submissionId, user.id);
-    if (!assignedSubmission) {
-      throw new ServiceError(403, "You can only access assigned submissions");
-    }
-
+    const submission = await this.requireSubmission(submissionId);
+    await this.assertReadAccess(user, submission);
     return submission;
   }
 
   async submitSubmission(user: AuthUser, submissionId: string): Promise<SubmissionEntity> {
-    const submission = await this.repository.findById(submissionId);
+    const submission = await this.requireSubmission(submissionId);
 
-    if (!submission) {
-      throw new ServiceError(404, "Submission not found");
+    if (submission.userId !== user.id) {
+      throw new ServiceError(403, "Only the submission owner can submit");
     }
 
-    if (user.role !== "admin" && submission.userId !== user.id) {
-      throw new ServiceError(403, "Only owner can submit this submission");
-    }
-
-    if (!SUBMITTABLE_STATUSES.has(submission.status)) {
-      throw new ServiceError(
-        409,
-        `Invalid status transition from "${submission.status}" to "submitted"`,
-      );
-    }
+    assertValidTransition(submission.status, "submitted");
 
     const updated = await this.repository.updateStatus({
       id: submission.id,
@@ -127,5 +83,33 @@ export class SubmissionsService {
     });
 
     return updated;
+  }
+
+  private async requireSubmission(submissionId: string): Promise<SubmissionEntity> {
+    const submission = await this.repository.findById(submissionId);
+
+    if (!submission) {
+      throw new ServiceError(404, "Submission not found");
+    }
+
+    return submission;
+  }
+
+  private async assertReadAccess(user: AuthUser, submission: SubmissionEntity): Promise<void> {
+    if (user.role === "admin") {
+      return;
+    }
+
+    if (user.role === "student") {
+      if (submission.userId !== user.id) {
+        throw new ServiceError(403, "You can only access your own submissions");
+      }
+      return;
+    }
+
+    const assigned = await this.repository.findReviewerAssignedById(submission.id, user.id);
+    if (!assigned) {
+      throw new ServiceError(403, "You can only access assigned submissions");
+    }
   }
 }

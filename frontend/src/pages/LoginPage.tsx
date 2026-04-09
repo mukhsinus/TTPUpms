@@ -49,7 +49,7 @@ export function LoginPage(): ReactElement {
     <section className="auth-page">
       <Card className="auth-card">
         <div className="auth-brand">
-          <div className="auth-logo">TPU</div>
+          <div className="auth-logo">TTPU</div>
           <div>
             <h1>UPMS Admin</h1>
             <p className="ui-card-subtitle">Turin Polytechnic University in Tashkent</p>

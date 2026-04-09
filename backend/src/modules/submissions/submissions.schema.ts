@@ -19,6 +19,12 @@ export const submissionParamsSchema = z.object({
   id: z.string().uuid(),
 });
 
+/** POST /:id/submit */
+export const submitSubmissionParamsSchema = submissionParamsSchema;
+
+/** Reject unknown JSON keys when a body is sent (empty object allowed). */
+export const submitSubmissionBodySchema = z.object({}).strict();
+
 export const getUserSubmissionsQuerySchema = z.object({
   userId: z.string().uuid().optional(),
 });
@@ -26,4 +32,5 @@ export const getUserSubmissionsQuerySchema = z.object({
 export type SubmissionStatus = z.infer<typeof submissionStatusSchema>;
 export type CreateSubmissionBody = z.infer<typeof createSubmissionBodySchema>;
 export type SubmissionParams = z.infer<typeof submissionParamsSchema>;
+export type SubmitSubmissionParams = z.infer<typeof submitSubmissionParamsSchema>;
 export type GetUserSubmissionsQuery = z.infer<typeof getUserSubmissionsQuerySchema>;

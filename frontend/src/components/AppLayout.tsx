@@ -28,7 +28,7 @@ export function AppLayout({ children, onLogout }: AppLayoutProps): ReactElement 
     <div className="dashboard-shell">
       <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}>
         <div className="sidebar-brand">
-          <div className="brand-logo">TPU</div>
+          <div className="brand-logo">TTPU</div>
           <div>
             <strong>UPMS Admin</strong>
             <p>Achievement Management</p>
