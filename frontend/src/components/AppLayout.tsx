@@ -1,7 +1,8 @@
-import { BarChart3, ClipboardList, LayoutDashboard, LogOut, Search, ShieldCheck, X } from "lucide-react";
+import { BarChart3, ClipboardList, LayoutDashboard, LogOut, Search, Settings, ShieldCheck, Users, X } from "lucide-react";
 import { useMemo, useState, type PropsWithChildren, type ReactElement } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { api } from "../lib/api";
+import { canAccessReviewerRoutes, isAdminRole, normalizeRole } from "../lib/rbac";
 import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
 
@@ -13,13 +14,20 @@ export function AppLayout({ children, onLogout }: AppLayoutProps): ReactElement 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
   const user = api.getSessionUser();
-  const canAccessReviewerFeatures = user?.role === "admin" || user?.role === "reviewer";
+  const role = normalizeRole(user?.role ?? "student");
+  const canAccessReviewerFeatures = canAccessReviewerRoutes(user);
+  const isAdmin = isAdminRole(user);
+
+  const brandTitle = isAdmin ? "PMS Admin" : role === "reviewer" ? "PMS Reviewer" : "Student Portal";
+  const brandSubtitle =
+    role === "student" ? "My achievements" : role === "reviewer" ? "Review & analytics" : "Achievement management";
 
   const pageTitle = useMemo(() => {
     if (location.pathname.startsWith("/submissions/")) return "Submission Detail";
     if (location.pathname.startsWith("/submissions")) return "Submissions";
     if (location.pathname.startsWith("/reviews")) return "Reviews";
     if (location.pathname.startsWith("/analytics")) return "Analytics";
+    if (location.pathname.startsWith("/settings/categories")) return "Categories";
     if (location.pathname.startsWith("/users")) return "Users";
     return "Dashboard";
   }, [location.pathname]);
@@ -30,8 +38,8 @@ export function AppLayout({ children, onLogout }: AppLayoutProps): ReactElement 
         <div className="sidebar-brand">
           <div className="brand-logo">TTPU</div>
           <div>
-            <strong>PMS Admin</strong>
-            <p>Achievement Management</p>
+            <strong>{brandTitle}</strong>
+            <p>{brandSubtitle}</p>
           </div>
         </div>
         <nav className="sidebar-nav">
@@ -55,10 +63,22 @@ export function AppLayout({ children, onLogout }: AppLayoutProps): ReactElement 
               Analytics
             </NavLink>
           ) : null}
+          {isAdmin ? (
+            <NavLink to="/settings/categories" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+              <Settings size={16} />
+              Categories
+            </NavLink>
+          ) : null}
+          {isAdmin ? (
+            <NavLink to="/users" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+              <Users size={16} />
+              Users
+            </NavLink>
+          ) : null}
         </nav>
         <div className="sidebar-user">
-          <p className="user-name">{user?.fullName ?? user?.email ?? "Admin"}</p>
-          <p className="user-role">{user?.role ?? "admin"}</p>
+          <p className="user-name">{user?.fullName ?? user?.email ?? "User"}</p>
+          <p className="user-role">{role}</p>
           <Button type="button" variant="ghost" className="logout-button" onClick={onLogout}>
             <LogOut size={16} />
             Logout

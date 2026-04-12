@@ -1,15 +1,22 @@
-import { useEffect, useState, type ReactElement } from "react";
-import { Award, CheckCircle2, Clock3, FileText } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactElement } from "react";
+import { AlertCircle, Award, CheckCircle2, FileText } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
+import { normalizeRole } from "../lib/rbac";
+import { EmptyState } from "../components/ui/EmptyState";
+import { DashboardStatsSkeleton, TableSkeleton } from "../components/ui/PageSkeletons";
 import { StatusBadge } from "../components/ui/Badge";
+import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Table } from "../components/ui/Table";
 
-export function DashboardPage(): ReactElement | null {
-  const sessionUser = api.getSessionUser();
-  const canViewAnalytics = sessionUser?.role === "admin" || sessionUser?.role === "reviewer";
+function formatPoints(value: number): string {
+  return Number.isFinite(value) ? value.toFixed(2) : "0.00";
+}
+
+export function DashboardPage(): ReactElement {
+  const navigate = useNavigate();
   const [submissions, setSubmissions] = useState<Awaited<ReturnType<typeof api.getSubmissions>>>([]);
-  const [totalPoints, setTotalPoints] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -17,95 +24,139 @@ export function DashboardPage(): ReactElement | null {
     void (async () => {
       try {
         setLoading(true);
-        const [submissionsResult, topStudentsResult] = await Promise.allSettled(
-          canViewAnalytics ? [api.getSubmissions(), api.getTopStudents(100)] : [api.getSubmissions()],
-        );
-
-        if (submissionsResult.status === "fulfilled") {
-          setSubmissions(submissionsResult.value);
-        } else {
-          throw submissionsResult.reason;
-        }
-
-        if (canViewAnalytics && topStudentsResult?.status === "fulfilled") {
-          const points = topStudentsResult.value.reduce((sum, student) => sum + student.approvedPoints, 0);
-          setTotalPoints(points);
-        } else {
-          setTotalPoints(null);
-        }
+        setSubmissions(await api.getSubmissions());
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load dashboard");
       } finally {
         setLoading(false);
       }
     })();
-  }, [canViewAnalytics]);
+  }, []);
 
-  if (loading) return <p>Loading dashboard...</p>;
-  if (error) return <p className="error">{error}</p>;
+  const { totalCount, approvedCount, totalPointsSum } = useMemo(() => {
+    const totalCount = submissions.length;
+    const approvedCount = submissions.filter((s) => s.status === "approved").length;
+    const totalPointsSum = submissions.reduce((sum, s) => sum + (Number(s.totalPoints) || 0), 0);
+    return { totalCount, approvedCount, totalPointsSum };
+  }, [submissions]);
 
-  const pending = submissions.filter((item) => item.status === "submitted" || item.status === "under_review").length;
-  const approved = submissions.filter((item) => item.status === "approved").length;
+  if (loading) {
+    return (
+      <section className="dashboard-stack">
+        <DashboardStatsSkeleton />
+        <Card title="Recent submissions">
+          <TableSkeleton rows={6} cols={5} />
+        </Card>
+      </section>
+    );
+  }
+
+  if (error) {
+    return (
+      <section className="dashboard-stack">
+        <Card>
+          <EmptyState
+            icon={AlertCircle}
+            tone="danger"
+            title="Couldn't load dashboard"
+            description={error}
+          >
+            <Button type="button" variant="primary" onClick={() => window.location.reload()}>
+              Retry
+            </Button>
+          </EmptyState>
+        </Card>
+      </section>
+    );
+  }
+
+  const sessionUser = api.getSessionUser();
+  const role = normalizeRole(sessionUser?.role ?? "student");
+  const totalLabel =
+    role === "student" ? "Your submissions" : role === "reviewer" ? "Assigned submissions" : "Total submissions";
+  const approvedLabel = role === "student" ? "Approved (yours)" : "Approved submissions";
+  const pointsLabel = role === "student" ? "Your total points" : "Total points (sum)";
+  const ownerColumnLabel = role === "student" ? "Account" : "Student";
+
   const recent = submissions.slice(0, 8);
 
   return (
     <section className="dashboard-stack">
-      <div className="stats-grid">
+      <div className="stats-grid stats-grid-three">
         <Card className="stat-card stat-card-primary">
           <div className="stat-card-header">
-            <p className="stat-card-label">Total Submissions</p>
+            <p className="stat-card-label">{totalLabel}</p>
             <FileText className="stat-card-icon" size={20} />
           </div>
-          <h2 className="stat-card-value">{submissions.length}</h2>
-        </Card>
-        <Card className="stat-card stat-card-warn">
-          <div className="stat-card-header">
-            <p className="stat-card-label">Pending Submissions</p>
-            <Clock3 className="stat-card-icon" size={20} />
-          </div>
-          <h2 className="stat-card-value">{pending}</h2>
+          <h2 className="stat-card-value">{totalCount}</h2>
         </Card>
         <Card className="stat-card stat-card-success">
           <div className="stat-card-header">
-            <p className="stat-card-label">Approved Submissions</p>
+            <p className="stat-card-label">{approvedLabel}</p>
             <CheckCircle2 className="stat-card-icon" size={20} />
           </div>
-          <h2 className="stat-card-value">{approved}</h2>
+          <h2 className="stat-card-value">{approvedCount}</h2>
         </Card>
-        {totalPoints !== null ? (
-          <Card className="stat-card stat-card-accent">
-            <div className="stat-card-header">
-              <p className="stat-card-label">Total Points</p>
-              <Award className="stat-card-icon" size={20} />
-            </div>
-            <h2 className="stat-card-value">{totalPoints.toFixed(2)}</h2>
-          </Card>
-        ) : null}
+        <Card className="stat-card stat-card-accent">
+          <div className="stat-card-header">
+            <p className="stat-card-label">{pointsLabel}</p>
+            <Award className="stat-card-icon" size={20} />
+          </div>
+          <h2 className="stat-card-value">{formatPoints(totalPointsSum)}</h2>
+          <p className="muted stat-card-footnote">Sum of stored submission totals</p>
+        </Card>
       </div>
 
-      <Card title="Recent Submissions">
+      <Card title={role === "student" ? "Your recent submissions" : "Recent submissions"}>
         <Table>
           <thead>
             <tr>
-              <th>Student</th>
-              <th>Category</th>
+              <th>{ownerColumnLabel}</th>
+              <th>Title</th>
               <th>Status</th>
-              <th>Score</th>
+              <th>Total score</th>
               <th>Date</th>
             </tr>
           </thead>
           <tbody>
-            {recent.map((submission) => (
-              <tr key={submission.id}>
-                <td>{submission.userId}</td>
-                <td>{submission.title}</td>
-                <td>
-                  <StatusBadge status={submission.status} />
+            {recent.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="empty-table-cell">
+                  <div className="empty-state-in-card">
+                    <EmptyState
+                      icon={FileText}
+                      tone="muted"
+                      title="No submissions yet"
+                      description={
+                        role === "student"
+                          ? "When you add achievements, they will show up here."
+                          : "Nothing in this list yet. Check back after students submit work."
+                      }
+                    >
+                      <Button type="button" variant="primary" onClick={() => navigate("/submissions")}>
+                        View all submissions
+                      </Button>
+                    </EmptyState>
+                  </div>
                 </td>
-                <td>{submission.totalPoints}</td>
-                <td>{submission.createdAt ? new Date(submission.createdAt).toLocaleDateString("en-US") : "-"}</td>
               </tr>
-            ))}
+            ) : (
+              recent.map((submission) => (
+                <tr key={submission.id}>
+                  <td>
+                    {role === "student"
+                      ? sessionUser?.fullName ?? sessionUser?.email ?? submission.userId
+                      : submission.userId}
+                  </td>
+                  <td>{submission.title}</td>
+                  <td>
+                    <StatusBadge status={submission.status} />
+                  </td>
+                  <td>{formatPoints(Number(submission.totalPoints) || 0)}</td>
+                  <td>{submission.createdAt ? new Date(submission.createdAt).toLocaleDateString("en-US") : "—"}</td>
+                </tr>
+              ))
+            )}
           </tbody>
         </Table>
       </Card>

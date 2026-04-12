@@ -12,15 +12,32 @@ export async function submissionItemsRoutes(app: FastifyInstance): Promise<void>
   const itemsIdempotency = idempotencyPreHandler(app, "submission-items");
   const onSendIdempotency = idempotencyOnSend(app);
 
-  app.get("/", { preHandler: [authMiddleware] }, controller.listItems);
-  app.post(
-    "/",
-    { preHandler: [authMiddleware, itemsIdempotency], onSend: [onSendIdempotency] },
-    controller.addItem,
+  await app.register(
+    async (scope) => {
+      scope.get("/", { preHandler: [authMiddleware] }, controller.listItems);
+      scope.post(
+        "/",
+        { preHandler: [authMiddleware, itemsIdempotency], onSend: [onSendIdempotency] },
+        controller.addItem,
+      );
+      scope.delete(
+        "/:itemId",
+        { preHandler: [authMiddleware, itemsIdempotency], onSend: [onSendIdempotency] },
+        controller.deleteItem,
+      );
+    },
+    { prefix: "/api/submissions/:submissionId/items" },
   );
-  app.delete(
-    "/:itemId",
-    { preHandler: [authMiddleware, itemsIdempotency], onSend: [onSendIdempotency] },
-    controller.deleteItem,
+
+  await app.register(
+    async (scope) => {
+      scope.get("/:submissionId", { preHandler: [authMiddleware] }, controller.listItems);
+      scope.post(
+        "/",
+        { preHandler: [authMiddleware, itemsIdempotency], onSend: [onSendIdempotency] },
+        controller.addItemFlat,
+      );
+    },
+    { prefix: "/api/submission-items" },
   );
 }

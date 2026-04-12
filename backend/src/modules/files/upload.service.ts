@@ -204,10 +204,12 @@ export class UploadService {
     submissionOwnerId: string;
     submissionItemId: string;
   }): Promise<void> {
-    assertStudentMayEditSubmissionContent(params.submissionStatus as SubmissionStatus);
-
     if (params.user.role !== "admin" && params.submissionOwnerId !== params.user.id) {
       throw new ServiceError(403, "Only the submission owner can attach proof to items");
+    }
+
+    if (params.user.role !== "admin") {
+      assertStudentMayEditSubmissionContent(params.submissionStatus as SubmissionStatus);
     }
 
     const item = await this.app.db.query<ItemRow>(

@@ -3,6 +3,7 @@ import { ServiceError } from "../../utils/service-error";
 
 type SubmissionStatus = "draft" | "submitted" | "under_review" | "approved" | "rejected" | "needs_revision";
 type ItemDecision = "approved" | "rejected" | null;
+type ItemWorkflowStatus = "pending" | "approved" | "rejected";
 
 interface SubmissionRow {
   id: string;
@@ -11,6 +12,8 @@ interface SubmissionRow {
   title: string;
   description: string | null;
   total_points: string;
+  submitted_at: string | null;
+  reviewed_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -25,8 +28,10 @@ interface SubmissionItemRow {
   description: string | null;
   proposed_score: string;
   reviewer_score: string | null;
+  approved_score: string | null;
   reviewer_comment: string | null;
   review_decision: ItemDecision;
+  status: string;
   reviewed_by: string | null;
   reviewed_at: string | null;
   created_at: string;
@@ -44,6 +49,8 @@ export interface ReviewSubmissionEntity {
   title: string;
   description: string | null;
   totalPoints: number;
+  submittedAt: string | null;
+  reviewedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -58,8 +65,11 @@ export interface ReviewSubmissionItemEntity {
   description: string | null;
   proposedScore: number;
   reviewerScore: number | null;
+  approvedScore: number | null;
   reviewerComment: string | null;
   reviewDecision: ItemDecision;
+  /** Item workflow status (aligned with submission_items.status). */
+  status: ItemWorkflowStatus;
   reviewedBy: string | null;
   reviewedAt: string | null;
   createdAt: string;
@@ -74,12 +84,34 @@ function mapSubmission(row: SubmissionRow): ReviewSubmissionEntity {
     title: row.title,
     description: row.description,
     totalPoints: Number(row.total_points),
+    submittedAt: row.submitted_at,
+    reviewedAt: row.reviewed_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
+const submissionSelectColumns = `
+  id, user_id, status, title, description, total_points, submitted_at, reviewed_at, created_at, updated_at
+`;
+
 function mapItem(row: SubmissionItemRow): ReviewSubmissionItemEntity {
+  const approved =
+    row.approved_score !== null && row.approved_score !== undefined
+      ? Number(row.approved_score)
+      : row.reviewer_score === null
+        ? null
+        : Number(row.reviewer_score);
+
+  const workflowStatus: ItemWorkflowStatus =
+    row.status === "approved" || row.status === "rejected" || row.status === "pending"
+      ? row.status
+      : row.review_decision === "approved"
+        ? "approved"
+        : row.review_decision === "rejected"
+          ? "rejected"
+          : "pending";
+
   return {
     id: row.id,
     submissionId: row.submission_id,
@@ -90,14 +122,22 @@ function mapItem(row: SubmissionItemRow): ReviewSubmissionItemEntity {
     description: row.description,
     proposedScore: Number(row.proposed_score),
     reviewerScore: row.reviewer_score === null ? null : Number(row.reviewer_score),
+    approvedScore: approved,
     reviewerComment: row.reviewer_comment,
     reviewDecision: row.review_decision,
+    status: workflowStatus,
     reviewedBy: row.reviewed_by,
     reviewedAt: row.reviewed_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
+
+const submissionItemSelectColumns = `
+  id, submission_id, user_id, category, subcategory, title, description, proposed_score,
+  reviewer_score, approved_score, reviewer_comment, review_decision, status::text AS status,
+  reviewed_by, reviewed_at, created_at, updated_at
+`;
 
 export class ReviewsRepository {
   constructor(private readonly app: FastifyInstance) {}
@@ -106,7 +146,7 @@ export class ReviewsRepository {
   async findSubmissionsAwaitingReview(): Promise<ReviewSubmissionEntity[]> {
     const result = await this.app.db.query<SubmissionRow>(
       `
-      SELECT id, user_id, status, title, description, total_points, created_at, updated_at
+      SELECT ${submissionSelectColumns}
       FROM submissions
       WHERE status IN ('submitted', 'under_review')
       ORDER BY created_at DESC
@@ -119,7 +159,7 @@ export class ReviewsRepository {
   async findAllSubmissions(): Promise<ReviewSubmissionEntity[]> {
     const result = await this.app.db.query<SubmissionRow>(
       `
-      SELECT id, user_id, status, title, description, total_points, created_at, updated_at
+      SELECT ${submissionSelectColumns}
       FROM submissions
       ORDER BY created_at DESC
       `,
@@ -131,7 +171,7 @@ export class ReviewsRepository {
   async findSubmissionById(submissionId: string): Promise<ReviewSubmissionEntity | null> {
     const result = await this.app.db.query<SubmissionRow>(
       `
-      SELECT id, user_id, status, title, description, total_points, created_at, updated_at
+      SELECT ${submissionSelectColumns}
       FROM submissions
       WHERE id = $1
       `,
@@ -162,8 +202,7 @@ export class ReviewsRepository {
   async findSubmissionItems(submissionId: string): Promise<ReviewSubmissionItemEntity[]> {
     const result = await this.app.db.query<SubmissionItemRow>(
       `
-      SELECT id, submission_id, user_id, category, subcategory, title, description, proposed_score,
-             reviewer_score, reviewer_comment, review_decision, reviewed_by, reviewed_at, created_at, updated_at
+      SELECT ${submissionItemSelectColumns}
       FROM submission_items
       WHERE submission_id = $1
       ORDER BY created_at ASC
@@ -215,8 +254,7 @@ export class ReviewsRepository {
   async findSubmissionItemById(itemId: string): Promise<ReviewSubmissionItemEntity | null> {
     const result = await this.app.db.query<SubmissionItemRow>(
       `
-      SELECT id, submission_id, user_id, category, subcategory, title, description, proposed_score,
-             reviewer_score, reviewer_comment, review_decision, reviewed_by, reviewed_at, created_at, updated_at
+      SELECT ${submissionItemSelectColumns}
       FROM submission_items
       WHERE id = $1
       `,
@@ -248,8 +286,7 @@ export class ReviewsRepository {
         reviewed_at = NOW(),
         updated_at = NOW()
       WHERE id = $1
-      RETURNING id, submission_id, user_id, category, subcategory, title, description, proposed_score,
-                reviewer_score, reviewer_comment, review_decision, reviewed_by, reviewed_at, created_at, updated_at
+      RETURNING ${submissionItemSelectColumns}
       `,
       [input.itemId, input.score, input.comment ?? null, input.decision, input.reviewerId],
     );
@@ -316,8 +353,7 @@ export class ReviewsRepository {
           reviewed_at = NOW(),
           updated_at = NOW()
         WHERE id = $1
-        RETURNING id, submission_id, user_id, category, subcategory, title, description, proposed_score,
-                  reviewer_score, reviewer_comment, review_decision, reviewed_by, reviewed_at, created_at, updated_at
+        RETURNING ${submissionItemSelectColumns}
         `,
         [
           input.itemId,
@@ -392,10 +428,38 @@ export class ReviewsRepository {
         reviewed_at = CASE WHEN $3::boolean THEN NOW() ELSE reviewed_at END,
         updated_at = NOW()
       WHERE id = $1
-      RETURNING id, user_id, status, title, description, total_points, created_at, updated_at
+      RETURNING ${submissionSelectColumns}
       `,
       [submissionId, status, touchReviewedAt],
     );
+
+    return mapSubmission(result.rows[0] as SubmissionRow);
+  }
+
+  /**
+   * Explicit submitted → under_review transition (does not set reviewed_at).
+   */
+  async startSubmissionReview(submissionId: string): Promise<ReviewSubmissionEntity> {
+    const result = await this.app.db.query<SubmissionRow>(
+      `
+      UPDATE submissions
+      SET status = 'under_review', updated_at = NOW()
+      WHERE id = $1 AND status = 'submitted'
+      RETURNING ${submissionSelectColumns}
+      `,
+      [submissionId],
+    );
+
+    if (result.rowCount === 0 || !result.rows[0]) {
+      const current = await this.findSubmissionById(submissionId);
+      if (!current) {
+        throw new ServiceError(404, "Submission not found");
+      }
+      throw new ServiceError(
+        409,
+        `Start review is only allowed when status is "submitted" (current: "${current.status}")`,
+      );
+    }
 
     return mapSubmission(result.rows[0] as SubmissionRow);
   }

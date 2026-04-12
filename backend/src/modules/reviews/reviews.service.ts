@@ -106,6 +106,16 @@ export class ReviewsService {
     return reviewed;
   }
 
+  async startSubmissionReview(user: AuthUser, submissionId: string): Promise<ReviewSubmissionEntity> {
+    await this.assertReviewerAccess(user, submissionId);
+    const submission = await this.repository.findSubmissionById(submissionId);
+    if (!submission) {
+      throw new ServiceError(404, "Submission not found");
+    }
+    assertValidTransition(submission.status, "under_review");
+    return this.repository.startSubmissionReview(submissionId);
+  }
+
   async completeSubmissionReview(
     user: AuthUser,
     submissionId: string,

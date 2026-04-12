@@ -1,3 +1,15 @@
+export type CategoryScoringType = "fixed" | "range" | "manual";
+
+export interface Category {
+  id: string;
+  name: string;
+  type: CategoryScoringType;
+  minScore: number;
+  maxScore: number;
+  requiresReview: boolean;
+  createdAt: string;
+}
+
 export type SubmissionStatus =
   | "draft"
   | "submitted"
@@ -14,19 +26,33 @@ export interface Submission {
   totalPoints: number;
   status: SubmissionStatus;
   createdAt?: string;
+  updatedAt?: string;
+  /** Set when the student submits for review. */
+  submittedAt?: string | null;
+  /** Set when the submission review is finalized (or terminal outcome recorded). */
+  reviewedAt?: string | null;
 }
+
+export type SubmissionItemStatus = "pending" | "approved" | "rejected";
 
 export interface SubmissionItem {
   id: string;
   title: string;
   category: string;
+  categoryId?: string | null;
   subcategory: string | null;
   description: string | null;
   proposedScore: number;
-  reviewerScore: number | null;
-  reviewDecision: "approved" | "rejected" | null;
-  reviewerComment: string | null;
+  /** Workflow status (submission-items API). */
+  status?: SubmissionItemStatus;
+  approvedScore?: number | null;
   proofFileUrl?: string | null;
+  externalLink?: string | null;
+  reviewerComment?: string | null;
+  createdAt?: string;
+  /** Legacy fields when returned from reviews endpoints */
+  reviewerScore?: number | null;
+  reviewDecision?: "approved" | "rejected" | null;
 }
 
 export interface User {

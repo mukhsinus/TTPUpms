@@ -3,11 +3,11 @@ import type { SubmissionStatus } from "../../types";
 
 const labels: Record<SubmissionStatus, string> = {
   draft: "Draft",
-  submitted: "Pending",
-  under_review: "Pending",
+  submitted: "Submitted",
+  under_review: "Under review",
   approved: "Approved",
   rejected: "Rejected",
-  needs_revision: "Pending",
+  needs_revision: "Needs revision",
 };
 
 export function StatusBadge({ status }: { status: SubmissionStatus }): ReactElement {

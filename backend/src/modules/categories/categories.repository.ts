@@ -65,6 +65,27 @@ export interface CategoryEntity {
   subcategories: SubcategoryEntity[];
 }
 
+/** Flat row for GET /categories (admin UI list). */
+export interface CategoryListItem {
+  id: string;
+  name: string;
+  type: CategoryScoringType;
+  minScore: number;
+  maxScore: number;
+  requiresReview: boolean;
+  createdAt: string;
+}
+
+interface CategoryListRow {
+  id: string;
+  name: string;
+  type: CategoryScoringType;
+  min_score: string;
+  max_score: string;
+  requires_review: boolean;
+  created_at: string;
+}
+
 function mapRule(row: ScoringRuleRow): CategoryScoringRuleEntity {
   return {
     id: row.id,
@@ -77,8 +98,52 @@ function mapRule(row: ScoringRuleRow): CategoryScoringRuleEntity {
   };
 }
 
+function mapListItem(row: CategoryListRow): CategoryListItem {
+  return {
+    id: row.id,
+    name: row.name,
+    type: row.type,
+    minScore: Number(row.min_score),
+    maxScore: Number(row.max_score),
+    requiresReview: row.requires_review,
+    createdAt: row.created_at,
+  };
+}
+
 export class CategoriesRepository {
   constructor(private readonly app: FastifyInstance) {}
+
+  async listCategories(): Promise<CategoryListItem[]> {
+    const result = await this.app.db.query<CategoryListRow>(
+      `
+      SELECT id, name, type, min_score, max_score, requires_review, created_at
+      FROM public.categories
+      ORDER BY name ASC
+      `,
+    );
+
+    return result.rows.map(mapListItem);
+  }
+
+  async insertCategory(input: {
+    name: string;
+    type: CategoryScoringType;
+    minScore: number;
+    maxScore: number;
+    requiresReview: boolean;
+    description: string | null;
+  }): Promise<CategoryListItem> {
+    const result = await this.app.db.query<CategoryListRow>(
+      `
+      INSERT INTO public.categories (name, type, min_score, max_score, description, requires_review)
+      VALUES ($1, $2::public.category_scoring_type, $3, $4, $5, $6)
+      RETURNING id, name, type, min_score, max_score, requires_review, created_at
+      `,
+      [input.name, input.type, input.minScore, input.maxScore, input.description, input.requiresReview],
+    );
+
+    return mapListItem(result.rows[0] as CategoryListRow);
+  }
 
   async listScoringConfiguration(): Promise<CategoryEntity[]> {
     const categoriesResult = await this.app.db.query<CategoryRow>(

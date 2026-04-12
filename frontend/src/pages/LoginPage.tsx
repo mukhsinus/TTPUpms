@@ -53,7 +53,7 @@ export function LoginPage(): ReactElement {
         <div className="auth-brand">
           <div className="auth-logo">TTPU</div>
           <div>
-            <h1>PMS Admin</h1>
+            <h1>PMS Portal</h1>
             <p className="ui-card-subtitle">Turin Polytechnic University in Tashkent</p>
           </div>
         </div>

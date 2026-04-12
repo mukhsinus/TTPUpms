@@ -16,3 +16,10 @@ export const addSubmissionItemBodySchema = z.object({
 });
 
 export type AddSubmissionItemBody = z.infer<typeof addSubmissionItemBodySchema>;
+
+/** POST /api/submission-items — submission id in body instead of URL. */
+export const addSubmissionItemFlatBodySchema = addSubmissionItemBodySchema.extend({
+  submission_id: z.string().uuid(),
+});
+
+export type AddSubmissionItemFlatBody = z.infer<typeof addSubmissionItemFlatBodySchema>;

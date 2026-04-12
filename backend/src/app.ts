@@ -63,9 +63,11 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(healthRoutes);
   await app.register(categoriesRoutes, { prefix: "/api/categories" });
   await app.register(submissionsRoutes, { prefix: "/api/submissions" });
-  await app.register(submissionItemsRoutes, { prefix: "/api/submissions/:submissionId/items" });
+  await app.register(submissionItemsRoutes);
   await app.register(uploadRoutes, { prefix: "/api/files" });
+  await app.register(uploadRoutes, { prefix: "/files" });
   await app.register(reviewsRoutes, { prefix: "/api/reviews" });
+  await app.register(reviewsRoutes, { prefix: "/reviews" });
   await app.register(adminOverrideRoutes, { prefix: "/api/admin" });
   await app.register(analyticsRoutes, { prefix: "/api/analytics" });
   await app.register(botApiRoutes, {

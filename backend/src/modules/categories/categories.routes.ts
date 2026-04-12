@@ -7,11 +7,14 @@ import { CategoriesService } from "./categories.service";
 export async function categoriesRoutes(app: FastifyInstance): Promise<void> {
   const service = new CategoriesService(app);
   const controller = new CategoriesController(service);
-  const guard = allowRoles(["student", "reviewer", "admin"]);
+  const readGuard = allowRoles(["student", "reviewer", "admin"]);
+  const adminOnly = allowRoles(["admin"]);
 
+  app.get("/", { preHandler: [authMiddleware, readGuard] }, controller.listCategories);
+  app.post("/", { preHandler: [authMiddleware, adminOnly] }, controller.createCategory);
   app.get(
     "/scoring-configuration",
-    { preHandler: [authMiddleware, guard] },
+    { preHandler: [authMiddleware, readGuard] },
     controller.getScoringConfiguration,
   );
 }

@@ -32,7 +32,17 @@ export async function reviewsRoutes(app: FastifyInstance): Promise<void> {
     controller.reviewItem,
   );
   app.post(
+    "/submissions/:submissionId/start-review",
+    { preHandler: [authMiddleware, reviewerGuard] },
+    controller.startSubmissionReview,
+  );
+  app.post(
     "/submissions/:submissionId/complete",
+    { preHandler: [authMiddleware, reviewerGuard] },
+    controller.completeReview,
+  );
+  app.post(
+    "/submissions/:submissionId/finalize",
     { preHandler: [authMiddleware, reviewerGuard] },
     controller.completeReview,
   );

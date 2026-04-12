@@ -1,6 +1,7 @@
-import type { Submission, SubmissionItem, SubmissionStatus, User } from "../types";
+import type { Category, Submission, SubmissionItem, SubmissionStatus, User } from "../types";
 import { signInWithSupabasePassword } from "./auth-sign-in";
 import { ApiError } from "./api-error";
+import { normalizeRole, type AppRole } from "./rbac";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? import.meta.env.VITE_API_BASE_URL ?? "";
 const AUTH_TOKEN_KEY = "upms_admin_token";
@@ -16,9 +17,42 @@ interface ApiResponse<T> {
 }
 
 export interface SessionUser {
+  /** Supabase JWT `sub` — matches backend `user.id`. */
+  userId: string | null;
   email: string | null;
-  role: string;
+  role: AppRole;
   fullName: string | null;
+}
+
+/** Response from POST /api/files/upload (and POST /files/upload). */
+export interface FileUploadResult {
+  id: string;
+  fileUrl: string;
+  mimeType: string;
+  signedUrl: string;
+  sizeBytes: number;
+  originalFilename: string;
+}
+
+/** Item payload from PATCH /api/reviews/items/:itemId (and POST review item). */
+export interface ReviewSubmissionItemResponse {
+  id: string;
+  submissionId: string;
+  userId: string;
+  category: string;
+  subcategory: string | null;
+  title: string;
+  description: string | null;
+  proposedScore: number;
+  reviewerScore: number | null;
+  approvedScore: number | null;
+  reviewerComment: string | null;
+  reviewDecision: "approved" | "rejected" | null;
+  status: "pending" | "approved" | "rejected";
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface TopStudent {
@@ -78,7 +112,7 @@ async function requestResult<T>(path: string, init?: RequestInit, token?: string
   const headers = new Headers(init?.headers);
   const authToken = token ?? getAuthToken();
 
-  if (init?.body && !headers.has("Content-Type")) {
+  if (init?.body && !headers.has("Content-Type") && !(init.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
   if (authToken) {
@@ -147,9 +181,12 @@ export const api = {
     const appMetadata = (payload.app_metadata as Record<string, unknown> | undefined) ?? {};
     const userMetadata = (payload.user_metadata as Record<string, unknown> | undefined) ?? {};
 
+    const rawRole = typeof appMetadata.role === "string" ? appMetadata.role : "student";
+
     return {
+      userId: typeof payload.sub === "string" ? payload.sub : null,
       email: typeof payload.email === "string" ? payload.email : null,
-      role: typeof appMetadata.role === "string" ? appMetadata.role : "student",
+      role: normalizeRole(rawRole),
       fullName:
         typeof userMetadata.full_name === "string"
           ? userMetadata.full_name
@@ -197,7 +234,23 @@ export const api = {
   },
 
   getSubmissionItems(submissionId: string): Promise<SubmissionItem[]> {
-    return request<SubmissionItem[]>(`/api/reviews/submissions/${submissionId}/items`);
+    return request<SubmissionItem[]>(`/api/submission-items/${submissionId}`);
+  },
+
+  createSubmissionItem(input: {
+    submission_id: string;
+    category_id: string;
+    subcategory?: string;
+    title: string;
+    description?: string;
+    proof_file_url?: string;
+    external_link?: string;
+    proposed_score: number;
+  }): Promise<SubmissionItem> {
+    return request<SubmissionItem>("/api/submission-items", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
   },
 
   reviewSubmissionItem(input: {
@@ -213,6 +266,46 @@ export const api = {
         score: input.score,
         comment: input.comment,
         decision: input.decision,
+      }),
+    });
+  },
+
+  /** PATCH /api/reviews/items/:itemId — reviewer/admin; sets approved score, status, comment. */
+  patchReviewItem(input: {
+    itemId: string;
+    approved_score: number;
+    status: "approved" | "rejected";
+    reviewer_comment?: string;
+  }): Promise<ReviewSubmissionItemResponse> {
+    return request<ReviewSubmissionItemResponse>(`/api/reviews/items/${input.itemId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        approved_score: input.approved_score,
+        status: input.status,
+        reviewer_comment: input.reviewer_comment,
+      }),
+    });
+  },
+
+  /** POST /api/reviews/submissions/:id/start-review — submitted → under_review. */
+  startSubmissionReview(submissionId: string): Promise<Submission> {
+    return request<Submission>(`/api/reviews/submissions/${submissionId}/start-review`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  },
+
+  /** POST /api/reviews/submissions/:id/finalize — alias of /complete; under_review → outcome. */
+  finalizeSubmissionReview(input: {
+    submissionId: string;
+    decision: "approved" | "rejected" | "needs_revision";
+    comment?: string;
+  }): Promise<Submission> {
+    return request<Submission>(`/api/reviews/submissions/${input.submissionId}/finalize`, {
+      method: "POST",
+      body: JSON.stringify({
+        decision: input.decision,
+        comment: input.comment,
       }),
     });
   },
@@ -256,5 +349,48 @@ export const api = {
 
   getActivityStats(): Promise<ActivityStat[]> {
     return request<ActivityStat[]>("/api/analytics/activity-stats");
+  },
+
+  getCategories(): Promise<Category[]> {
+    return request<Category[]>("/api/categories");
+  },
+
+  createCategory(input: {
+    name: string;
+    type: Category["type"];
+    min_score: number;
+    max_score: number;
+    requires_review?: boolean;
+    description?: string;
+  }): Promise<Category> {
+    return request<Category>("/api/categories", {
+      method: "POST",
+      body: JSON.stringify({
+        name: input.name,
+        type: input.type,
+        min_score: input.min_score,
+        max_score: input.max_score,
+        requires_review: input.requires_review ?? true,
+        description: input.description,
+      }),
+    });
+  },
+
+  /**
+   * Multipart upload to Supabase Storage; updates `submission_items.proof_file_url` when `submissionItemId` is set.
+   */
+  uploadSubmissionItemProof(input: {
+    submissionId: string;
+    submissionItemId: string;
+    file: File;
+  }): Promise<FileUploadResult> {
+    const form = new FormData();
+    form.append("submissionId", input.submissionId);
+    form.append("submissionItemId", input.submissionItemId);
+    form.append("file", input.file, input.file.name);
+    return request<FileUploadResult>("/api/files/upload", {
+      method: "POST",
+      body: form,
+    });
   },
 };

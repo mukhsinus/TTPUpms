@@ -74,7 +74,7 @@ export class AnalyticsService {
       `
       SELECT
         si.category,
-        COALESCE(SUM(si.reviewer_score), 0)::text AS approved_points,
+        COALESCE(SUM(COALESCE(si.approved_score, si.reviewer_score)), 0)::text AS approved_points,
         COUNT(*)::text AS approved_items
       FROM submission_items si
       INNER JOIN submissions s ON s.id = si.submission_id
@@ -82,7 +82,7 @@ export class AnalyticsService {
         AND ($1::timestamptz IS NULL OR s.created_at >= $1::timestamptz)
         AND ($2::timestamptz IS NULL OR s.created_at <= $2::timestamptz)
       GROUP BY si.category
-      ORDER BY COALESCE(SUM(si.reviewer_score), 0) DESC
+      ORDER BY COALESCE(SUM(COALESCE(si.approved_score, si.reviewer_score)), 0) DESC
       `,
       [from ?? null, to ?? null],
     );

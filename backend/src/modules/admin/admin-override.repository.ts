@@ -65,7 +65,13 @@ export class AdminOverrideRepository {
     const result = await this.app.db.query<SubmissionRow>(
       `
       UPDATE submissions
-      SET status = $2, reviewed_at = NOW(), updated_at = NOW()
+      SET
+        status = $2,
+        reviewed_at = CASE
+          WHEN $2 IN ('approved', 'rejected', 'needs_revision') THEN NOW()
+          ELSE reviewed_at
+        END,
+        updated_at = NOW()
       WHERE id = $1
       RETURNING id, user_id, total_points, status
       `,

@@ -1,6 +1,9 @@
 import type { AdminOverrideRepository, AdminSubmissionEntity } from "./admin-override.repository";
 import type { OverrideScoreBody, OverrideStatusBody } from "./admin-override.schema";
 import type { NotificationService } from "../notifications/notification.service";
+import { assertValidTransition } from "../submissions/submission-transitions";
+import type { SubmissionStatus } from "../submissions/submissions.schema";
+import { ServiceError as TransitionServiceError } from "../../utils/service-error";
 
 interface ActorContext {
   actorUserId: string;
@@ -72,6 +75,15 @@ export class AdminOverrideService {
 
     if (submission.status === body.status) {
       throw new ServiceError(409, "Submission status is already set to this value");
+    }
+
+    try {
+      assertValidTransition(submission.status as SubmissionStatus, body.status);
+    } catch (error) {
+      if (error instanceof TransitionServiceError) {
+        throw new ServiceError(error.statusCode, error.message);
+      }
+      throw error;
     }
 
     const updated = await this.repository.updateSubmissionStatus(submissionId, body.status);

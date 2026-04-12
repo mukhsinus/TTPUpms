@@ -30,6 +30,7 @@ interface SubmissionItemScoreRow {
   id: string;
   category: string;
   reviewer_score: string | null;
+  approved_score: string | null;
   review_decision: "approved" | "rejected" | null;
 }
 
@@ -39,9 +40,9 @@ interface CategoryCapRow {
 }
 
 /**
- * Computes submission total from approved item scores (reviewer-assigned),
- * applies per-category caps from `categories.max_score`, deduplicates by item id,
- * and persists `submissions.total_points`.
+ * Computes submission `total_points` as the sum of each approved item's `approved_score`
+ * (falls back to `reviewer_score` when needed), applies per-category caps from
+ * `categories.max_score`, deduplicates by item id, and persists `submissions.total_points`.
  */
 export class ScoringService {
   constructor(private readonly app: FastifyInstance) {}
@@ -72,16 +73,22 @@ export class ScoringService {
         continue;
       }
 
-      const reviewerScore = item.reviewer_score === null ? null : Number(item.reviewer_score);
-      if (reviewerScore === null || Number.isNaN(reviewerScore) || reviewerScore < 0) {
+      const approvedPoints =
+        item.approved_score !== null && item.approved_score !== undefined
+          ? Number(item.approved_score)
+          : item.reviewer_score === null
+            ? null
+            : Number(item.reviewer_score);
+
+      if (approvedPoints === null || Number.isNaN(approvedPoints) || approvedPoints < 0) {
         throw new ScoringServiceError(
           409,
-          `Approved item ${item.id} is missing a valid reviewer score for scoring`,
+          `Approved item ${item.id} is missing a valid approved_score for scoring`,
         );
       }
 
       const cat = item.category;
-      categoryRawTotals.set(cat, round2((categoryRawTotals.get(cat) ?? 0) + reviewerScore));
+      categoryRawTotals.set(cat, round2((categoryRawTotals.get(cat) ?? 0) + approvedPoints));
     }
 
     const categoryBreakdown: ScoringEngineResult["categoryBreakdown"] = [];
@@ -148,7 +155,7 @@ export class ScoringService {
   private async findSubmissionItems(submissionId: string): Promise<SubmissionItemScoreRow[]> {
     const result = await this.app.db.query<SubmissionItemScoreRow>(
       `
-      SELECT id, category, reviewer_score, review_decision
+      SELECT id, category, reviewer_score, approved_score, review_decision
       FROM submission_items
       WHERE submission_id = $1
       ORDER BY created_at ASC

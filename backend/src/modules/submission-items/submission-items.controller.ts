@@ -3,6 +3,7 @@ import { ZodError } from "zod";
 import { errorCodeFromStatus, failure, success } from "../../utils/http-response";
 import {
   addSubmissionItemBodySchema,
+  addSubmissionItemFlatBodySchema,
   submissionItemParamsSchema,
 } from "./submission-items.schema";
 import type { SubmissionItemsService } from "./submission-items.service";
@@ -35,6 +36,24 @@ export class SubmissionItemsController {
       const params = submissionItemParamsSchema.pick({ submissionId: true }).parse(request.params);
       const body = addSubmissionItemBodySchema.parse(request.body);
       const data = await this.service.addItem(request.user, params.submissionId, body);
+
+      reply.status(201).send(success(data));
+    } catch (error) {
+      this.handleError(reply, error);
+    }
+  };
+
+  /** POST /api/submission-items — same as addItem but `submission_id` is in the JSON body. */
+  addItemFlat = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!request.user) {
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
+      return;
+    }
+
+    try {
+      const flat = addSubmissionItemFlatBodySchema.parse(request.body);
+      const { submission_id: submissionId, ...body } = flat;
+      const data = await this.service.addItem(request.user, submissionId, body);
 
       reply.status(201).send(success(data));
     } catch (error) {
