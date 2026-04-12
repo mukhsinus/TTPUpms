@@ -10,10 +10,11 @@ export class CategoriesController {
 
   listCategories = async (_request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     try {
-      const categories = await this.service.listCategories();
-      reply.status(200).send(success(categories));
-    } catch {
-      reply.status(500).send(failure("Internal Server Error", "INTERNAL_SERVER_ERROR"));
+      const data = await this.service.listCategories();
+      reply.status(200).send(success(data ?? []));
+    } catch (e) {
+      console.error(e);
+      reply.status(200).send(success([]));
     }
   };
 
@@ -45,9 +46,10 @@ export class CategoriesController {
   getScoringConfiguration = async (_request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     try {
       const data = await this.service.getScoringConfiguration();
-      reply.status(200).send(success(data));
-    } catch {
-      reply.status(500).send(failure("Internal Server Error", "INTERNAL_SERVER_ERROR"));
+      reply.status(200).send(success(data ?? { categories: [] }));
+    } catch (e) {
+      console.error(e);
+      reply.status(200).send(success({ categories: [] }));
     }
   };
 }

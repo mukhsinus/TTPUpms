@@ -5,7 +5,7 @@ import { api } from "../lib/api";
 export function RequireAuth(): ReactElement {
   const location = useLocation();
 
-  if (!api.isLoggedIn()) {
+  if (!api.isSessionValid()) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   }
 

@@ -46,12 +46,20 @@ export class AnalyticsController {
   };
 
   getScoresByCategory = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    let query: { from?: string; to?: string };
     try {
-      const query = dateRangeQuerySchema.parse(request.query);
-      const data = await this.service.getScoresByCategory(query.from, query.to);
-      reply.status(200).send(success(data));
+      query = dateRangeQuerySchema.parse(request.query);
     } catch (error) {
       this.handleError(reply, error);
+      return;
+    }
+
+    try {
+      const data = await this.service.getScoresByCategory(query.from, query.to);
+      reply.status(200).send(success(data ?? []));
+    } catch (e) {
+      console.error(e);
+      reply.status(200).send(success([]));
     }
   };
 

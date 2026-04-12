@@ -36,6 +36,29 @@ const createStudentSubmissionSchema = z.object({
   proof_file_url: z.string().url(),
 });
 
+const createDraftSubmissionSchema = z.object({
+  telegram_id: z.string().regex(/^\d+$/, "telegram_id must be numeric"),
+});
+
+const addBotSubmissionItemSchema = z.object({
+  telegram_id: z.string().regex(/^\d+$/, "telegram_id must be numeric"),
+  submission_id: z.string().uuid(),
+  category_id: z.string().uuid(),
+  subcategory: z.string().min(1).max(200).nullable().optional(),
+  title: z.string().min(1).max(200),
+  description: z.string().min(1).max(5000),
+  proof_file_url: z.string().url(),
+  external_link: z.union([z.string().url(), z.literal("")]).optional().nullable(),
+});
+
+const submitDraftParamsSchema = z.object({
+  id: z.string().uuid(),
+});
+
+const submitDraftBodySchema = z.object({
+  telegram_id: z.string().regex(/^\d+$/, "telegram_id must be numeric"),
+});
+
 function verifyBotApiKey(headers: Record<string, unknown>): boolean {
   const token = headers["x-bot-api-key"];
   return typeof token === "string" && token === env.BOT_API_KEY;
@@ -94,6 +117,50 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
       const body = linkSchema.parse(request.body);
       const data = await service.linkTelegramByEmail(body.email, body.telegram_id);
       reply.send(success(data));
+    } catch (error) {
+      handleRouteError(app, reply, error);
+    }
+  });
+
+  app.post("/submissions/draft", async (request, reply) => {
+    try {
+      const body = createDraftSubmissionSchema.parse(request.body);
+      const data = await service.createDraftSubmissionForBot(body.telegram_id);
+      reply.status(201).send(success(data));
+    } catch (error) {
+      handleRouteError(app, reply, error);
+    }
+  });
+
+  app.post("/submissions/items", async (request, reply) => {
+    try {
+      const body = addBotSubmissionItemSchema.parse(request.body);
+      const ext =
+        body.external_link === "" || body.external_link === undefined || body.external_link === null
+          ? null
+          : body.external_link;
+      const data = await service.addSubmissionItemFromBot({
+        telegramId: body.telegram_id,
+        submissionId: body.submission_id,
+        categoryId: body.category_id,
+        subcategory: body.subcategory ?? null,
+        title: body.title,
+        description: body.description,
+        proofFileUrl: body.proof_file_url,
+        externalLink: ext,
+      });
+      reply.status(201).send(success(data));
+    } catch (error) {
+      handleRouteError(app, reply, error);
+    }
+  });
+
+  app.post("/submissions/:id/submit", async (request, reply) => {
+    try {
+      const params = submitDraftParamsSchema.parse(request.params);
+      const body = submitDraftBodySchema.parse(request.body);
+      await service.submitDraftFromBot(body.telegram_id, params.id);
+      reply.status(200).send(success({ ok: true }));
     } catch (error) {
       handleRouteError(app, reply, error);
     }

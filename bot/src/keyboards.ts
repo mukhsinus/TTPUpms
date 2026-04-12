@@ -15,9 +15,7 @@ export const mainMenuKeyboard = () =>
 export function categoryPickerKeyboard(categories: CategoryCatalogEntry[]) {
   const rows: ReturnType<typeof Markup.button.callback>[][] = [];
   for (let i = 0; i < categories.length; i += 2) {
-    const row = [
-      Markup.button.callback(categories[i].name, `cat_${categories[i].id}`),
-    ];
+    const row = [Markup.button.callback(categories[i].name, `cat_${categories[i].id}`)];
     if (categories[i + 1]) {
       row.push(Markup.button.callback(categories[i + 1].name, `cat_${categories[i + 1].id}`));
     }
@@ -28,14 +26,10 @@ export function categoryPickerKeyboard(categories: CategoryCatalogEntry[]) {
 }
 
 /** Callback sub_<slug> — category is already chosen in session */
-export function subcategoryPickerKeyboard(
-  subcategories: Array<{ slug: string; label: string }>,
-) {
+export function subcategoryPickerKeyboard(subcategories: Array<{ slug: string; label: string }>) {
   const rows: ReturnType<typeof Markup.button.callback>[][] = [];
   for (let i = 0; i < subcategories.length; i += 2) {
-    const row = [
-      Markup.button.callback(subcategories[i].label, `sub_${subcategories[i].slug}`),
-    ];
+    const row = [Markup.button.callback(subcategories[i].label, `sub_${subcategories[i].slug}`)];
     if (subcategories[i + 1]) {
       row.push(
         Markup.button.callback(subcategories[i + 1].label, `sub_${subcategories[i + 1].slug}`),
@@ -47,10 +41,22 @@ export function subcategoryPickerKeyboard(
   return Markup.inlineKeyboard(rows);
 }
 
-export const confirmKeyboard = () =>
+export const cancelOnlyKeyboard = () => Markup.inlineKeyboard([CANCEL_ROW]);
+
+export const skipOptionalLinkKeyboard = () =>
   Markup.inlineKeyboard([
-    [
-      Markup.button.callback("Confirm and submit", "confirm_submit"),
-      Markup.button.callback("Cancel", "wizard_cancel"),
-    ],
+    [Markup.button.callback("Skip", "skip_external_link")],
+    CANCEL_ROW,
+  ]);
+
+export const addAnotherItemKeyboard = () =>
+  Markup.inlineKeyboard([
+    [Markup.button.callback("Add another item", "flow_add_more")],
+    [Markup.button.callback("Preview and submit", "flow_preview")],
+    CANCEL_ROW,
+  ]);
+
+export const previewSubmitKeyboard = () =>
+  Markup.inlineKeyboard([
+    [Markup.button.callback("Submit", "confirm_submit"), Markup.button.callback("Cancel", "wizard_cancel")],
   ]);

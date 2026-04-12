@@ -1,83 +1,228 @@
-import { Markup, Scenes } from "telegraf";
+import { Scenes } from "telegraf";
 import {
+  addAnotherItemKeyboard,
+  cancelOnlyKeyboard,
   categoryPickerKeyboard,
-  confirmKeyboard,
   mainMenuKeyboard,
+  previewSubmitKeyboard,
+  skipOptionalLinkKeyboard,
   subcategoryPickerKeyboard,
 } from "../keyboards";
 import type { UpmsService } from "../services/upms.service";
 import type { BotContext, SubmitFlowState } from "../types/session";
 
 const TEN_MB = 10 * 1024 * 1024;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const CATEGORIES_FAIL_MSG = "Could not load categories. Please try again later.";
+const NO_CATEGORIES_MSG = "No categories available. Please try later.";
+const SUCCESS_MSG = "Your achievement has been submitted and is under review.";
 
 function st(ctx: BotContext): SubmitFlowState {
   return ctx.wizard.state as SubmitFlowState;
+}
+
+function resetFlowState(s: SubmitFlowState): void {
+  delete s.needsEmailLink;
+  delete s.submissionId;
+  delete s.categories;
+  delete s.categoryId;
+  delete s.categoryName;
+  delete s.subcategorySlug;
+  delete s.subcategoryLabel;
+  delete s.title;
+  delete s.description;
+  delete s.proofFileUrl;
+  delete s.previewBlocks;
+}
+
+function clearCurrentItem(s: SubmitFlowState): void {
+  delete s.categoryId;
+  delete s.categoryName;
+  delete s.subcategorySlug;
+  delete s.subcategoryLabel;
+  delete s.title;
+  delete s.description;
+  delete s.proofFileUrl;
 }
 
 function hasAllowedDocumentType(mime: string | undefined): boolean {
   return mime === "application/pdf" || mime === "image/jpeg" || mime === "image/png";
 }
 
+function isProbablyUrl(text: string): boolean {
+  try {
+    const u = new URL(text.trim());
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+async function leaveWithMenu(ctx: BotContext): Promise<void> {
+  await ctx.scene.leave();
+}
+
+async function presentCategoryStep(ctx: BotContext, upms: UpmsService): Promise<void> {
+  const tgId = ctx.session.authenticatedTelegramId;
+  if (!tgId) {
+    await ctx.reply("Session error. Use /start and try again.", mainMenuKeyboard());
+    throw new Error("NO_TG");
+  }
+
+  const s = st(ctx);
+  if (!s.submissionId) {
+    const draft = await upms.createDraftSubmission(tgId);
+    s.submissionId = draft.submissionId;
+  }
+
+  let categories;
+  try {
+    categories = await upms.getCategoriesCatalog();
+    console.log("categories:", categories);
+  } catch {
+    await ctx.reply(CATEGORIES_FAIL_MSG, mainMenuKeyboard());
+    throw new Error("CAT_FAIL");
+  }
+
+  if (categories.length === 0) {
+    await ctx.reply(NO_CATEGORIES_MSG, mainMenuKeyboard());
+    throw new Error("NO_CATS");
+  }
+
+  s.categories = categories;
+  await ctx.reply("Select a category:", categoryPickerKeyboard(categories));
+}
+
+function formatItemBlock(s: SubmitFlowState, externalLink: string | null): string {
+  const fileNote = s.proofFileUrl ? "Proof file attached" : "—";
+  return [
+    `Category: ${s.categoryName ?? "—"}`,
+    `Subcategory: ${s.subcategoryLabel ?? "—"}`,
+    `Title: ${s.title ?? "—"}`,
+    `Description: ${s.description ?? "—"}`,
+    `File: ${fileNote}`,
+    externalLink ? `Link: ${externalLink}` : "Link: —",
+  ].join("\n");
+}
+
+/** Persist current item; updates previewBlocks. */
+async function persistItemAndRecordPreview(ctx: BotContext, upms: UpmsService, externalLink: string | null): Promise<void> {
+  const tgId = ctx.session.authenticatedTelegramId!;
+  const s = st(ctx);
+  const subSlug = s.subcategorySlug ?? "general";
+
+  await upms.addSubmissionItem({
+    telegramId: tgId,
+    submissionId: s.submissionId!,
+    categoryId: s.categoryId!,
+    subcategory: subSlug,
+    title: s.title!,
+    description: s.description!,
+    proofFileUrl: s.proofFileUrl!,
+    externalLink,
+  });
+
+  s.previewBlocks = s.previewBlocks ?? [];
+  s.previewBlocks.push(formatItemBlock(s, externalLink));
+}
+
 export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardScene<BotContext> {
   return new Scenes.WizardScene<BotContext>(
     "submit-submission",
-    // 0 — load categories
+    // 0 — verify user
     async (ctx) => {
-      if (!ctx.session.authenticatedTelegramId) {
-        await ctx.reply("Please use /start first to sign in.");
-        await ctx.scene.leave();
+      const fromId = ctx.from?.id;
+      if (!fromId) {
+        await ctx.reply("Unable to identify your Telegram account.");
+        await leaveWithMenu(ctx);
         return;
       }
 
-      const s = st(ctx);
-      s.categories = undefined;
-      s.categoryId = undefined;
-      s.categoryName = undefined;
-      s.subcategorySlug = undefined;
-      s.subcategoryLabel = undefined;
-      s.title = undefined;
-      s.description = undefined;
-      s.proofFileUrl = undefined;
+      const tg = String(fromId);
+      resetFlowState(st(ctx));
 
-      let categories;
-      try {
-        categories = await upms.getCategoriesCatalog();
-      } catch {
-        await ctx.reply(
-          "Could not load categories. Try again later.",
-          mainMenuKeyboard(),
-        );
-        await ctx.scene.leave();
-        return;
+      const linked = await upms.lookupUserByTelegramId(tg);
+      if (linked) {
+        ctx.session.authenticatedTelegramId = tg;
+        try {
+          await presentCategoryStep(ctx, upms);
+        } catch {
+          await leaveWithMenu(ctx);
+          return;
+        }
+        return ctx.wizard.selectStep(2);
       }
 
-      if (categories.length === 0) {
-        await ctx.reply(
-          "No categories are configured yet. Contact an administrator.",
-          mainMenuKeyboard(),
-        );
-        await ctx.scene.leave();
-        return;
-      }
-
-      s.categories = categories;
+      st(ctx).needsEmailLink = true;
       await ctx.reply(
-        "Step 1/7 — Select a category:",
-        categoryPickerKeyboard(categories),
+        "Please send your registered university email address to link this Telegram account to UPMS.",
+        cancelOnlyKeyboard(),
       );
       return ctx.wizard.next();
     },
-    // 1 — category
+    // 1 — link email
     async (ctx) => {
       if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "wizard_cancel") {
         await ctx.answerCbQuery();
         await ctx.reply("Cancelled.", mainMenuKeyboard());
-        await ctx.scene.leave();
+        await leaveWithMenu(ctx);
+        return;
+      }
+
+      if (!ctx.message || !("text" in ctx.message)) {
+        await ctx.reply("Send a valid email address, or tap Cancel.");
+        return;
+      }
+
+      const text = ctx.message.text.trim();
+      if (!EMAIL_REGEX.test(text)) {
+        await ctx.reply("That does not look like a valid email. Try again or tap Cancel.");
+        return;
+      }
+
+      const fromId = ctx.from?.id;
+      if (!fromId) {
+        await ctx.reply("Unable to identify your Telegram account.");
+        await leaveWithMenu(ctx);
+        return;
+      }
+
+      try {
+        const user = await upms.linkTelegramByEmail(text, String(fromId));
+        if (!user) {
+          await ctx.reply("Email not found. Use the address registered in UPMS, or tap Cancel.", cancelOnlyKeyboard());
+          return;
+        }
+        ctx.session.authenticatedTelegramId = String(fromId);
+        st(ctx).needsEmailLink = false;
+      } catch (e) {
+        await ctx.reply(
+          `Could not link account: ${e instanceof Error ? e.message : "Unknown error"}`,
+          cancelOnlyKeyboard(),
+        );
+        return;
+      }
+
+      try {
+        await presentCategoryStep(ctx, upms);
+      } catch {
+        await leaveWithMenu(ctx);
+        return;
+      }
+      return ctx.wizard.selectStep(2);
+    },
+    // 2 — category
+    async (ctx) => {
+      if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "wizard_cancel") {
+        await ctx.answerCbQuery();
+        await ctx.reply("Cancelled.", mainMenuKeyboard());
+        await leaveWithMenu(ctx);
         return;
       }
 
       if (!ctx.callbackQuery || !("data" in ctx.callbackQuery)) {
-        await ctx.reply("Please choose a category using the buttons.");
+        await ctx.reply("Please choose a category using the buttons below.");
         return;
       }
 
@@ -93,8 +238,8 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       const selected = categories.find((c) => c.id === categoryId);
       if (!selected) {
         await ctx.answerCbQuery();
-        await ctx.reply("Invalid category. Restart the flow.");
-        await ctx.scene.leave();
+        await ctx.reply("Invalid category. Start again from the menu.");
+        await leaveWithMenu(ctx);
         return;
       }
 
@@ -106,25 +251,19 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       if (selected.subcategories.length === 0) {
         s.subcategorySlug = "general";
         s.subcategoryLabel = "General";
-        await ctx.reply(
-          "Step 3/7 — Enter a short title for this achievement:",
-          Markup.inlineKeyboard([[Markup.button.callback("Cancel", "wizard_cancel")]]),
-        );
-        return ctx.wizard.selectStep(3);
+        await ctx.reply("Enter a short title for this achievement:", cancelOnlyKeyboard());
+        return ctx.wizard.selectStep(4);
       }
 
-      await ctx.reply(
-        "Step 2/7 — Select a subcategory:",
-        subcategoryPickerKeyboard(selected.subcategories),
-      );
+      await ctx.reply("Select a subcategory:", subcategoryPickerKeyboard(selected.subcategories));
       return ctx.wizard.next();
     },
-    // 2 — subcategory
+    // 3 — subcategory
     async (ctx) => {
       if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "wizard_cancel") {
         await ctx.answerCbQuery();
         await ctx.reply("Cancelled.", mainMenuKeyboard());
-        await ctx.scene.leave();
+        await leaveWithMenu(ctx);
         return;
       }
 
@@ -155,18 +294,15 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       s.subcategorySlug = sub.slug;
       s.subcategoryLabel = sub.label;
 
-      await ctx.reply(
-        "Step 3/7 — Enter a short title for this achievement:",
-        Markup.inlineKeyboard([[Markup.button.callback("Cancel", "wizard_cancel")]]),
-      );
+      await ctx.reply("Enter a short title for this achievement:", cancelOnlyKeyboard());
       return ctx.wizard.next();
     },
-    // 3 — title
+    // 4 — title
     async (ctx) => {
       if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "wizard_cancel") {
         await ctx.answerCbQuery();
         await ctx.reply("Cancelled.", mainMenuKeyboard());
-        await ctx.scene.leave();
+        await leaveWithMenu(ctx);
         return;
       }
 
@@ -176,18 +312,15 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       }
 
       st(ctx).title = ctx.message.text.trim();
-      await ctx.reply(
-        "Step 4/7 — Describe the achievement (details, dates, role):",
-        Markup.inlineKeyboard([[Markup.button.callback("Cancel", "wizard_cancel")]]),
-      );
+      await ctx.reply("Describe the achievement (details, dates, role):", cancelOnlyKeyboard());
       return ctx.wizard.next();
     },
-    // 4 — description
+    // 5 — description
     async (ctx) => {
       if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "wizard_cancel") {
         await ctx.answerCbQuery();
         await ctx.reply("Cancelled.", mainMenuKeyboard());
-        await ctx.scene.leave();
+        await leaveWithMenu(ctx);
         return;
       }
 
@@ -197,18 +330,15 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       }
 
       st(ctx).description = ctx.message.text.trim();
-      await ctx.reply(
-        "Step 5/7 — Upload proof (PDF, JPG, or PNG, max 10 MB).",
-        Markup.inlineKeyboard([[Markup.button.callback("Cancel", "wizard_cancel")]]),
-      );
+      await ctx.reply("Upload proof (PDF, JPG, or PNG, max 10 MB).", cancelOnlyKeyboard());
       return ctx.wizard.next();
     },
-    // 5 — file
+    // 6 — file
     async (ctx) => {
       if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "wizard_cancel") {
         await ctx.answerCbQuery();
         await ctx.reply("Cancelled.", mainMenuKeyboard());
-        await ctx.scene.leave();
+        await leaveWithMenu(ctx);
         return;
       }
 
@@ -246,7 +376,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       const tgId = ctx.session.authenticatedTelegramId;
       if (!tgId || !fileId || !mimeType) {
         await ctx.reply("Session error. Use /start again.");
-        await ctx.scene.leave();
+        await leaveWithMenu(ctx);
         return;
       }
 
@@ -267,32 +397,108 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
 
       st(ctx).proofFileUrl = upload.proofFileUrl;
 
-      const s = st(ctx);
       await ctx.reply(
-        [
-          "Step 6/7 — Confirm your submission:",
-          "",
-          `Category: ${s.categoryName}`,
-          `Subcategory: ${s.subcategoryLabel}`,
-          `Title: ${s.title}`,
-          `Description: ${s.description}`,
-          `Proof: uploaded (${upload.mimeType}, ${(upload.sizeBytes / 1024).toFixed(1)} KB)`,
-        ].join("\n"),
-        confirmKeyboard(),
+        "Optional: send a related link (https://…), or tap Skip.",
+        skipOptionalLinkKeyboard(),
       );
       return ctx.wizard.next();
     },
-    // 6 — confirm & submit
+    // 7 — optional link + persist item
+    async (ctx) => {
+      if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "wizard_cancel") {
+        await ctx.answerCbQuery();
+        await ctx.reply("Cancelled.", mainMenuKeyboard());
+        await leaveWithMenu(ctx);
+        return;
+      }
+
+      let externalLink: string | null = null;
+
+      if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "skip_external_link") {
+        await ctx.answerCbQuery();
+      } else if (ctx.message && "text" in ctx.message && ctx.message.text.trim()) {
+        const raw = ctx.message.text.trim();
+        if (!isProbablyUrl(raw)) {
+          await ctx.reply("Send a valid http(s) URL, or tap Skip.");
+          return;
+        }
+        externalLink = raw;
+      } else {
+        await ctx.reply("Send a link or tap Skip.");
+        return;
+      }
+
+      const s = st(ctx);
+      try {
+        await persistItemAndRecordPreview(ctx, upms, externalLink);
+      } catch (e) {
+        await ctx.reply(
+          `Could not save this item: ${e instanceof Error ? e.message : "Unknown error"}. Check your data and try again.`,
+          cancelOnlyKeyboard(),
+        );
+        return;
+      }
+
+      clearCurrentItem(s);
+      await ctx.reply("Item saved. Add another achievement line, or preview and submit.", addAnotherItemKeyboard());
+      return ctx.wizard.next();
+    },
+    // 8 — add another vs preview
     async (ctx) => {
       if (!ctx.callbackQuery || !("data" in ctx.callbackQuery)) {
-        await ctx.reply("Use Confirm or Cancel.");
+        await ctx.reply("Use the buttons below.");
+        return;
+      }
+
+      const data = ctx.callbackQuery.data;
+
+      if (data === "wizard_cancel") {
+        await ctx.answerCbQuery();
+        await ctx.reply("Cancelled.", mainMenuKeyboard());
+        await leaveWithMenu(ctx);
+        return;
+      }
+
+      if (data === "flow_add_more") {
+        await ctx.answerCbQuery();
+        try {
+          await presentCategoryStep(ctx, upms);
+        } catch {
+          await leaveWithMenu(ctx);
+          return;
+        }
+        return ctx.wizard.selectStep(2);
+      }
+
+      if (data === "flow_preview") {
+        await ctx.answerCbQuery();
+        const s = st(ctx);
+        const blocks = s.previewBlocks ?? [];
+        if (blocks.length === 0) {
+          await ctx.reply("No items yet. Add at least one achievement.", addAnotherItemKeyboard());
+          return;
+        }
+
+        const summary = ["Preview — submit when ready:", "", ...blocks.map((b, i) => `— Item ${i + 1} —\n${b}`)].join(
+          "\n\n",
+        );
+        await ctx.reply(summary, previewSubmitKeyboard());
+        return ctx.wizard.next();
+      }
+
+      await ctx.answerCbQuery();
+    },
+    // 9 — submit / cancel
+    async (ctx) => {
+      if (!ctx.callbackQuery || !("data" in ctx.callbackQuery)) {
+        await ctx.reply("Use Submit or Cancel.");
         return;
       }
 
       if (ctx.callbackQuery.data === "wizard_cancel") {
         await ctx.answerCbQuery();
         await ctx.reply("Cancelled.", mainMenuKeyboard());
-        await ctx.scene.leave();
+        await leaveWithMenu(ctx);
         return;
       }
 
@@ -301,44 +507,20 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
         return;
       }
 
-      const s = st(ctx);
       const tgId = ctx.session.authenticatedTelegramId;
-
-      if (
-        !tgId ||
-        !s.categoryId ||
-        !s.subcategorySlug ||
-        !s.title ||
-        !s.description ||
-        !s.proofFileUrl
-      ) {
+      const s = st(ctx);
+      if (!tgId || !s.submissionId || !s.previewBlocks?.length) {
         await ctx.answerCbQuery();
-        await ctx.reply("Incomplete data. Start again from the menu.");
-        await ctx.scene.leave();
+        await ctx.reply("Incomplete session. Start again from the menu.", mainMenuKeyboard());
+        await leaveWithMenu(ctx);
         return;
       }
 
       await ctx.answerCbQuery("Submitting…");
 
       try {
-        const result = await upms.createStudentSubmission({
-          telegramId: tgId,
-          categoryId: s.categoryId,
-          subcategory: s.subcategorySlug,
-          title: s.title,
-          description: s.description,
-          proofFileUrl: s.proofFileUrl,
-        });
-
-        await ctx.reply(
-          [
-            "Step 7/7 — Submitted successfully.",
-            `Submission ID: ${result.submissionId}`,
-            "",
-            'You can track it under "My Submissions".',
-          ].join("\n"),
-          mainMenuKeyboard(),
-        );
+        await upms.submitDraft(tgId, s.submissionId);
+        await ctx.reply(SUCCESS_MSG, mainMenuKeyboard());
       } catch (e) {
         await ctx.reply(
           `Submission failed: ${e instanceof Error ? e.message : "Unknown error"}`,
@@ -346,7 +528,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
         );
       }
 
-      await ctx.scene.leave();
+      await leaveWithMenu(ctx);
     },
   );
 }

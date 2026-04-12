@@ -141,6 +141,46 @@ export class UpmsService {
     return payload.data;
   }
 
+  async createDraftSubmission(telegramId: string): Promise<{ submissionId: string }> {
+    return this.requestJson<{ submissionId: string }>("/api/bot/submissions/draft", {
+      method: "POST",
+      body: JSON.stringify({ telegram_id: telegramId }),
+    });
+  }
+
+  async addSubmissionItem(input: {
+    telegramId: string;
+    submissionId: string;
+    categoryId: string;
+    subcategory: string | null;
+    title: string;
+    description: string;
+    proofFileUrl: string;
+    externalLink?: string | null;
+  }): Promise<{ itemId: string }> {
+    return this.requestJson<{ itemId: string }>("/api/bot/submissions/items", {
+      method: "POST",
+      body: JSON.stringify({
+        telegram_id: input.telegramId,
+        submission_id: input.submissionId,
+        category_id: input.categoryId,
+        subcategory: input.subcategory,
+        title: input.title,
+        description: input.description,
+        proof_file_url: input.proofFileUrl,
+        external_link: input.externalLink ?? null,
+      }),
+    });
+  }
+
+  async submitDraft(telegramId: string, submissionId: string): Promise<void> {
+    await this.requestJson<{ ok: boolean }>(`/api/bot/submissions/${submissionId}/submit`, {
+      method: "POST",
+      body: JSON.stringify({ telegram_id: telegramId }),
+    });
+  }
+
+  /** @deprecated Legacy single-shot create; prefer draft + items + submit. */
   async createStudentSubmission(input: {
     telegramId: string;
     categoryId: string;

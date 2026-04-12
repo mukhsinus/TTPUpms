@@ -6,6 +6,16 @@ import { normalizeRole, type AppRole } from "./rbac";
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? import.meta.env.VITE_API_BASE_URL ?? "";
 const AUTH_TOKEN_KEY = "upms_admin_token";
 
+/** Treat JWT as expired this many ms before `exp` to avoid edge 401s from clock skew. */
+const JWT_EXPIRY_SKEW_MS = 60_000;
+
+let sessionRedirectInProgress = false;
+
+interface RequestResultOptions {
+  /** When true, a 401 does not clear storage or navigate (e.g. login probe before token is stored). */
+  skipUnauthorizedRedirect?: boolean;
+}
+
 export { ApiError };
 
 interface ApiResponse<T> {
@@ -85,7 +95,46 @@ function getAuthToken(): string {
 }
 
 function setAuthToken(token: string): void {
+  sessionRedirectInProgress = false;
   localStorage.setItem(AUTH_TOKEN_KEY, token);
+}
+
+function getTokenExpiryMs(token: string): number | null {
+  const payload = decodeJwtPayload(token);
+  if (!payload || typeof payload.exp !== "number") return null;
+  return payload.exp * 1000;
+}
+
+function isAccessTokenExpired(token: string): boolean {
+  const expMs = getTokenExpiryMs(token);
+  if (expMs === null) return true;
+  return Date.now() >= expMs - JWT_EXPIRY_SKEW_MS;
+}
+
+function sessionIsValid(): boolean {
+  const token = getAuthToken();
+  if (!token) return false;
+  if (isAccessTokenExpired(token)) return false;
+  const payload = decodeJwtPayload(token);
+  if (!payload || typeof payload.sub !== "string") return false;
+  return true;
+}
+
+function invalidateSessionAndRedirect(): void {
+  if (typeof window === "undefined") return;
+  if (sessionRedirectInProgress) return;
+  sessionRedirectInProgress = true;
+  try {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+  } catch {
+    /* ignore */
+  }
+  const path = window.location.pathname;
+  if (path === "/login") {
+    sessionRedirectInProgress = false;
+    return;
+  }
+  window.location.replace("/login");
 }
 
 function parseUnknownResponseBody(rawText: string): unknown {
@@ -108,7 +157,12 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
   }
 }
 
-async function requestResult<T>(path: string, init?: RequestInit, token?: string): Promise<ApiResult<T>> {
+async function requestResult<T>(
+  path: string,
+  init?: RequestInit,
+  token?: string,
+  options?: RequestResultOptions,
+): Promise<ApiResult<T>> {
   const headers = new Headers(init?.headers);
   const authToken = token ?? getAuthToken();
 
@@ -136,6 +190,9 @@ async function requestResult<T>(path: string, init?: RequestInit, token?: string
 
   if (!response.ok || payload?.error) {
     if (response.status === 401) {
+      if (!options?.skipUnauthorizedRedirect) {
+        invalidateSessionAndRedirect();
+      }
       return { data: null, error: "Unauthorized. Please login again.", statusCode: 401 };
     }
     if (response.status === 403) {
@@ -164,15 +221,22 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  /** True when a non-expired JWT with `sub` is stored (client-side check only). */
+  isSessionValid(): boolean {
+    return sessionIsValid();
+  },
+
   isLoggedIn(): boolean {
-    return Boolean(getAuthToken());
+    return sessionIsValid();
   },
 
   logout(): void {
+    sessionRedirectInProgress = false;
     localStorage.removeItem(AUTH_TOKEN_KEY);
   },
 
   getSessionUser(): SessionUser | null {
+    if (!sessionIsValid()) return null;
     const token = getAuthToken();
     if (!token) return null;
     const payload = decodeJwtPayload(token);
@@ -198,7 +262,12 @@ export const api = {
 
   async loginWithCredentials(email: string, password: string): Promise<void> {
     const token = await signInWithSupabasePassword(email, password);
-    const result = await requestResult<Submission[]>("/api/submissions", { method: "GET" }, token);
+    const result = await requestResult<Submission[]>(
+      "/api/submissions",
+      { method: "GET" },
+      token,
+      { skipUnauthorizedRedirect: true },
+    );
     if (result.error) {
       throw new ApiError(result.error, result.statusCode);
     }

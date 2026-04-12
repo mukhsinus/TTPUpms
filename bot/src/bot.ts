@@ -82,10 +82,6 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
 
   bot.action("menu_submit", async (ctx) => {
     await ctx.answerCbQuery();
-    if (!ctx.session.authenticatedTelegramId) {
-      await ctx.reply("Please use /start and link your account first.");
-      return;
-    }
     await ctx.scene.enter("submit-submission");
   });
 

@@ -11,6 +11,10 @@ export interface CategoryCatalogEntry {
 }
 
 export interface SubmitFlowState extends Scenes.WizardSessionData {
+  /** True while waiting for email text (unlinked user). */
+  needsEmailLink?: boolean;
+  /** Draft submission id (POST /api/bot/submissions/draft). */
+  submissionId?: string;
   categories?: CategoryCatalogEntry[];
   categoryId?: string;
   categoryName?: string;
@@ -19,6 +23,8 @@ export interface SubmitFlowState extends Scenes.WizardSessionData {
   title?: string;
   description?: string;
   proofFileUrl?: string;
+  /** Human-readable lines for final preview (one block per item). */
+  previewBlocks?: string[];
 }
 
 export interface BotSession extends Scenes.WizardSession<SubmitFlowState> {

@@ -15,7 +15,7 @@ export function LoginPage(): ReactElement {
   const supabaseEnv = validateSupabaseEnvForUi();
 
   useEffect(() => {
-    if (api.isLoggedIn()) {
+    if (api.isSessionValid()) {
       navigate("/dashboard", { replace: true });
     }
   }, [navigate]);

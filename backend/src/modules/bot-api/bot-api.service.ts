@@ -124,6 +124,231 @@ export class BotApiService {
     return [...byId.values()];
   }
 
+  /** Draft submission for Telegram multi-item flow (POST /api/submissions equivalent). */
+  async createDraftSubmissionForBot(telegramId: string): Promise<{ submissionId: string }> {
+    const user = await this.findOrCreateUserByTelegramId(telegramId);
+    const result = await this.app.db.query<{ id: string }>(
+      `
+      INSERT INTO submissions (user_id, title, description, status)
+      VALUES ($1, $2, $3, 'draft')
+      RETURNING id
+      `,
+      [user.id, "Telegram achievement submission", null],
+    );
+
+    return { submissionId: result.rows[0].id };
+  }
+
+  /**
+   * Add one line item to a draft submission (POST /api/submission-items equivalent).
+   */
+  async addSubmissionItemFromBot(input: {
+    telegramId: string;
+    submissionId: string;
+    categoryId: string;
+    subcategory: string | null;
+    title: string;
+    description: string;
+    proofFileUrl: string;
+    externalLink?: string | null;
+  }): Promise<{ itemId: string }> {
+    this.validateProofStorageUrl(input.proofFileUrl);
+
+    const user = await this.findOrCreateUserByTelegramId(input.telegramId);
+    const client = await this.app.db.connect();
+    try {
+      await client.query("BEGIN");
+
+      const subRow = await client.query<{ user_id: string; status: string }>(
+        `SELECT user_id, status FROM submissions WHERE id = $1 FOR UPDATE`,
+        [input.submissionId],
+      );
+
+      const submission = subRow.rows[0];
+      if (!submission) {
+        throw new Error("Submission not found");
+      }
+      if (submission.user_id !== user.id) {
+        throw new Error("You cannot modify this submission");
+      }
+      if (submission.status !== "draft" && submission.status !== "needs_revision") {
+        throw new Error("Items can only be added while the submission is a draft");
+      }
+
+      const cat = await client.query<{
+        id: string;
+        name: string;
+        max_score: string;
+      }>(
+        `
+        SELECT id, name, max_score
+        FROM categories
+        WHERE id = $1
+        `,
+        [input.categoryId],
+      );
+
+      const categoryRow = cat.rows[0];
+      if (!categoryRow) {
+        throw new Error("Unknown category");
+      }
+
+      const subCount = await client.query<{ c: string }>(
+        `
+        SELECT COUNT(*)::text AS c
+        FROM category_subcategories
+        WHERE category_id = $1
+        `,
+        [input.categoryId],
+      );
+
+      const hasSubs = Number(subCount.rows[0]?.c ?? "0") > 0;
+      let subcategoryValue: string | null = input.subcategory;
+
+      if (hasSubs) {
+        if (!input.subcategory) {
+          throw new Error("Subcategory is required for this category");
+        }
+        const subCheck = await client.query<{ ok: boolean }>(
+          `
+          SELECT true AS ok
+          FROM category_subcategories
+          WHERE category_id = $1 AND slug = $2
+          LIMIT 1
+          `,
+          [input.categoryId, input.subcategory],
+        );
+
+        if (!subCheck.rows[0]) {
+          throw new Error("Invalid subcategory for this category");
+        }
+      } else {
+        subcategoryValue = input.subcategory ?? "general";
+      }
+
+      const proposedScore = Number(categoryRow.max_score);
+
+      const ext =
+        input.externalLink && input.externalLink.trim() !== "" ? input.externalLink.trim() : null;
+
+      const insert = await client.query<{ id: string }>(
+        `
+        INSERT INTO submission_items (
+          submission_id,
+          user_id,
+          category_id,
+          category,
+          subcategory,
+          title,
+          description,
+          proof_file_url,
+          external_link,
+          proposed_score,
+          status
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending')
+        RETURNING id
+        `,
+        [
+          input.submissionId,
+          user.id,
+          input.categoryId,
+          categoryRow.name,
+          subcategoryValue,
+          input.title,
+          input.description,
+          input.proofFileUrl,
+          ext,
+          proposedScore,
+        ],
+      );
+
+      await client.query("COMMIT");
+      this.app.log.info(
+        {
+          telegram_id: input.telegramId,
+          user_id: user.id,
+          submission_id: input.submissionId,
+          item_id: insert.rows[0].id,
+        },
+        "Added submission item from bot",
+      );
+
+      return { itemId: insert.rows[0].id };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /** PATCH /api/submissions/:id/submit equivalent for Telegram bot. */
+  async submitDraftFromBot(telegramId: string, submissionId: string): Promise<void> {
+    const user = await this.findOrCreateUserByTelegramId(telegramId);
+
+    const client = await this.app.db.connect();
+    try {
+      await client.query("BEGIN");
+
+      const subRow = await client.query<{ user_id: string; status: string; title: string }>(
+        `SELECT user_id, status, title FROM submissions WHERE id = $1 FOR UPDATE`,
+        [submissionId],
+      );
+
+      const submission = subRow.rows[0];
+      if (!submission) {
+        throw new Error("Submission not found");
+      }
+      if (submission.user_id !== user.id) {
+        throw new Error("Only the submission owner can submit");
+      }
+
+      if (submission.status !== "draft" && submission.status !== "needs_revision") {
+        throw new Error(`Submit is not allowed from status "${submission.status}"`);
+      }
+
+      const itemsCount = await client.query<{ c: string }>(
+        `SELECT COUNT(*)::text AS c FROM submission_items WHERE submission_id = $1`,
+        [submissionId],
+      );
+
+      if (Number(itemsCount.rows[0]?.c ?? "0") < 1) {
+        throw new Error("Add at least one achievement item before submitting");
+      }
+
+      await client.query(
+        `
+        UPDATE submissions
+        SET status = 'submitted', submitted_at = NOW(), updated_at = NOW()
+        WHERE id = $1
+        `,
+        [submissionId],
+      );
+
+      await client.query("COMMIT");
+
+      this.app.log.info(
+        { telegram_id: telegramId, user_id: user.id, submission_id: submissionId },
+        "Bot submitted draft submission",
+      );
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  private validateProofStorageUrl(url: string): void {
+    if (isUnsafeTelegramProofUrl(url)) {
+      throw new Error("Unsafe proof URL is not allowed");
+    }
+    if (!isSafeProofStorageUrl(url)) {
+      throw new Error("Proof URL must be a safe storage URL");
+    }
+  }
+
   async createStudentSubmissionFromBot(input: {
     telegramId: string;
     categoryId: string;
@@ -132,12 +357,7 @@ export class BotApiService {
     description: string;
     proofFileUrl: string;
   }): Promise<{ submissionId: string }> {
-    if (isUnsafeTelegramProofUrl(input.proofFileUrl)) {
-      throw new Error("Unsafe proof URL is not allowed");
-    }
-    if (!isSafeProofStorageUrl(input.proofFileUrl)) {
-      throw new Error("Proof URL must be a safe storage URL");
-    }
+    this.validateProofStorageUrl(input.proofFileUrl);
 
     const user = await this.findOrCreateUserByTelegramId(input.telegramId);
     const client = await this.app.db.connect();
