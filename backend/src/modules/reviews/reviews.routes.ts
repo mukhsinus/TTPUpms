@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { authMiddleware } from "../../middleware/auth.middleware";
 import { allowRoles } from "../../middleware/role.middleware";
 import { NotificationService } from "../notifications/notification.service";
+import { ScoringService } from "../scoring/scoring.service";
 import { ReviewsController } from "./reviews.controller";
 import { ReviewsRepository } from "./reviews.repository";
 import { ReviewsService } from "./reviews.service";
@@ -9,10 +10,16 @@ import { ReviewsService } from "./reviews.service";
 export async function reviewsRoutes(app: FastifyInstance): Promise<void> {
   const repository = new ReviewsRepository(app);
   const notifications = new NotificationService(app);
-  const service = new ReviewsService(repository, notifications);
+  const scoring = new ScoringService(app);
+  const service = new ReviewsService(repository, notifications, scoring);
   const controller = new ReviewsController(service);
   const reviewerGuard = allowRoles(["reviewer", "admin"]);
 
+  app.patch(
+    "/items/:itemId",
+    { preHandler: [authMiddleware, reviewerGuard] },
+    controller.patchSubmissionItem,
+  );
   app.get("/submissions", { preHandler: [authMiddleware, reviewerGuard] }, controller.getReviewableSubmissions);
   app.get(
     "/submissions/:submissionId/items",

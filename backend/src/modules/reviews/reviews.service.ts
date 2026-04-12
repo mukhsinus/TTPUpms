@@ -5,24 +5,25 @@ import type {
 } from "./reviews.repository";
 import type { CompleteSubmissionReviewBody, ReviewItemBody } from "./reviews.schema";
 import type { NotificationService } from "../notifications/notification.service";
-import { assertValidTransition } from "../submissions/submission-transitions";
+import type { ScoringService } from "../scoring/scoring.service";
+import {
+  assertValidTransition,
+  REVIEW_ACTIVE_STATUSES,
+} from "../submissions/submission-transitions";
 import { ServiceError } from "../../utils/service-error";
 
 type Role = "student" | "reviewer" | "admin";
-type SubmissionStatus = "draft" | "submitted" | "under_review" | "approved" | "rejected" | "needs_revision";
 
 export interface AuthUser {
   id: string;
   role: Role;
 }
 
-/** Item-level review: owner must have submitted; under_review continues in-progress review. */
-const ITEM_REVIEW_STATUSES = new Set<SubmissionStatus>(["submitted", "under_review"]);
-
 export class ReviewsService {
   constructor(
     private readonly repository: ReviewsRepository,
     private readonly notifications: NotificationService,
+    private readonly scoring: ScoringService,
   ) {}
 
   async getReviewableSubmissions(user: AuthUser): Promise<ReviewSubmissionEntity[]> {
@@ -30,7 +31,11 @@ export class ReviewsService {
       return this.repository.findAllSubmissions();
     }
 
-    return this.repository.findAssignedSubmissions(user.id);
+    if (user.role === "reviewer") {
+      return this.repository.findSubmissionsAwaitingReview();
+    }
+
+    throw new ServiceError(403, "Forbidden");
   }
 
   async getSubmissionItemsForReview(
@@ -41,6 +46,19 @@ export class ReviewsService {
     return this.repository.findSubmissionItems(submissionId);
   }
 
+  async patchSubmissionItem(
+    user: AuthUser,
+    itemId: string,
+    body: ReviewItemBody,
+  ): Promise<ReviewSubmissionItemEntity> {
+    const submissionId = await this.repository.findSubmissionIdForItem(itemId);
+    if (!submissionId) {
+      throw new ServiceError(404, "Submission item not found");
+    }
+
+    return this.reviewSubmissionItem(user, submissionId, itemId, body);
+  }
+
   async reviewSubmissionItem(
     user: AuthUser,
     submissionId: string,
@@ -49,7 +67,7 @@ export class ReviewsService {
   ): Promise<ReviewSubmissionItemEntity> {
     const submission = await this.assertReviewerAccess(user, submissionId);
 
-    if (!ITEM_REVIEW_STATUSES.has(submission.status)) {
+    if (!REVIEW_ACTIVE_STATUSES.has(submission.status)) {
       throw new ServiceError(
         409,
         `Submission in status "${submission.status}" cannot be reviewed`,
@@ -61,17 +79,21 @@ export class ReviewsService {
       throw new ServiceError(404, "Submission item not found");
     }
 
-    if (body.score > item.proposedScore) {
-      throw new ServiceError(
-        400,
-        `Score cannot exceed max proposed score (${item.proposedScore})`,
-      );
-    }
+    await this.assertValidItemScore(item, body.score);
 
+    let reviewed: ReviewSubmissionItemEntity;
     if (submission.status === "submitted") {
       assertValidTransition("submitted", "under_review");
-      return this.repository.reviewItemPromotingFromSubmitted({
+      reviewed = await this.repository.reviewItemPromotingFromSubmitted({
         submissionId,
+        itemId,
+        reviewerId: user.id,
+        score: body.score,
+        comment: body.comment,
+        decision: body.decision,
+      });
+    } else {
+      reviewed = await this.repository.reviewItem({
         itemId,
         reviewerId: user.id,
         score: body.score,
@@ -80,13 +102,8 @@ export class ReviewsService {
       });
     }
 
-    return this.repository.reviewItem({
-      itemId,
-      reviewerId: user.id,
-      score: body.score,
-      comment: body.comment,
-      decision: body.decision,
-    });
+    await this.scoring.syncSubmissionTotalPoints(submissionId);
+    return reviewed;
   }
 
   async completeSubmissionReview(
@@ -111,19 +128,19 @@ export class ReviewsService {
     }
 
     const unreviewedCount = await this.repository.countUnreviewedItems(submissionId);
-    if (body.decision === "approved" && unreviewedCount > 0) {
+    if (unreviewedCount > 0) {
       throw new ServiceError(
         409,
-        "Each submission item must be reviewed before submission approval",
+        "Each submission item must be reviewed before the submission can be finalized",
       );
     }
 
-    const totalAssignedScore = items.reduce((sum, item) => sum + (item.reviewerScore ?? 0), 0);
+    const scoringResult = await this.scoring.syncSubmissionTotalPoints(submissionId);
 
     await this.repository.upsertSubmissionReview({
       submissionId,
       reviewerId: user.id,
-      score: totalAssignedScore,
+      score: scoringResult.totalScore,
       decision: body.decision,
       comment: body.comment,
     });
@@ -145,6 +162,27 @@ export class ReviewsService {
     return updated;
   }
 
+  private async assertValidItemScore(item: ReviewSubmissionItemEntity, score: number): Promise<void> {
+    if (score > item.proposedScore) {
+      throw new ServiceError(
+        400,
+        `Score cannot exceed the proposed maximum (${item.proposedScore})`,
+      );
+    }
+
+    const bounds = await this.repository.findCategoryBoundsForItem(item.id);
+    if (!bounds) {
+      return;
+    }
+
+    if (score < bounds.minScore || score > bounds.maxScore) {
+      throw new ServiceError(
+        400,
+        `Score must be within the category range ${bounds.minScore}–${bounds.maxScore}`,
+      );
+    }
+  }
+
   private async assertReviewerAccess(
     user: AuthUser,
     submissionId: string,
@@ -158,12 +196,14 @@ export class ReviewsService {
       return submission;
     }
 
-    const assigned = await this.repository.isReviewerAssigned(submissionId, user.id);
-    if (!assigned) {
-      throw new ServiceError(403, "Reviewer is not assigned to this submission");
+    if (user.role === "reviewer") {
+      if (submission.status === "draft") {
+        throw new ServiceError(403, "Submission is not available for review");
+      }
+      return submission;
     }
 
-    return submission;
+    throw new ServiceError(403, "Forbidden");
   }
 }
 

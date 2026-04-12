@@ -6,17 +6,26 @@ interface SubmissionOwnerRow {
   status: "draft" | "submitted" | "under_review" | "approved" | "rejected" | "needs_revision";
 }
 
+interface CategoryBoundsRow {
+  min_score: string;
+  max_score: string;
+}
+
 interface SubmissionItemRow {
   id: string;
   submission_id: string;
   user_id: string;
+  category_id: string | null;
   category: string;
   subcategory: string | null;
-  activity_date: string | null;
   title: string;
   description: string | null;
   proof_file_url: string | null;
+  external_link: string | null;
   proposed_score: string;
+  approved_score: string | null;
+  status: "pending" | "approved" | "rejected";
+  reviewer_comment: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -25,13 +34,17 @@ export interface SubmissionItemEntity {
   id: string;
   submissionId: string;
   userId: string;
+  categoryId: string | null;
   category: string;
   subcategory: string | null;
-  activityDate: string | null;
   title: string;
   description: string | null;
   proofFileUrl: string | null;
+  externalLink: string | null;
   proposedScore: number;
+  approvedScore: number | null;
+  status: "pending" | "approved" | "rejected";
+  reviewerComment: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -47,17 +60,27 @@ function mapItem(row: SubmissionItemRow): SubmissionItemEntity {
     id: row.id,
     submissionId: row.submission_id,
     userId: row.user_id,
+    categoryId: row.category_id,
     category: row.category,
     subcategory: row.subcategory,
-    activityDate: row.activity_date,
     title: row.title,
     description: row.description,
     proofFileUrl: row.proof_file_url,
+    externalLink: row.external_link,
     proposedScore: Number(row.proposed_score),
+    approvedScore: row.approved_score === null ? null : Number(row.approved_score),
+    status: row.status,
+    reviewerComment: row.reviewer_comment,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
+
+const itemSelectColumns = `
+  id, submission_id, user_id, category_id, category, subcategory, title, description,
+  proof_file_url, external_link, proposed_score, approved_score, status, reviewer_comment,
+  created_at, updated_at
+`;
 
 export class SubmissionItemsRepository {
   constructor(private readonly app: FastifyInstance) {}
@@ -83,14 +106,62 @@ export class SubmissionItemsRepository {
     };
   }
 
+  async isReviewerForSubmission(submissionId: string, reviewerId: string): Promise<boolean> {
+    const result = await this.app.db.query<{ ok: boolean }>(
+      `
+      SELECT EXISTS (
+        SELECT 1 FROM reviews
+        WHERE submission_id = $1 AND reviewer_id = $2
+      ) AS ok
+      `,
+      [submissionId, reviewerId],
+    );
+
+    return Boolean(result.rows[0]?.ok);
+  }
+
+  async findCategoryBounds(categoryId: string): Promise<{ minScore: number; maxScore: number } | null> {
+    const result = await this.app.db.query<CategoryBoundsRow>(
+      `
+      SELECT min_score, max_score
+      FROM categories
+      WHERE id = $1
+      `,
+      [categoryId],
+    );
+
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+
+    return {
+      minScore: Number(row.min_score),
+      maxScore: Number(row.max_score),
+    };
+  }
+
+  async resolveCategoryName(categoryId: string): Promise<string | null> {
+    const result = await this.app.db.query<{ name: string }>(
+      `
+      SELECT name FROM categories WHERE id = $1
+      `,
+      [categoryId],
+    );
+
+    return result.rows[0]?.name ?? null;
+  }
+
   async createItem(input: {
     submissionId: string;
     userId: string;
-    category: string;
+    categoryId: string;
+    categoryName: string;
     subcategory?: string;
-    activityDate?: string;
     title: string;
     description?: string;
+    proofFileUrl?: string;
+    externalLink?: string;
     proposedScore: number;
   }): Promise<SubmissionItemEntity> {
     const result = await this.app.db.query<SubmissionItemRow>(
@@ -98,24 +169,29 @@ export class SubmissionItemsRepository {
       INSERT INTO submission_items (
         submission_id,
         user_id,
+        category_id,
         category,
         subcategory,
-        activity_date,
         title,
         description,
-        proposed_score
+        proof_file_url,
+        external_link,
+        proposed_score,
+        status
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      RETURNING id, submission_id, user_id, category, subcategory, activity_date, title, description, proof_file_url, proposed_score, created_at, updated_at
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending')
+      RETURNING ${itemSelectColumns}
       `,
       [
         input.submissionId,
         input.userId,
-        input.category,
+        input.categoryId,
+        input.categoryName,
         input.subcategory ?? null,
-        input.activityDate ?? null,
         input.title,
         input.description ?? null,
+        input.proofFileUrl ?? null,
+        input.externalLink ?? null,
         input.proposedScore,
       ],
     );
@@ -123,10 +199,24 @@ export class SubmissionItemsRepository {
     return mapItem(result.rows[0] as SubmissionItemRow);
   }
 
+  async findItemsBySubmissionId(submissionId: string): Promise<SubmissionItemEntity[]> {
+    const result = await this.app.db.query<SubmissionItemRow>(
+      `
+      SELECT ${itemSelectColumns}
+      FROM submission_items
+      WHERE submission_id = $1
+      ORDER BY created_at ASC
+      `,
+      [submissionId],
+    );
+
+    return result.rows.map((row) => mapItem(row));
+  }
+
   async findItemById(itemId: string): Promise<SubmissionItemEntity | null> {
     const result = await this.app.db.query<SubmissionItemRow>(
       `
-      SELECT id, submission_id, user_id, category, subcategory, activity_date, title, description, proof_file_url, proposed_score, created_at, updated_at
+      SELECT ${itemSelectColumns}
       FROM submission_items
       WHERE id = $1
       `,
@@ -138,59 +228,6 @@ export class SubmissionItemsRepository {
     }
 
     return mapItem(result.rows[0]);
-  }
-
-  async updateItem(
-    itemId: string,
-    patch: {
-      category?: string;
-      subcategory?: string;
-      activityDate?: string;
-      title?: string;
-      description?: string;
-      proposedScore?: number;
-    },
-  ): Promise<SubmissionItemEntity> {
-    const result = await this.app.db.query<SubmissionItemRow>(
-      `
-      UPDATE submission_items
-      SET
-        category = COALESCE($2, category),
-        subcategory = COALESCE($3, subcategory),
-        activity_date = COALESCE($4::date, activity_date),
-        title = COALESCE($5, title),
-        description = COALESCE($6, description),
-        proposed_score = COALESCE($7, proposed_score),
-        updated_at = NOW()
-      WHERE id = $1
-      RETURNING id, submission_id, user_id, category, subcategory, activity_date, title, description, proof_file_url, proposed_score, created_at, updated_at
-      `,
-      [
-        itemId,
-        patch.category ?? null,
-        patch.subcategory ?? null,
-        patch.activityDate ?? null,
-        patch.title ?? null,
-        patch.description ?? null,
-        patch.proposedScore ?? null,
-      ],
-    );
-
-    return mapItem(result.rows[0] as SubmissionItemRow);
-  }
-
-  async updateProofFileUrl(itemId: string, proofFileUrl: string): Promise<SubmissionItemEntity> {
-    const result = await this.app.db.query<SubmissionItemRow>(
-      `
-      UPDATE submission_items
-      SET proof_file_url = $2, updated_at = NOW()
-      WHERE id = $1
-      RETURNING id, submission_id, user_id, category, subcategory, activity_date, title, description, proof_file_url, proposed_score, created_at, updated_at
-      `,
-      [itemId, proofFileUrl],
-    );
-
-    return mapItem(result.rows[0] as SubmissionItemRow);
   }
 
   async deleteItem(itemId: string): Promise<void> {

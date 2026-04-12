@@ -30,7 +30,7 @@ export function AppLayout({ children, onLogout }: AppLayoutProps): ReactElement 
         <div className="sidebar-brand">
           <div className="brand-logo">TTPU</div>
           <div>
-            <strong>UPMS Admin</strong>
+            <strong>PMS Admin</strong>
             <p>Achievement Management</p>
           </div>
         </div>

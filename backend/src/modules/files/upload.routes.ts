@@ -3,7 +3,7 @@ import { z } from "zod";
 import { authMiddleware } from "../../middleware/auth.middleware";
 import { errorCodeFromStatus, failure, success } from "../../utils/http-response";
 import { AntiFraudService } from "../validation/anti-fraud.service";
-import { FileService, FileServiceError } from "./file.service";
+import { FileServiceError, UploadService } from "./upload.service";
 
 const uploadFieldsSchema = z.object({
   submissionId: z.string().uuid(),
@@ -38,14 +38,17 @@ function getMultipartFieldValue(
   return undefined;
 }
 
+const JSON_UPLOAD_BODY_LIMIT = 15 * 1024 * 1024;
+
 export async function uploadRoutes(app: FastifyInstance): Promise<void> {
   const antiFraud = new AntiFraudService(app);
-  const fileService = new FileService(app, antiFraud);
+  const uploadService = new UploadService(app, antiFraud);
 
   app.post(
     "/upload",
     {
       preHandler: authMiddleware,
+      bodyLimit: JSON_UPLOAD_BODY_LIMIT,
       config: { rateLimit: { max: 30, timeWindow: "1 minute" } },
     },
     async (request, reply) => {
@@ -66,7 +69,7 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
             return;
           }
 
-          const result = await fileService.uploadFile({
+          const result = await uploadService.uploadFile({
             user: request.user,
             submissionId: body.submissionId,
             submissionItemId: body.submissionItemId,
@@ -96,6 +99,14 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
           return;
         }
 
+        const mimeParse = z
+          .enum(["application/pdf", "image/jpeg", "image/png"])
+          .safeParse(multipartFile.mimetype);
+        if (!mimeParse.success) {
+          reply.status(400).send(failure("Only PDF, JPG, and PNG files are allowed", "BAD_REQUEST"));
+          return;
+        }
+
         const parsedFields = uploadFieldsSchema.parse({
           submissionId: getMultipartFieldValue(
             multipartFile.fields as unknown as Record<string, unknown>,
@@ -109,12 +120,12 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
 
         const bytes = await multipartFile.toBuffer();
 
-        const result = await fileService.uploadFile({
+        const result = await uploadService.uploadFile({
           user: request.user,
           submissionId: parsedFields.submissionId,
           submissionItemId: parsedFields.submissionItemId,
           filename: multipartFile.filename,
-          mimeType: multipartFile.mimetype,
+          mimeType: mimeParse.data,
           bytes,
         });
 

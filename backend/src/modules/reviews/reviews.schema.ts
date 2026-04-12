@@ -9,6 +9,10 @@ export const reviewSubmissionItemParamsSchema = z.object({
   itemId: z.string().uuid(),
 });
 
+export const patchReviewItemParamsSchema = z.object({
+  itemId: z.string().uuid(),
+});
+
 export const reviewItemBodySchema = z.object({
   score: z.number().min(0),
   comment: z.string().trim().max(5000).optional(),

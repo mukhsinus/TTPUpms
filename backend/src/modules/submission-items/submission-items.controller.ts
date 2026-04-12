@@ -2,16 +2,28 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import { ZodError } from "zod";
 import { errorCodeFromStatus, failure, success } from "../../utils/http-response";
 import {
-  addExternalLinkBodySchema,
   addSubmissionItemBodySchema,
-  attachFileBodySchema,
   submissionItemParamsSchema,
-  updateSubmissionItemBodySchema,
 } from "./submission-items.schema";
 import type { SubmissionItemsService } from "./submission-items.service";
 
 export class SubmissionItemsController {
   constructor(private readonly service: SubmissionItemsService) {}
+
+  listItems = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!request.user) {
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
+      return;
+    }
+
+    try {
+      const params = submissionItemParamsSchema.pick({ submissionId: true }).parse(request.params);
+      const data = await this.service.listItems(request.user, params.submissionId);
+      reply.status(200).send(success(data));
+    } catch (error) {
+      this.handleError(reply, error);
+    }
+  };
 
   addItem = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (!request.user) {
@@ -30,23 +42,6 @@ export class SubmissionItemsController {
     }
   };
 
-  updateItem = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
-    if (!request.user) {
-      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
-      return;
-    }
-
-    try {
-      const params = submissionItemParamsSchema.parse(request.params);
-      const body = updateSubmissionItemBodySchema.parse(request.body);
-      const data = await this.service.updateItem(request.user, params.submissionId, params.itemId, body);
-
-      reply.status(200).send(success(data));
-    } catch (error) {
-      this.handleError(reply, error);
-    }
-  };
-
   deleteItem = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (!request.user) {
       reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
@@ -58,50 +53,6 @@ export class SubmissionItemsController {
       await this.service.deleteItem(request.user, params.submissionId, params.itemId);
 
       reply.status(200).send(success({ message: "Submission item deleted" }));
-    } catch (error) {
-      this.handleError(reply, error);
-    }
-  };
-
-  attachFile = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
-    if (!request.user) {
-      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
-      return;
-    }
-
-    try {
-      const params = submissionItemParamsSchema.parse(request.params);
-      const body = attachFileBodySchema.parse(request.body);
-      const data = await this.service.attachFile(
-        request.user,
-        params.submissionId,
-        params.itemId,
-        body.proof_file_url,
-      );
-
-      reply.status(200).send(success(data));
-    } catch (error) {
-      this.handleError(reply, error);
-    }
-  };
-
-  addExternalLink = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
-    if (!request.user) {
-      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
-      return;
-    }
-
-    try {
-      const params = submissionItemParamsSchema.parse(request.params);
-      const body = addExternalLinkBodySchema.parse(request.body);
-      const data = await this.service.addExternalLink(
-        request.user,
-        params.submissionId,
-        params.itemId,
-        body.proof_file_url,
-      );
-
-      reply.status(200).send(success(data));
     } catch (error) {
       this.handleError(reply, error);
     }

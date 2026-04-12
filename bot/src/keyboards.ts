@@ -1,30 +1,56 @@
 import { Markup } from "telegraf";
+import type { CategoryCatalogEntry } from "./types/session";
+
+const CANCEL_ROW = [Markup.button.callback("Cancel", "wizard_cancel")];
 
 export const mainMenuKeyboard = () =>
   Markup.inlineKeyboard([
     [Markup.button.callback("Submit Achievement", "menu_submit")],
-    [Markup.button.callback("View Submissions", "menu_submissions")],
-    [Markup.button.callback("View Points", "menu_points")],
+    [Markup.button.callback("My Submissions", "menu_submissions")],
+    [Markup.button.callback("My Points", "menu_points")],
+    [Markup.button.callback("Help", "menu_help")],
   ]);
 
-export const categoryKeyboard = () =>
-  Markup.inlineKeyboard([
-    [
-      Markup.button.callback("Academic", "cat_Academic"),
-      Markup.button.callback("Competition", "cat_Competition"),
-    ],
-    [
-      Markup.button.callback("Research", "cat_Research"),
-      Markup.button.callback("Organization", "cat_Organization"),
-    ],
-    [Markup.button.callback("Community Service", "cat_Community Service")],
-    [Markup.button.callback("Cancel", "wizard_cancel")],
-  ]);
+/** Two categories per row; callback cat_<uuid> */
+export function categoryPickerKeyboard(categories: CategoryCatalogEntry[]) {
+  const rows: ReturnType<typeof Markup.button.callback>[][] = [];
+  for (let i = 0; i < categories.length; i += 2) {
+    const row = [
+      Markup.button.callback(categories[i].name, `cat_${categories[i].id}`),
+    ];
+    if (categories[i + 1]) {
+      row.push(Markup.button.callback(categories[i + 1].name, `cat_${categories[i + 1].id}`));
+    }
+    rows.push(row);
+  }
+  rows.push(CANCEL_ROW);
+  return Markup.inlineKeyboard(rows);
+}
+
+/** Callback sub_<slug> — category is already chosen in session */
+export function subcategoryPickerKeyboard(
+  subcategories: Array<{ slug: string; label: string }>,
+) {
+  const rows: ReturnType<typeof Markup.button.callback>[][] = [];
+  for (let i = 0; i < subcategories.length; i += 2) {
+    const row = [
+      Markup.button.callback(subcategories[i].label, `sub_${subcategories[i].slug}`),
+    ];
+    if (subcategories[i + 1]) {
+      row.push(
+        Markup.button.callback(subcategories[i + 1].label, `sub_${subcategories[i + 1].slug}`),
+      );
+    }
+    rows.push(row);
+  }
+  rows.push(CANCEL_ROW);
+  return Markup.inlineKeyboard(rows);
+}
 
 export const confirmKeyboard = () =>
   Markup.inlineKeyboard([
     [
-      Markup.button.callback("Confirm Submit", "confirm_submit"),
+      Markup.button.callback("Confirm and submit", "confirm_submit"),
       Markup.button.callback("Cancel", "wizard_cancel"),
     ],
   ]);

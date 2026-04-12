@@ -1,8 +1,9 @@
 import { Markup, Scenes, Telegraf, session } from "telegraf";
 import { env } from "./config/env";
+import { createSubmitSubmissionScene } from "./fsm/submit-submission.scene";
 import { mainMenuKeyboard } from "./keyboards";
-import { createSubmitAchievementScene } from "./scenes/submit-achievement.scene";
 import { UpmsService } from "./services/upms.service";
+import { HELP_TEXT } from "./text/help";
 import type { BotContext } from "./types/session";
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -10,7 +11,7 @@ const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
   const bot = new Telegraf<BotContext>(env.TELEGRAM_BOT_TOKEN);
 
-  const submitScene = createSubmitAchievementScene(upmsService);
+  const submitScene = createSubmitSubmissionScene(upmsService);
   const stage = new Scenes.Stage<BotContext>([submitScene]);
 
   bot.use(session());
@@ -23,19 +24,24 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
       return;
     }
 
-    const linkedUser = await upmsService.findUserByTelegramId(String(telegramUserId));
+    const tg = String(telegramUserId);
+    const linkedUser = await upmsService.lookupUserByTelegramId(tg);
     if (linkedUser) {
-      ctx.session.authenticatedTelegramId = String(telegramUserId);
+      ctx.session.authenticatedTelegramId = tg;
       await ctx.reply(
-        `Welcome back, ${linkedUser.fullName ?? linkedUser.email}.\nUse the menu below.`,
+        `Welcome back, ${linkedUser.fullName ?? linkedUser.email}.\nChoose an action below.`,
         mainMenuKeyboard(),
       );
       return;
     }
 
     await ctx.reply(
-      "Welcome to UPMS Bot.\nPlease authenticate by sending your registered email address.",
+      "Welcome to UPMS.\nSend your registered university email address to link this Telegram account.",
     );
+  });
+
+  bot.command("help", async (ctx) => {
+    await ctx.reply(HELP_TEXT, mainMenuKeyboard());
   });
 
   bot.on("text", async (ctx, next) => {
@@ -51,7 +57,7 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
 
     const text = ctx.message.text.trim();
     if (!emailRegex.test(text)) {
-      await ctx.reply("Please send a valid email address to authenticate.");
+      await ctx.reply("Please send a valid email address.");
       return;
     }
 
@@ -63,61 +69,64 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
 
     const linkedUser = await upmsService.linkTelegramByEmail(text, String(telegramUserId));
     if (!linkedUser) {
-      await ctx.reply("Email not found. Please use the email registered in UPMS.");
+      await ctx.reply("Email not found. Use the address registered in UPMS.");
       return;
     }
 
     ctx.session.authenticatedTelegramId = String(telegramUserId);
     await ctx.reply(
-      `Authentication successful. Hello ${linkedUser.fullName ?? linkedUser.email}.`,
+      `Linked successfully. Hello, ${linkedUser.fullName ?? linkedUser.email}.`,
       mainMenuKeyboard(),
     );
   });
 
   bot.action("menu_submit", async (ctx) => {
+    await ctx.answerCbQuery();
     if (!ctx.session.authenticatedTelegramId) {
-      await ctx.answerCbQuery();
-      await ctx.reply("Please authenticate first using /start.");
+      await ctx.reply("Please use /start and link your account first.");
       return;
     }
-
-    await ctx.answerCbQuery();
-    await ctx.scene.enter("submit-achievement");
+    await ctx.scene.enter("submit-submission");
   });
 
   bot.action("menu_submissions", async (ctx) => {
     await ctx.answerCbQuery();
     if (!ctx.session.authenticatedTelegramId) {
-      await ctx.reply("Please authenticate first using /start.");
+      await ctx.reply("Please use /start and link your account first.");
       return;
     }
 
     const submissions = await upmsService.getUserSubmissions(ctx.session.authenticatedTelegramId);
     if (submissions.length === 0) {
-      await ctx.reply("You do not have any submissions yet.", mainMenuKeyboard());
+      await ctx.reply("You have no submissions yet.", mainMenuKeyboard());
       return;
     }
 
     const lines = submissions.map(
       (item, index) =>
-        `${index + 1}. ${item.title}\nStatus: ${item.status}\nPoints: ${item.totalPoints}\nCreated: ${new Date(item.createdAt).toLocaleDateString("en-US")}`,
+        `${index + 1}. ${item.title}\n   Status: ${item.status}\n   Points: ${item.totalPoints}\n   Created: ${new Date(item.createdAt).toLocaleDateString("en-US")}`,
     );
 
-    await ctx.reply(`Your latest submissions:\n\n${lines.join("\n\n")}`, mainMenuKeyboard());
+    await ctx.reply(`My Submissions:\n\n${lines.join("\n\n")}`, mainMenuKeyboard());
   });
 
   bot.action("menu_points", async (ctx) => {
     await ctx.answerCbQuery();
     if (!ctx.session.authenticatedTelegramId) {
-      await ctx.reply("Please authenticate first using /start.");
+      await ctx.reply("Please use /start and link your account first.");
       return;
     }
 
     const totalPoints = await upmsService.getUserPoints(ctx.session.authenticatedTelegramId);
     await ctx.reply(
-      `Your approved points: ${totalPoints.toFixed(2)}`,
-      Markup.inlineKeyboard([[Markup.button.callback("Back to Menu", "menu_back")]]),
+      `My Points (approved submissions): ${totalPoints.toFixed(2)}`,
+      Markup.inlineKeyboard([[Markup.button.callback("Back to menu", "menu_back")]]),
     );
+  });
+
+  bot.action("menu_help", async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.reply(HELP_TEXT, mainMenuKeyboard());
   });
 
   bot.action("menu_back", async (ctx) => {

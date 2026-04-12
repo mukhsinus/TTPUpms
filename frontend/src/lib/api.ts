@@ -1,9 +1,11 @@
 import type { Submission, SubmissionItem, SubmissionStatus, User } from "../types";
+import { signInWithSupabasePassword } from "./auth-sign-in";
+import { ApiError } from "./api-error";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? import.meta.env.VITE_API_BASE_URL ?? "";
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ?? "";
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY ?? "";
 const AUTH_TOKEN_KEY = "upms_admin_token";
+
+export { ApiError };
 
 interface ApiResponse<T> {
   data: T | null;
@@ -13,36 +15,10 @@ interface ApiResponse<T> {
   } | null;
 }
 
-export class ApiError extends Error {
-  statusCode: number;
-
-  constructor(message: string, statusCode: number) {
-    super(message);
-    this.statusCode = statusCode;
-    this.name = "ApiError";
-  }
-}
-
 export interface SessionUser {
   email: string | null;
   role: string;
   fullName: string | null;
-}
-
-interface SupabaseAuthResponse {
-  access_token?: string;
-  user?: {
-    email?: string;
-    user_metadata?: {
-      full_name?: string;
-      name?: string;
-    };
-    app_metadata?: {
-      role?: string;
-    };
-  };
-  error_description?: string;
-  msg?: string;
 }
 
 interface TopStudent {
@@ -184,28 +160,7 @@ export const api = {
   },
 
   async loginWithCredentials(email: string, password: string): Promise<void> {
-    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-      throw new ApiError("Supabase auth is not configured in frontend env", 500);
-    }
-
-    const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: SUPABASE_ANON_KEY,
-      },
-      body: JSON.stringify({ email, password }),
-    });
-
-    const payload = (await response.json().catch(() => null)) as SupabaseAuthResponse | null;
-    if (!response.ok || !payload?.access_token) {
-      throw new ApiError(
-        payload?.error_description ?? payload?.msg ?? "Invalid email or password",
-        response.status || 401,
-      );
-    }
-
-    const token = payload.access_token;
+    const token = await signInWithSupabasePassword(email, password);
     const result = await requestResult<Submission[]>("/api/submissions", { method: "GET" }, token);
     if (result.error) {
       throw new ApiError(result.error, result.statusCode);

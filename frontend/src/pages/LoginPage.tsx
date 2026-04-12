@@ -1,20 +1,10 @@
 import { useEffect, useState, type FormEvent, type ReactElement } from "react";
 import { useNavigate } from "react-router-dom";
-import { api } from "../lib/api";
+import { api, ApiError } from "../lib/api";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Input } from "../components/ui/Input";
-
-function getMissingSupabaseEnvVars(): string[] {
-  const missing: string[] = [];
-  if (!import.meta.env.VITE_SUPABASE_URL) {
-    missing.push("VITE_SUPABASE_URL");
-  }
-  if (!import.meta.env.VITE_SUPABASE_ANON_KEY) {
-    missing.push("VITE_SUPABASE_ANON_KEY");
-  }
-  return missing;
-}
+import { validateSupabaseEnvForUi } from "../lib/supabase-env";
 
 export function LoginPage(): ReactElement {
   const [email, setEmail] = useState("");
@@ -22,7 +12,7 @@ export function LoginPage(): ReactElement {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
-  const missingEnvVars = getMissingSupabaseEnvVars();
+  const supabaseEnv = validateSupabaseEnvForUi();
 
   useEffect(() => {
     if (api.isLoggedIn()) {
@@ -36,10 +26,22 @@ export function LoginPage(): ReactElement {
 
     try {
       setLoading(true);
+      if (import.meta.env.DEV) {
+        console.log("[upms:auth] login submit", { email: `${email.slice(0, 2)}***` });
+      }
       await api.loginWithCredentials(email, password);
       navigate("/dashboard", { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      if (import.meta.env.DEV) {
+        console.error("[upms:auth] login failed", err);
+      }
+      const message =
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Login failed";
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -51,7 +53,7 @@ export function LoginPage(): ReactElement {
         <div className="auth-brand">
           <div className="auth-logo">TTPU</div>
           <div>
-            <h1>UPMS Admin</h1>
+            <h1>PMS Admin</h1>
             <p className="ui-card-subtitle">Turin Polytechnic University in Tashkent</p>
           </div>
         </div>
@@ -82,9 +84,9 @@ export function LoginPage(): ReactElement {
           </Button>
         </form>
         {error ? <p className="error">{error}</p> : null}
-        {missingEnvVars.length > 0 ? (
+        {!supabaseEnv.ok ? (
           <p className="muted">
-            Missing frontend env: <code>{missingEnvVars.join(", ")}</code>
+            Supabase env: <code>{supabaseEnv.issues.join(" ")}</code>
           </p>
         ) : null}
       </Card>

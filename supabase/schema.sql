@@ -31,6 +31,14 @@ begin
   if not exists (select 1 from pg_type where typname = 'item_review_decision') then
     create type public.item_review_decision as enum ('approved', 'rejected');
   end if;
+
+  if not exists (select 1 from pg_type where typname = 'category_scoring_type') then
+    create type public.category_scoring_type as enum ('fixed', 'range', 'manual');
+  end if;
+
+  if not exists (select 1 from pg_type where typname = 'submission_item_status') then
+    create type public.submission_item_status as enum ('pending', 'approved', 'rejected');
+  end if;
 end
 $$;
 
@@ -211,6 +219,103 @@ create table if not exists public.idempotency_keys (
 );
 
 -- -----------------------------
+-- Categories & scoring configuration (reference data)
+-- -----------------------------
+create table if not exists public.categories (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  type public.category_scoring_type not null,
+  min_score numeric(10, 2) not null default 0,
+  max_score numeric(10, 2) not null,
+  description text,
+  requires_review boolean not null default true,
+  created_at timestamptz not null default now(),
+  check (min_score <= max_score),
+  check (min_score >= 0)
+);
+
+create table if not exists public.category_subcategories (
+  id uuid primary key default gen_random_uuid(),
+  category_id uuid not null references public.categories(id) on delete cascade,
+  slug text not null,
+  label text not null,
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now(),
+  unique (category_id, slug)
+);
+
+create table if not exists public.category_scoring_rules (
+  id uuid primary key default gen_random_uuid(),
+  category_id uuid not null references public.categories(id) on delete cascade,
+  subcategory_id uuid references public.category_subcategories(id) on delete cascade,
+  min_score numeric(10, 2) not null,
+  max_score numeric(10, 2) not null,
+  notes text,
+  created_at timestamptz not null default now(),
+  check (min_score <= max_score),
+  check (min_score >= 0)
+);
+
+create or replace function public.enforce_scoring_rule_subcategory_category()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.subcategory_id is not null then
+    if not exists (
+      select 1
+      from public.category_subcategories cs
+      where cs.id = new.subcategory_id
+        and cs.category_id = new.category_id
+    ) then
+      raise exception 'category_scoring_rules.subcategory_id must belong to the same category_id';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_category_scoring_rules_validate_subcategory on public.category_scoring_rules;
+create trigger trg_category_scoring_rules_validate_subcategory
+before insert or update of category_id, subcategory_id on public.category_scoring_rules
+for each row execute function public.enforce_scoring_rule_subcategory_category();
+
+-- submission_items: category FK and review-derived fields (runs after categories exist)
+alter table public.submission_items
+  add column if not exists category_id uuid references public.categories(id) on delete set null,
+  add column if not exists external_link text,
+  add column if not exists approved_score numeric(10, 2) check (approved_score is null or approved_score >= 0),
+  add column if not exists status public.submission_item_status not null default 'pending';
+
+create or replace function public.submission_items_sync_status_and_approved_score()
+returns trigger
+language plpgsql
+as $$
+begin
+  if tg_op = 'UPDATE' then
+    if new.reviewer_score is distinct from old.reviewer_score then
+      new.approved_score := new.reviewer_score;
+    end if;
+    if new.review_decision is distinct from old.review_decision then
+      if new.review_decision = 'approved' then
+        new.status := 'approved'::public.submission_item_status;
+      elsif new.review_decision = 'rejected' then
+        new.status := 'rejected'::public.submission_item_status;
+      else
+        new.status := 'pending'::public.submission_item_status;
+      end if;
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_submission_items_sync_review_derived on public.submission_items;
+create trigger trg_submission_items_sync_review_derived
+before update on public.submission_items
+for each row execute function public.submission_items_sync_status_and_approved_score();
+
+-- -----------------------------
 -- Data integrity helpers
 -- -----------------------------
 create or replace function public.sync_submission_item_user_id()
@@ -339,6 +444,8 @@ create index if not exists idx_submission_items_user_created_at
   on public.submission_items(user_id, created_at desc);
 create index if not exists idx_submission_items_review_decision
   on public.submission_items(review_decision);
+create index if not exists idx_submission_items_category_id on public.submission_items(category_id);
+create index if not exists idx_submission_items_status on public.submission_items(submission_id, status);
 
 create index if not exists idx_files_submission_id on public.files(submission_id);
 create index if not exists idx_files_submission_item_id on public.files(submission_item_id);
@@ -363,6 +470,13 @@ create index if not exists idx_idempotency_keys_created_at
 create index if not exists idx_idempotency_keys_user_scope
   on public.idempotency_keys(user_id, scope);
 
+create index if not exists idx_category_subcategories_category_id
+  on public.category_subcategories(category_id);
+create index if not exists idx_category_scoring_rules_category_id
+  on public.category_scoring_rules(category_id);
+create index if not exists idx_category_scoring_rules_subcategory_id
+  on public.category_scoring_rules(subcategory_id);
+
 -- -----------------------------
 -- Row Level Security (tenant-safe by user_id)
 -- -----------------------------
@@ -372,6 +486,9 @@ alter table public.submission_items enable row level security;
 alter table public.files enable row level security;
 alter table public.reviews enable row level security;
 alter table public.audit_logs enable row level security;
+alter table public.categories enable row level security;
+alter table public.category_subcategories enable row level security;
+alter table public.category_scoring_rules enable row level security;
 
 -- USERS
 drop policy if exists users_select_self_or_admin on public.users;
@@ -569,5 +686,69 @@ with check (public.current_app_role() = 'admin');
 
 drop policy if exists audit_logs_delete_admin_only on public.audit_logs;
 create policy audit_logs_delete_admin_only on public.audit_logs
+for delete
+using (public.current_app_role() = 'admin');
+
+-- CATEGORIES (reference configuration)
+drop policy if exists categories_select_authenticated on public.categories;
+create policy categories_select_authenticated on public.categories
+for select
+using (auth.uid() is not null);
+
+drop policy if exists categories_write_admin on public.categories;
+create policy categories_write_admin on public.categories
+for insert
+with check (public.current_app_role() = 'admin');
+
+drop policy if exists categories_update_admin on public.categories;
+create policy categories_update_admin on public.categories
+for update
+using (public.current_app_role() = 'admin')
+with check (public.current_app_role() = 'admin');
+
+drop policy if exists categories_delete_admin on public.categories;
+create policy categories_delete_admin on public.categories
+for delete
+using (public.current_app_role() = 'admin');
+
+drop policy if exists category_subcategories_select_authenticated on public.category_subcategories;
+create policy category_subcategories_select_authenticated on public.category_subcategories
+for select
+using (auth.uid() is not null);
+
+drop policy if exists category_subcategories_write_admin on public.category_subcategories;
+create policy category_subcategories_write_admin on public.category_subcategories
+for insert
+with check (public.current_app_role() = 'admin');
+
+drop policy if exists category_subcategories_update_admin on public.category_subcategories;
+create policy category_subcategories_update_admin on public.category_subcategories
+for update
+using (public.current_app_role() = 'admin')
+with check (public.current_app_role() = 'admin');
+
+drop policy if exists category_subcategories_delete_admin on public.category_subcategories;
+create policy category_subcategories_delete_admin on public.category_subcategories
+for delete
+using (public.current_app_role() = 'admin');
+
+drop policy if exists category_scoring_rules_select_authenticated on public.category_scoring_rules;
+create policy category_scoring_rules_select_authenticated on public.category_scoring_rules
+for select
+using (auth.uid() is not null);
+
+drop policy if exists category_scoring_rules_write_admin on public.category_scoring_rules;
+create policy category_scoring_rules_write_admin on public.category_scoring_rules
+for insert
+with check (public.current_app_role() = 'admin');
+
+drop policy if exists category_scoring_rules_update_admin on public.category_scoring_rules;
+create policy category_scoring_rules_update_admin on public.category_scoring_rules
+for update
+using (public.current_app_role() = 'admin')
+with check (public.current_app_role() = 'admin');
+
+drop policy if exists category_scoring_rules_delete_admin on public.category_scoring_rules;
+create policy category_scoring_rules_delete_admin on public.category_scoring_rules
 for delete
 using (public.current_app_role() = 'admin');

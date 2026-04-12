@@ -1,7 +1,7 @@
 import { ServiceError } from "../../utils/service-error";
 import type { NotificationService } from "../notifications/notification.service";
 import type { AntiFraudService } from "../validation/anti-fraud.service";
-import { assertValidTransition } from "./submission-transitions";
+import { assertStudentMaySubmitFromStatus } from "./submission-transitions";
 import type { SubmissionsRepository, SubmissionEntity } from "./submissions.repository";
 import type { CreateSubmissionBody } from "./submissions.schema";
 
@@ -68,7 +68,7 @@ export class SubmissionsService {
       throw new ServiceError(403, "Only the submission owner can submit");
     }
 
-    assertValidTransition(submission.status, "submitted");
+    assertStudentMaySubmitFromStatus(submission.status);
 
     const updated = await this.repository.updateStatus({
       id: submission.id,

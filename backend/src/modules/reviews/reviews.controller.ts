@@ -3,6 +3,7 @@ import { ZodError } from "zod";
 import { errorCodeFromStatus, failure, success } from "../../utils/http-response";
 import {
   completeSubmissionReviewBodySchema,
+  patchReviewItemParamsSchema,
   reviewItemBodySchema,
   reviewSubmissionItemParamsSchema,
   reviewSubmissionParamsSchema,
@@ -11,6 +12,22 @@ import { ReviewsService, ReviewsServiceError } from "./reviews.service";
 
 export class ReviewsController {
   constructor(private readonly service: ReviewsService) {}
+
+  patchSubmissionItem = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!request.user) {
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
+      return;
+    }
+
+    try {
+      const params = patchReviewItemParamsSchema.parse(request.params);
+      const body = reviewItemBodySchema.parse(request.body);
+      const data = await this.service.patchSubmissionItem(request.user, params.itemId, body);
+      reply.status(200).send(success(data));
+    } catch (error) {
+      this.handleError(reply, error);
+    }
+  };
 
   getReviewableSubmissions = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (!request.user) {

@@ -102,16 +102,15 @@ function mapItem(row: SubmissionItemRow): ReviewSubmissionItemEntity {
 export class ReviewsRepository {
   constructor(private readonly app: FastifyInstance) {}
 
-  async findAssignedSubmissions(reviewerId: string): Promise<ReviewSubmissionEntity[]> {
+  /** All submissions currently in the review queue (reviewer pool). */
+  async findSubmissionsAwaitingReview(): Promise<ReviewSubmissionEntity[]> {
     const result = await this.app.db.query<SubmissionRow>(
       `
-      SELECT s.id, s.user_id, s.status, s.title, s.description, s.total_points, s.created_at, s.updated_at
-      FROM submissions s
-      INNER JOIN reviews r ON r.submission_id = s.id
-      WHERE r.reviewer_id = $1
-      ORDER BY s.created_at DESC
+      SELECT id, user_id, status, title, description, total_points, created_at, updated_at
+      FROM submissions
+      WHERE status IN ('submitted', 'under_review')
+      ORDER BY created_at DESC
       `,
-      [reviewerId],
     );
 
     return result.rows.map(mapSubmission);
@@ -173,6 +172,44 @@ export class ReviewsRepository {
     );
 
     return result.rows.map(mapItem);
+  }
+
+  async findSubmissionIdForItem(itemId: string): Promise<string | null> {
+    const result = await this.app.db.query<{ submission_id: string }>(
+      `
+      SELECT submission_id
+      FROM submission_items
+      WHERE id = $1
+      `,
+      [itemId],
+    );
+
+    return result.rows[0]?.submission_id ?? null;
+  }
+
+  async findCategoryBoundsForItem(itemId: string): Promise<{ minScore: number; maxScore: number } | null> {
+    const result = await this.app.db.query<{ min_score: string | null; max_score: string | null }>(
+      `
+      SELECT
+        COALESCE(c_by_id.min_score, c_by_name.min_score) AS min_score,
+        COALESCE(c_by_id.max_score, c_by_name.max_score) AS max_score
+      FROM submission_items si
+      LEFT JOIN categories c_by_id ON c_by_id.id = si.category_id
+      LEFT JOIN categories c_by_name ON si.category_id IS NULL AND c_by_name.name = si.category
+      WHERE si.id = $1
+      `,
+      [itemId],
+    );
+
+    const row = result.rows[0];
+    if (!row || row.min_score === null || row.max_score === null) {
+      return null;
+    }
+
+    return {
+      minScore: Number(row.min_score),
+      maxScore: Number(row.max_score),
+    };
   }
 
   async findSubmissionItemById(itemId: string): Promise<ReviewSubmissionItemEntity | null> {

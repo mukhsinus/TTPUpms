@@ -33,10 +33,10 @@ function isUnsafeTelegramProofUrl(url: string): boolean {
 }
 
 function isSafeProofStorageUrl(url: string): boolean {
-  return (
-    url.startsWith(env.SUPABASE_PROJECT_URL) &&
-    url.includes("/storage/v1/object/public/proofs/")
-  );
+  if (!url.startsWith(env.SUPABASE_PROJECT_URL) || !url.includes("/storage/v1/object/")) {
+    return false;
+  }
+  return url.includes("/object/public/proofs/") || url.includes("/object/public/submission-files/");
 }
 
 function toSafeFilename(filename: string): string {
@@ -53,6 +53,194 @@ export class BotApiService {
       email: row.email,
       fullName: row.full_name,
     };
+  }
+
+  async getCategoriesCatalog(): Promise<
+    Array<{
+      id: string;
+      name: string;
+      type: string;
+      minScore: number;
+      maxScore: number;
+      subcategories: Array<{ slug: string; label: string }>;
+    }>
+  > {
+    const result = await this.app.db.query<{
+      id: string;
+      name: string;
+      type: string;
+      min_score: string;
+      max_score: string;
+      slug: string | null;
+      label: string | null;
+      sort_order: number | null;
+    }>(
+      `
+      SELECT
+        c.id,
+        c.name,
+        c.type::text AS type,
+        c.min_score,
+        c.max_score,
+        cs.slug,
+        cs.label,
+        cs.sort_order
+      FROM categories c
+      LEFT JOIN category_subcategories cs ON cs.category_id = c.id
+      ORDER BY c.name ASC, cs.sort_order ASC NULLS LAST, cs.slug ASC NULLS LAST
+      `,
+    );
+
+    const byId = new Map<
+      string,
+      {
+        id: string;
+        name: string;
+        type: string;
+        minScore: number;
+        maxScore: number;
+        subcategories: Array<{ slug: string; label: string }>;
+      }
+    >();
+
+    for (const row of result.rows) {
+      let entry = byId.get(row.id);
+      if (!entry) {
+        entry = {
+          id: row.id,
+          name: row.name,
+          type: row.type,
+          minScore: Number(row.min_score),
+          maxScore: Number(row.max_score),
+          subcategories: [],
+        };
+        byId.set(row.id, entry);
+      }
+      if (row.slug && row.label) {
+        entry.subcategories.push({ slug: row.slug, label: row.label });
+      }
+    }
+
+    return [...byId.values()];
+  }
+
+  async createStudentSubmissionFromBot(input: {
+    telegramId: string;
+    categoryId: string;
+    subcategory: string;
+    title: string;
+    description: string;
+    proofFileUrl: string;
+  }): Promise<{ submissionId: string }> {
+    if (isUnsafeTelegramProofUrl(input.proofFileUrl)) {
+      throw new Error("Unsafe proof URL is not allowed");
+    }
+    if (!isSafeProofStorageUrl(input.proofFileUrl)) {
+      throw new Error("Proof URL must be a safe storage URL");
+    }
+
+    const user = await this.findOrCreateUserByTelegramId(input.telegramId);
+    const client = await this.app.db.connect();
+    try {
+      await client.query("BEGIN");
+
+      const cat = await client.query<{
+        id: string;
+        name: string;
+        max_score: string;
+      }>(
+        `
+        SELECT id, name, max_score
+        FROM categories
+        WHERE id = $1
+        `,
+        [input.categoryId],
+      );
+
+      const categoryRow = cat.rows[0];
+      if (!categoryRow) {
+        throw new Error("Unknown category");
+      }
+
+      const subCount = await client.query<{ c: string }>(
+        `
+        SELECT COUNT(*)::text AS c
+        FROM category_subcategories
+        WHERE category_id = $1
+        `,
+        [input.categoryId],
+      );
+
+      const hasSubs = Number(subCount.rows[0]?.c ?? "0") > 0;
+      if (hasSubs) {
+        const subCheck = await client.query<{ ok: boolean }>(
+          `
+          SELECT true AS ok
+          FROM category_subcategories
+          WHERE category_id = $1 AND slug = $2
+          LIMIT 1
+          `,
+          [input.categoryId, input.subcategory],
+        );
+
+        if (!subCheck.rows[0]) {
+          throw new Error("Invalid subcategory for this category");
+        }
+      }
+
+      const proposedScore = Number(categoryRow.max_score);
+
+      const submissionResult = await client.query<{ id: string }>(
+        `
+        INSERT INTO submissions (user_id, title, description, status, submitted_at)
+        VALUES ($1, $2, $3, 'submitted', NOW())
+        RETURNING id
+        `,
+        [user.id, input.title, input.description],
+      );
+
+      const submissionId = submissionResult.rows[0].id;
+
+      await client.query(
+        `
+        INSERT INTO submission_items (
+          submission_id,
+          user_id,
+          category_id,
+          category,
+          subcategory,
+          title,
+          description,
+          proof_file_url,
+          proposed_score
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        `,
+        [
+          submissionId,
+          user.id,
+          input.categoryId,
+          categoryRow.name,
+          input.subcategory,
+          input.title,
+          input.description,
+          input.proofFileUrl,
+          proposedScore,
+        ],
+      );
+
+      await client.query("COMMIT");
+      this.app.log.info(
+        { telegram_id: input.telegramId, user_id: user.id, submission_id: submissionId },
+        "Created student submission from bot",
+      );
+      return { submissionId };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async findUserByTelegramId(telegramId: string): Promise<BotUser | null> {

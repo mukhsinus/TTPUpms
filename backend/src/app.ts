@@ -4,6 +4,7 @@ import { setGlobalErrorHandler } from "./middleware/error-handler";
 import { adminOverrideRoutes } from "./modules/admin/admin-override.routes";
 import { analyticsRoutes } from "./modules/analytics/analytics.routes";
 import { botApiRoutes } from "./modules/bot-api/bot-api.routes";
+import { categoriesRoutes } from "./modules/categories/categories.routes";
 import { healthRoutes } from "./modules/health/health.route";
 import { uploadRoutes } from "./modules/files/upload.routes";
 import { reviewsRoutes } from "./modules/reviews/reviews.routes";
@@ -60,6 +61,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   await app.register(healthRoutes);
+  await app.register(categoriesRoutes, { prefix: "/api/categories" });
   await app.register(submissionsRoutes, { prefix: "/api/submissions" });
   await app.register(submissionItemsRoutes, { prefix: "/api/submissions/:submissionId/items" });
   await app.register(uploadRoutes, { prefix: "/api/files" });

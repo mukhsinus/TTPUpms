@@ -1,29 +1,6 @@
 import type { FastifyInstance } from "fastify";
 
-export type ScoringMode = "FIXED" | "RANGE" | "MANUAL";
-
-interface SubmissionRow {
-  id: string;
-}
-
-interface SubmissionItemRow {
-  id: string;
-  category: string;
-  proposed_score: string;
-  reviewer_score: string | null;
-  review_decision: "approved" | "rejected" | null;
-}
-
-interface ComputeScoreInput {
-  submissionId: string;
-  categoryCaps?: Record<string, number>;
-  defaultScoringMode?: ScoringMode;
-  categoryScoringModes?: Record<string, ScoringMode>;
-  itemScoringModes?: Record<string, ScoringMode>;
-  persistTotalScore?: boolean;
-}
-
-interface ComputeScoreResult {
+export interface ScoringEngineResult {
   submissionId: string;
   totalScore: number;
   countedItems: number;
@@ -49,43 +26,71 @@ function round2(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+interface SubmissionItemScoreRow {
+  id: string;
+  category: string;
+  reviewer_score: string | null;
+  review_decision: "approved" | "rejected" | null;
+}
+
+interface CategoryCapRow {
+  name: string;
+  max_score: string;
+}
+
+/**
+ * Computes submission total from approved item scores (reviewer-assigned),
+ * applies per-category caps from `categories.max_score`, deduplicates by item id,
+ * and persists `submissions.total_points`.
+ */
 export class ScoringService {
   constructor(private readonly app: FastifyInstance) {}
 
-  async computeSubmissionScore(input: ComputeScoreInput): Promise<ComputeScoreResult> {
-    const submission = await this.findSubmission(input.submissionId);
+  /**
+   * Recompute and persist total points for a submission (idempotent per DB state).
+   * Call after item approval/rejection and after submission workflow finalization.
+   */
+  async syncSubmissionTotalPoints(submissionId: string): Promise<ScoringEngineResult> {
+    const submission = await this.findSubmission(submissionId);
     if (!submission) {
       throw new ScoringServiceError(404, "Submission not found");
     }
 
-    const items = await this.findSubmissionItems(input.submissionId);
+    const items = await this.findSubmissionItems(submissionId);
+    const categoryCaps = await this.loadCategoryCaps();
+
     const seenItemIds = new Set<string>();
     const categoryRawTotals = new Map<string, number>();
-    let countedItems = 0;
 
     for (const item of items) {
       if (seenItemIds.has(item.id)) {
-        throw new ScoringServiceError(409, `Duplicate scoring source detected for item ${item.id}`);
+        throw new ScoringServiceError(409, `Duplicate item row for scoring: ${item.id}`);
       }
       seenItemIds.add(item.id);
 
-      // Only approved items are eligible for scoring.
       if (item.review_decision !== "approved") {
         continue;
       }
 
-      const score = this.resolveItemScore(item, input);
-      countedItems += 1;
-      categoryRawTotals.set(item.category, round2((categoryRawTotals.get(item.category) ?? 0) + score));
+      const reviewerScore = item.reviewer_score === null ? null : Number(item.reviewer_score);
+      if (reviewerScore === null || Number.isNaN(reviewerScore) || reviewerScore < 0) {
+        throw new ScoringServiceError(
+          409,
+          `Approved item ${item.id} is missing a valid reviewer score for scoring`,
+        );
+      }
+
+      const cat = item.category;
+      categoryRawTotals.set(cat, round2((categoryRawTotals.get(cat) ?? 0) + reviewerScore));
     }
 
-    const categoryBreakdown: ComputeScoreResult["categoryBreakdown"] = [];
+    const categoryBreakdown: ScoringEngineResult["categoryBreakdown"] = [];
     let totalScore = 0;
 
     for (const [category, rawScore] of categoryRawTotals.entries()) {
-      const cap = input.categoryCaps?.[category];
+      const cap = categoryCaps.get(category);
       if (cap !== undefined && cap < 0) {
-        throw new ScoringServiceError(400, `Category cap cannot be negative for category "${category}"`);
+        throw new ScoringServiceError(400, `Invalid category cap for "${category}"`);
       }
 
       const finalScore = cap === undefined ? rawScore : Math.min(rawScore, cap);
@@ -100,60 +105,35 @@ export class ScoringService {
       });
     }
 
-    if (input.persistTotalScore ?? true) {
-      await this.updateSubmissionTotalScore(input.submissionId, totalScore);
-    }
+    await this.updateSubmissionTotalScore(submissionId, totalScore);
+
+    const countedItems = items.filter((i) => i.review_decision === "approved").length;
 
     return {
-      submissionId: input.submissionId,
+      submissionId,
       totalScore,
       countedItems,
       categoryBreakdown,
     };
   }
 
-  private resolveItemScore(item: SubmissionItemRow, input: ComputeScoreInput): number {
-    const mode =
-      input.itemScoringModes?.[item.id] ??
-      input.categoryScoringModes?.[item.category] ??
-      input.defaultScoringMode ??
-      "RANGE";
+  private async loadCategoryCaps(): Promise<Map<string, number>> {
+    const result = await this.app.db.query<CategoryCapRow>(
+      `
+      SELECT name, max_score
+      FROM categories
+      `,
+    );
 
-    const proposed = Number(item.proposed_score);
-    const reviewer = item.reviewer_score === null ? null : Number(item.reviewer_score);
-
-    if (Number.isNaN(proposed) || proposed < 0) {
-      throw new ScoringServiceError(400, `Invalid proposed score for item ${item.id}`);
+    const map = new Map<string, number>();
+    for (const row of result.rows) {
+      map.set(row.name, Number(row.max_score));
     }
-
-    if (reviewer !== null && (Number.isNaN(reviewer) || reviewer < 0)) {
-      throw new ScoringServiceError(400, `Invalid reviewer score for item ${item.id}`);
-    }
-
-    if (mode === "FIXED") {
-      return round2(proposed);
-    }
-
-    if (reviewer === null) {
-      throw new ScoringServiceError(409, `Missing reviewer score for approved item ${item.id}`);
-    }
-
-    if (mode === "RANGE") {
-      if (reviewer > proposed) {
-        throw new ScoringServiceError(
-          400,
-          `Reviewer score (${reviewer}) exceeds max proposed score (${proposed}) for item ${item.id}`,
-        );
-      }
-      return round2(reviewer);
-    }
-
-    // MANUAL mode uses reviewer-assigned score directly.
-    return round2(reviewer);
+    return map;
   }
 
-  private async findSubmission(submissionId: string): Promise<SubmissionRow | null> {
-    const result = await this.app.db.query<SubmissionRow>(
+  private async findSubmission(submissionId: string): Promise<{ id: string } | null> {
+    const result = await this.app.db.query<{ id: string }>(
       `
       SELECT id
       FROM submissions
@@ -165,12 +145,13 @@ export class ScoringService {
     return result.rows[0] ?? null;
   }
 
-  private async findSubmissionItems(submissionId: string): Promise<SubmissionItemRow[]> {
-    const result = await this.app.db.query<SubmissionItemRow>(
+  private async findSubmissionItems(submissionId: string): Promise<SubmissionItemScoreRow[]> {
+    const result = await this.app.db.query<SubmissionItemScoreRow>(
       `
-      SELECT id, category, proposed_score, reviewer_score, review_decision
+      SELECT id, category, reviewer_score, review_decision
       FROM submission_items
       WHERE submission_id = $1
+      ORDER BY created_at ASC
       `,
       [submissionId],
     );

@@ -27,6 +27,15 @@ const uploadProofSchema = z.object({
   fileBase64: z.string().min(1),
 });
 
+const createStudentSubmissionSchema = z.object({
+  telegram_id: z.string().regex(/^\d+$/, "telegram_id must be numeric"),
+  category_id: z.string().uuid(),
+  subcategory: z.string().min(1).max(200),
+  title: z.string().min(1).max(200),
+  description: z.string().min(1).max(5000),
+  proof_file_url: z.string().url(),
+});
+
 function verifyBotApiKey(headers: Record<string, unknown>): boolean {
   const token = headers["x-bot-api-key"];
   return typeof token === "string" && token === env.BOT_API_KEY;
@@ -51,10 +60,29 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
+  app.post("/users/lookup", async (request, reply) => {
+    try {
+      const body = telegramIdentitySchema.parse(request.body);
+      const user = await service.findUserByTelegramId(body.telegram_id);
+      reply.send(success({ user }));
+    } catch (error) {
+      handleRouteError(app, reply, error);
+    }
+  });
+
   app.post("/users/resolve", async (request, reply) => {
     try {
       const body = telegramIdentitySchema.parse(request.body);
       const data = await service.findOrCreateUserByTelegramId(body.telegram_id);
+      reply.send(success(data));
+    } catch (error) {
+      handleRouteError(app, reply, error);
+    }
+  });
+
+  app.get("/categories", async (request, reply) => {
+    try {
+      const data = await service.getCategoriesCatalog();
       reply.send(success(data));
     } catch (error) {
       handleRouteError(app, reply, error);
@@ -66,6 +94,23 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
       const body = linkSchema.parse(request.body);
       const data = await service.linkTelegramByEmail(body.email, body.telegram_id);
       reply.send(success(data));
+    } catch (error) {
+      handleRouteError(app, reply, error);
+    }
+  });
+
+  app.post("/submissions/student", async (request, reply) => {
+    try {
+      const body = createStudentSubmissionSchema.parse(request.body);
+      const data = await service.createStudentSubmissionFromBot({
+        telegramId: body.telegram_id,
+        categoryId: body.category_id,
+        subcategory: body.subcategory,
+        title: body.title,
+        description: body.description,
+        proofFileUrl: body.proof_file_url,
+      });
+      reply.status(201).send(success(data));
     } catch (error) {
       handleRouteError(app, reply, error);
     }
