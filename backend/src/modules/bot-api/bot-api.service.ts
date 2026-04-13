@@ -5,9 +5,9 @@ import { env } from "../../config/env";
 interface UserRow {
   id: string;
   role: "student" | "reviewer" | "admin";
-  email: string;
   full_name: string | null;
   telegram_id: string | null;
+  telegram_username: string | null;
 }
 
 interface SubmissionRow {
@@ -21,7 +21,7 @@ interface SubmissionRow {
 export interface BotUser {
   id: string;
   role: "student" | "reviewer" | "admin";
-  email: string;
+  telegramUsername: string | null;
   fullName: string | null;
 }
 
@@ -43,14 +43,44 @@ function toSafeFilename(filename: string): string {
   return filename.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
+function isMissingRelationError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: string }).code === "42P01"
+  );
+}
+
 export class BotApiService {
+  private telegramUsernameColumnAvailable: boolean | null = null;
+
   constructor(private readonly app: FastifyInstance) {}
+
+  private async hasTelegramUsernameColumn(): Promise<boolean> {
+    if (this.telegramUsernameColumnAvailable !== null) {
+      return this.telegramUsernameColumnAvailable;
+    }
+    const check = await this.app.db.query<{ exists: boolean }>(
+      `
+      SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'users'
+          AND column_name = 'telegram_username'
+      ) AS exists
+      `,
+    );
+    this.telegramUsernameColumnAvailable = Boolean(check.rows[0]?.exists);
+    return this.telegramUsernameColumnAvailable;
+  }
 
   private toBotUser(row: UserRow): BotUser {
     return {
       id: row.id,
       role: row.role,
-      email: row.email,
+      telegramUsername: row.telegram_username,
       fullName: row.full_name,
     };
   }
@@ -65,31 +95,40 @@ export class BotApiService {
       subcategories: Array<{ slug: string; label: string }>;
     }>
   > {
-    const result = await this.app.db.query<{
-      id: string;
-      name: string;
-      type: string;
-      min_score: string;
-      max_score: string;
-      slug: string | null;
-      label: string | null;
-      sort_order: number | null;
-    }>(
-      `
-      SELECT
-        c.id,
-        c.name,
-        c.type::text AS type,
-        c.min_score,
-        c.max_score,
-        cs.slug,
-        cs.label,
-        cs.sort_order
-      FROM categories c
-      LEFT JOIN category_subcategories cs ON cs.category_id = c.id
-      ORDER BY c.name ASC, cs.sort_order ASC NULLS LAST, cs.slug ASC NULLS LAST
-      `,
-    );
+    let result;
+    try {
+      result = await this.app.db.query<{
+        id: string;
+        name: string;
+        type: string;
+        min_score: string;
+        max_score: string;
+        slug: string | null;
+        label: string | null;
+        sort_order: number | null;
+      }>(
+        `
+        SELECT
+          c.id,
+          c.name,
+          c.type::text AS type,
+          c.min_score,
+          c.max_score,
+          cs.slug,
+          cs.label,
+          cs.sort_order
+        FROM categories c
+        LEFT JOIN category_subcategories cs ON cs.category_id = c.id
+        ORDER BY c.name ASC, cs.sort_order ASC NULLS LAST, cs.slug ASC NULLS LAST
+        `,
+      );
+    } catch (error) {
+      if (isMissingRelationError(error)) {
+        this.app.log.warn("categories tables are not available yet; returning empty catalog");
+        return [];
+      }
+      throw error;
+    }
 
     const byId = new Map<
       string,
@@ -463,10 +502,17 @@ export class BotApiService {
     }
   }
 
-  async findUserByTelegramId(telegramId: string): Promise<BotUser | null> {
+  async findUserByTelegramId(
+    telegramId: string,
+    identity?: { telegramUsername: string | null; fullName: string | null },
+  ): Promise<BotUser | null> {
+    const hasTelegramUsername = await this.hasTelegramUsernameColumn();
+    const telegramUsernameSelect = hasTelegramUsername
+      ? "telegram_username"
+      : "NULL::text AS telegram_username";
     const result = await this.app.db.query<UserRow>(
       `
-      SELECT id, role, email, full_name, telegram_id
+      SELECT id, role, full_name, telegram_id, ${telegramUsernameSelect}
       FROM users
       WHERE telegram_id = $1::bigint
       LIMIT 1
@@ -477,11 +523,47 @@ export class BotApiService {
     const row = result.rows[0];
     if (!row) return null;
 
+    if (identity) {
+      const nextUsername = identity.telegramUsername ? identity.telegramUsername.trim() : null;
+      const nextFullName = identity.fullName ? identity.fullName.trim() : null;
+      const shouldUpdateUsername =
+        hasTelegramUsername && Boolean(nextUsername && nextUsername !== row.telegram_username);
+      const shouldUpdateFullName = Boolean(nextFullName && nextFullName !== row.full_name);
+      if (shouldUpdateUsername || shouldUpdateFullName) {
+        const updates: string[] = [];
+        const params: Array<string | null> = [row.id];
+        let i = 2;
+        if (shouldUpdateUsername) {
+          updates.push(`telegram_username = $${i++}`);
+          params.push(nextUsername);
+        }
+        if (shouldUpdateFullName) {
+          updates.push(`full_name = $${i++}`);
+          params.push(nextFullName);
+        }
+        await this.app.db.query(
+          `
+          UPDATE users
+          SET ${updates.join(", ")}, updated_at = NOW()
+          WHERE id = $1
+          `,
+          params,
+        );
+        if (shouldUpdateUsername) {
+          row.telegram_username = nextUsername ?? row.telegram_username;
+        }
+        row.full_name = nextFullName ?? row.full_name;
+      }
+    }
+
     return this.toBotUser(row);
   }
 
-  async findOrCreateUserByTelegramId(telegramId: string): Promise<BotUser> {
-    const existing = await this.findUserByTelegramId(telegramId);
+  async findOrCreateUserByTelegramId(
+    telegramId: string,
+    identity?: { telegramUsername: string | null; fullName: string | null },
+  ): Promise<BotUser> {
+    const existing = await this.findUserByTelegramId(telegramId, identity);
     if (existing) {
       this.app.log.info(
         { telegram_id: telegramId, user_id: existing.id, source: "existing" },
@@ -490,45 +572,34 @@ export class BotApiService {
       return existing;
     }
 
-    const generatedEmail = `tg_${telegramId}@telegram.local`;
-    const createdAuth = await this.app.supabaseAdmin.auth.admin.createUser({
-      email: generatedEmail,
-      email_confirm: true,
-      app_metadata: {
-        role: "student",
-      },
-    });
-
-    if (createdAuth.error || !createdAuth.data.user) {
-      throw new Error(`Failed to create auth user for telegram_id=${telegramId}`);
-    }
-
-    const inserted = await this.app.db.query<UserRow>(
-      `
-      INSERT INTO users (id, email, role, telegram_id)
-      VALUES ($1, $2, 'student', $3::bigint)
-      RETURNING id, role, email, full_name, telegram_id
-      `,
-      [createdAuth.data.user.id, generatedEmail, telegramId],
-    );
-
-    const row = inserted.rows[0];
-    this.app.log.info(
-      { telegram_id: telegramId, user_id: row.id, source: "created" },
-      "Resolved bot user mapping",
-    );
-    return this.toBotUser(row);
+    throw new Error("Telegram account is not linked. Please link via email first.");
   }
 
-  async linkTelegramByEmail(email: string, telegramId: string): Promise<BotUser | null> {
+  async linkTelegramByEmail(
+    email: string,
+    telegramId: string,
+    identity?: { telegramUsername: string | null; fullName: string | null },
+  ): Promise<BotUser | null> {
+    const hasTelegramUsername = await this.hasTelegramUsernameColumn();
+    const nextUsername = identity?.telegramUsername ? identity.telegramUsername.trim() : null;
+    const nextFullName = identity?.fullName ? identity.fullName.trim() : null;
+    const telegramUsernameUpdate = hasTelegramUsername
+      ? "telegram_username = COALESCE($3, telegram_username),"
+      : "";
+    const telegramUsernameSelect = hasTelegramUsername
+      ? "telegram_username"
+      : "NULL::text AS telegram_username";
     const result = await this.app.db.query<UserRow>(
       `
       UPDATE users
-      SET telegram_id = $2::bigint, updated_at = NOW()
+      SET telegram_id = $2::bigint,
+          ${telegramUsernameUpdate}
+          full_name = COALESCE($4, full_name),
+          updated_at = NOW()
       WHERE lower(email) = lower($1)
-      RETURNING id, role, email, full_name, telegram_id
+      RETURNING id, role, full_name, telegram_id, ${telegramUsernameSelect}
       `,
-      [email, telegramId],
+      [email, telegramId, nextUsername, nextFullName],
     );
 
     const row = result.rows[0];

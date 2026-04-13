@@ -75,6 +75,7 @@ create table if not exists public.users (
   email citext not null unique,
   full_name text,
   telegram_id bigint unique,
+  telegram_username text,
   role public.user_role not null default 'student',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -82,6 +83,9 @@ create table if not exists public.users (
 
 alter table public.users
   add column if not exists telegram_id bigint;
+
+alter table public.users
+  add column if not exists telegram_username text;
 
 do $$
 begin

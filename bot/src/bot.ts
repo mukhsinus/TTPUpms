@@ -25,11 +25,26 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
     }
 
     const tg = String(telegramUserId);
-    const linkedUser = await upmsService.lookupUserByTelegramId(tg);
+  let linkedUser = null;
+  try {
+    linkedUser = await upmsService.lookupUserByTelegramId({
+      telegramId: tg,
+      telegramUsername: ctx.from?.username ? String(ctx.from.username) : null,
+      fullName: [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") || null,
+    });
+  } catch (error) {
+    process.stderr.write(`start lookup failed: ${String(error)}\n`);
+    await ctx.reply("UPMS service is temporarily unavailable. Please try again later.");
+    return;
+  }
     if (linkedUser) {
       ctx.session.authenticatedTelegramId = tg;
+    const display =
+      linkedUser.telegramUsername && linkedUser.telegramUsername.trim() !== ""
+        ? `@${linkedUser.telegramUsername}`
+        : null;
       await ctx.reply(
-        `Welcome back, ${linkedUser.fullName ?? linkedUser.email}.\nChoose an action below.`,
+      display ? `Welcome back, ${display}.\nChoose an action below.` : "Welcome back.\nChoose an action below.",
         mainMenuKeyboard(),
       );
       return;
@@ -67,15 +82,31 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
       return;
     }
 
-    const linkedUser = await upmsService.linkTelegramByEmail(text, String(telegramUserId));
+  let linkedUser = null;
+  try {
+    linkedUser = await upmsService.linkTelegramByEmail({
+      email: text,
+      telegramId: String(telegramUserId),
+      telegramUsername: ctx.from?.username ? String(ctx.from.username) : null,
+      fullName: [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") || null,
+    });
+  } catch (error) {
+    process.stderr.write(`link by email failed: ${String(error)}\n`);
+    await ctx.reply("Could not link your account right now. Please try again later.");
+    return;
+  }
     if (!linkedUser) {
       await ctx.reply("Email not found. Use the address registered in UPMS.");
       return;
     }
 
     ctx.session.authenticatedTelegramId = String(telegramUserId);
+  const display =
+    linkedUser.telegramUsername && linkedUser.telegramUsername.trim() !== ""
+      ? `@${linkedUser.telegramUsername}`
+      : null;
     await ctx.reply(
-      `Linked successfully. Hello, ${linkedUser.fullName ?? linkedUser.email}.`,
+    display ? `Linked successfully. Hello, ${display}.` : "Linked successfully. Hello.",
       mainMenuKeyboard(),
     );
   });

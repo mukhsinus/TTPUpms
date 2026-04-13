@@ -67,8 +67,9 @@ export interface ReviewSubmissionItemResponse {
 
 interface TopStudent {
   userId: string;
-  email: string;
   fullName: string | null;
+  telegramUsername: string | null;
+  telegramId: string | null;
   approvedPoints: number;
   approvedSubmissions: number;
 }

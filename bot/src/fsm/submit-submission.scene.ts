@@ -14,7 +14,6 @@ import type { BotContext, SubmitFlowState } from "../types/session";
 const TEN_MB = 10 * 1024 * 1024;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-const CATEGORIES_FAIL_MSG = "Could not load categories. Please try again later.";
 const NO_CATEGORIES_MSG = "No categories available. Please try later.";
 const SUCCESS_MSG = "Your achievement has been submitted and is under review.";
 
@@ -63,35 +62,37 @@ async function leaveWithMenu(ctx: BotContext): Promise<void> {
   await ctx.scene.leave();
 }
 
-async function presentCategoryStep(ctx: BotContext, upms: UpmsService): Promise<void> {
+async function presentCategoryStep(ctx: BotContext, upms: UpmsService): Promise<boolean> {
   const tgId = ctx.session.authenticatedTelegramId;
   if (!tgId) {
     await ctx.reply("Session error. Use /start and try again.", mainMenuKeyboard());
-    throw new Error("NO_TG");
+    return false;
   }
 
   const s = st(ctx);
-  if (!s.submissionId) {
-    const draft = await upms.createDraftSubmission(tgId);
-    s.submissionId = draft.submissionId;
-  }
-
-  let categories;
   try {
-    categories = await upms.getCategoriesCatalog();
-    console.log("categories:", categories);
-  } catch {
-    await ctx.reply(CATEGORIES_FAIL_MSG, mainMenuKeyboard());
-    throw new Error("CAT_FAIL");
-  }
+    const categories = await upms.getCategoriesCatalog();
+    console.log("Categories response:", categories);
 
-  if (categories.length === 0) {
-    await ctx.reply(NO_CATEGORIES_MSG, mainMenuKeyboard());
-    throw new Error("NO_CATS");
-  }
+    if (!categories || categories.length === 0) {
+      await ctx.reply(NO_CATEGORIES_MSG, mainMenuKeyboard());
+      return false;
+    }
 
-  s.categories = categories;
-  await ctx.reply("Select a category:", categoryPickerKeyboard(categories));
+    // Create draft only after categories are available (avoid side-effects when categories fail).
+    if (!s.submissionId) {
+      const draft = await upms.createDraftSubmission(tgId);
+      s.submissionId = draft.submissionId;
+    }
+
+    s.categories = categories;
+    await ctx.reply("Select a category:", categoryPickerKeyboard(categories));
+    return true;
+  } catch (e) {
+    console.error("Categories error:", e);
+    await ctx.reply("Submission is temporarily unavailable. Please try again later.", mainMenuKeyboard());
+    return false;
+  }
 }
 
 function formatItemBlock(s: SubmitFlowState, externalLink: string | null): string {
@@ -142,12 +143,23 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       const tg = String(fromId);
       resetFlowState(st(ctx));
 
-      const linked = await upms.lookupUserByTelegramId(tg);
+      let linked = null;
+      try {
+        linked = await upms.lookupUserByTelegramId({
+          telegramId: tg,
+          telegramUsername: ctx.from?.username ? String(ctx.from.username) : null,
+          fullName: [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") || null,
+        });
+      } catch (error) {
+        console.error("Submit flow lookup error:", error);
+        await ctx.reply("Submission is temporarily unavailable. Please try again later.", mainMenuKeyboard());
+        await leaveWithMenu(ctx);
+        return;
+      }
       if (linked) {
         ctx.session.authenticatedTelegramId = tg;
-        try {
-          await presentCategoryStep(ctx, upms);
-        } catch {
+        const ok = await presentCategoryStep(ctx, upms);
+        if (!ok) {
           await leaveWithMenu(ctx);
           return;
         }
@@ -189,7 +201,12 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       }
 
       try {
-        const user = await upms.linkTelegramByEmail(text, String(fromId));
+        const user = await upms.linkTelegramByEmail({
+          email: text,
+          telegramId: String(fromId),
+          telegramUsername: ctx.from?.username ? String(ctx.from.username) : null,
+          fullName: [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") || null,
+        });
         if (!user) {
           await ctx.reply("Email not found. Use the address registered in UPMS, or tap Cancel.", cancelOnlyKeyboard());
           return;
@@ -204,9 +221,8 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
         return;
       }
 
-      try {
-        await presentCategoryStep(ctx, upms);
-      } catch {
+      const ok = await presentCategoryStep(ctx, upms);
+      if (!ok) {
         await leaveWithMenu(ctx);
         return;
       }

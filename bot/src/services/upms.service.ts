@@ -4,7 +4,7 @@ import type { CategoryCatalogEntry } from "../types/session";
 interface BotApiUserRow {
   id: string;
   role: "student" | "reviewer" | "admin";
-  email: string;
+  telegramUsername: string | null;
   fullName: string | null;
 }
 
@@ -25,7 +25,7 @@ interface UploadProofResponse {
 export interface AuthenticatedTelegramUser {
   id: string;
   role: "student" | "reviewer" | "admin";
-  email: string;
+  telegramUsername: string | null;
   fullName: string | null;
 }
 
@@ -57,14 +57,22 @@ export class UpmsService {
   }
 
   /** Lookup only — does not create a user. */
-  async lookupUserByTelegramId(telegramId: string): Promise<AuthenticatedTelegramUser | null> {
+  async lookupUserByTelegramId(input: {
+    telegramId: string;
+    telegramUsername?: string | null;
+    fullName?: string | null;
+  }): Promise<AuthenticatedTelegramUser | null> {
     const payload = await fetch(`${env.BACKEND_API_URL}/api/bot/users/lookup`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-bot-api-key": env.BOT_API_KEY,
       },
-      body: JSON.stringify({ telegram_id: telegramId }),
+      body: JSON.stringify({
+        telegram_id: input.telegramId,
+        telegram_username: input.telegramUsername ?? null,
+        full_name: input.fullName ?? null,
+      }),
     });
 
     const body = (await payload.json()) as ApiEnvelope<{ user: BotApiUserRow | null }>;
@@ -79,34 +87,52 @@ export class UpmsService {
     return {
       id: user.id,
       role: user.role,
-      email: user.email,
+      telegramUsername: user.telegramUsername,
       fullName: user.fullName,
     };
   }
 
   /** Ensures a user row exists (used by list/points/upload). */
-  async resolveUserByTelegramId(telegramId: string): Promise<AuthenticatedTelegramUser> {
+  async resolveUserByTelegramId(input: {
+    telegramId: string;
+    telegramUsername?: string | null;
+    fullName?: string | null;
+  }): Promise<AuthenticatedTelegramUser> {
     const user = await this.requestJson<BotApiUserRow>("/api/bot/users/resolve", {
       method: "POST",
-      body: JSON.stringify({ telegram_id: telegramId }),
+      body: JSON.stringify({
+        telegram_id: input.telegramId,
+        telegram_username: input.telegramUsername ?? null,
+        full_name: input.fullName ?? null,
+      }),
     });
 
     return {
       id: user.id,
       role: user.role,
-      email: user.email,
+      telegramUsername: user.telegramUsername,
       fullName: user.fullName,
     };
   }
 
-  async linkTelegramByEmail(email: string, telegramId: string): Promise<AuthenticatedTelegramUser | null> {
+  async linkTelegramByEmail(input: {
+    email: string;
+    telegramId: string;
+    telegramUsername?: string | null;
+    fullName?: string | null;
+  }): Promise<AuthenticatedTelegramUser | null> {
     const response = await fetch(`${env.BACKEND_API_URL}/api/bot/users/link-email`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-bot-api-key": env.BOT_API_KEY,
       },
-      body: JSON.stringify({ email, telegram_id: telegramId }),
+      body: JSON.stringify({
+        email: input.email,
+        telegram_id: input.telegramId,
+        telegram_username: input.telegramUsername ?? null,
+        full_name: input.fullName ?? null,
+      }),
     });
 
     const payload = (await response.json()) as ApiEnvelope<BotApiUserRow | null>;
@@ -119,7 +145,7 @@ export class UpmsService {
       ? {
           id: user.id,
           role: user.role,
-          email: user.email,
+          telegramUsername: user.telegramUsername,
           fullName: user.fullName,
         }
       : null;
@@ -203,7 +229,7 @@ export class UpmsService {
   }
 
   async getUserSubmissions(telegramId: string): Promise<BotApiSubmissionRow[]> {
-    await this.resolveUserByTelegramId(telegramId);
+    await this.resolveUserByTelegramId({ telegramId });
     return this.requestJson<BotApiSubmissionRow[]>("/api/bot/submissions/list", {
       method: "POST",
       body: JSON.stringify({
@@ -213,7 +239,7 @@ export class UpmsService {
   }
 
   async getUserPoints(telegramId: string): Promise<number> {
-    await this.resolveUserByTelegramId(telegramId);
+    await this.resolveUserByTelegramId({ telegramId });
     const result = await this.requestJson<{ totalPoints: number }>("/api/bot/points", {
       method: "POST",
       body: JSON.stringify({
@@ -229,7 +255,7 @@ export class UpmsService {
     mimeType: "application/pdf" | "image/jpeg" | "image/png";
     bytes: Buffer;
   }): Promise<UploadProofResponse> {
-    await this.resolveUserByTelegramId(input.telegramId);
+    await this.resolveUserByTelegramId({ telegramId: input.telegramId });
     return this.requestJson<UploadProofResponse>("/api/bot/files/upload", {
       method: "POST",
       body: JSON.stringify({

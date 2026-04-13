@@ -18,6 +18,14 @@ const createAchievementSchema = z.object({
 
 const telegramIdentitySchema = z.object({
   telegram_id: z.string().regex(/^\d+$/, "telegram_id must be numeric"),
+  telegram_username: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[a-zA-Z0-9_]+$/, "telegram_username must be alphanumeric/underscore")
+    .optional()
+    .nullable(),
+  full_name: z.string().min(1).max(200).optional().nullable(),
 });
 
 const uploadProofSchema = z.object({
@@ -86,7 +94,10 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
   app.post("/users/lookup", async (request, reply) => {
     try {
       const body = telegramIdentitySchema.parse(request.body);
-      const user = await service.findUserByTelegramId(body.telegram_id);
+      const user = await service.findUserByTelegramId(body.telegram_id, {
+        telegramUsername: body.telegram_username ?? null,
+        fullName: body.full_name ?? null,
+      });
       reply.send(success({ user }));
     } catch (error) {
       handleRouteError(app, reply, error);
@@ -96,7 +107,10 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
   app.post("/users/resolve", async (request, reply) => {
     try {
       const body = telegramIdentitySchema.parse(request.body);
-      const data = await service.findOrCreateUserByTelegramId(body.telegram_id);
+      const data = await service.findOrCreateUserByTelegramId(body.telegram_id, {
+        telegramUsername: body.telegram_username ?? null,
+        fullName: body.full_name ?? null,
+      });
       reply.send(success(data));
     } catch (error) {
       handleRouteError(app, reply, error);
@@ -115,7 +129,16 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
   app.post("/users/link-email", async (request, reply) => {
     try {
       const body = linkSchema.parse(request.body);
-      const data = await service.linkTelegramByEmail(body.email, body.telegram_id);
+      const telegramIdentity =
+        typeof request.body === "object" && request.body !== null ? (request.body as Record<string, unknown>) : {};
+      const telegram_username =
+        typeof telegramIdentity.telegram_username === "string" ? telegramIdentity.telegram_username : null;
+      const full_name = typeof telegramIdentity.full_name === "string" ? telegramIdentity.full_name : null;
+
+      const data = await service.linkTelegramByEmail(body.email, body.telegram_id, {
+        telegramUsername: telegram_username,
+        fullName: full_name,
+      });
       reply.send(success(data));
     } catch (error) {
       handleRouteError(app, reply, error);

@@ -2,8 +2,9 @@ import type { FastifyInstance } from "fastify";
 
 interface TopStudentRow {
   user_id: string;
-  email: string;
   full_name: string | null;
+  telegram_username: string | null;
+  telegram_id: string | null;
   approved_points: string;
   approved_submissions: string;
 }
@@ -21,8 +22,9 @@ interface ActivityStatRow {
 
 export interface TopStudent {
   userId: string;
-  email: string;
   fullName: string | null;
+  telegramUsername: string | null;
+  telegramId: string | null;
   approvedPoints: number;
   approvedSubmissions: number;
 }
@@ -46,14 +48,15 @@ export class AnalyticsService {
       `
       SELECT
         s.user_id,
-        u.email,
         u.full_name,
+        to_jsonb(u)->>'telegram_username' AS telegram_username,
+        u.telegram_id::text AS telegram_id,
         COALESCE(SUM(s.total_points), 0)::text AS approved_points,
         COUNT(*)::text AS approved_submissions
       FROM submissions s
       INNER JOIN users u ON u.id = s.user_id
       WHERE s.status = 'approved'
-      GROUP BY s.user_id, u.email, u.full_name
+      GROUP BY s.user_id, u.full_name, to_jsonb(u)->>'telegram_username', u.telegram_id
       ORDER BY COALESCE(SUM(s.total_points), 0) DESC
       LIMIT $1
       `,
@@ -62,8 +65,9 @@ export class AnalyticsService {
 
     return result.rows.map((row) => ({
       userId: row.user_id,
-      email: row.email,
       fullName: row.full_name,
+      telegramUsername: row.telegram_username,
+      telegramId: row.telegram_id,
       approvedPoints: Number(row.approved_points),
       approvedSubmissions: Number(row.approved_submissions),
     }));

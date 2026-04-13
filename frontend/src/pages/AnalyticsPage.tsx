@@ -18,8 +18,9 @@ import { api } from "../lib/api";
 
 interface TopStudent {
   userId: string;
-  email: string;
   fullName: string | null;
+  telegramUsername: string | null;
+  telegramId: string | null;
   approvedPoints: number;
   approvedSubmissions: number;
 }
@@ -88,7 +89,10 @@ export function AnalyticsPage(): ReactElement {
   const topStudentsChartData = useMemo(
     () =>
       topStudents.map((s) => ({
-        name: (s.fullName?.trim() || s.email || s.userId).slice(0, 28),
+        name: (s.telegramUsername ? `@${s.telegramUsername}` : s.fullName?.trim() || s.telegramId || s.userId).slice(
+          0,
+          28,
+        ),
         points: s.approvedPoints,
         submissions: s.approvedSubmissions,
       })),
@@ -236,7 +240,7 @@ export function AnalyticsPage(): ReactElement {
               <thead>
                 <tr>
                   <th>Student</th>
-                  <th>Email</th>
+                  <th>Telegram</th>
                   <th>Approved</th>
                   <th>Points</th>
                 </tr>
@@ -260,7 +264,7 @@ export function AnalyticsPage(): ReactElement {
                   topStudents.map((item) => (
                     <tr key={item.userId}>
                       <td>{item.fullName ?? "—"}</td>
-                      <td>{item.email}</td>
+                      <td>{item.telegramUsername ? `@${item.telegramUsername}` : item.telegramId ?? "—"}</td>
                       <td>{item.approvedSubmissions}</td>
                       <td>{item.approvedPoints.toFixed(2)}</td>
                     </tr>
