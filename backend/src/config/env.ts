@@ -1,7 +1,19 @@
+import path from "node:path";
 import dotenv from "dotenv";
 import { z } from "zod";
 
-dotenv.config();
+const backendEnvFile = path.join(__dirname, "../../.env");
+dotenv.config({ path: backendEnvFile, override: true });
+dotenv.config({ override: false });
+
+function normalizeBotApiKey(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  let s = value.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").trim();
+  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+    s = s.slice(1, -1).trim();
+  }
+  return s.length ? s : undefined;
+}
 
 const resolvedDatabaseUrl =
   process.env.DATABASE_URL ??
@@ -15,6 +27,7 @@ const envInput = {
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN ?? process.env.BOT_TOKEN,
   DATABASE_URL: resolvedDatabaseUrl,
   SUPABASE_DB_URL: process.env.SUPABASE_DB_URL ?? resolvedDatabaseUrl,
+  BOT_API_KEY: normalizeBotApiKey(process.env.BOT_API_KEY),
 };
 
 const envSchema = z.object({
@@ -33,7 +46,12 @@ const envSchema = z.object({
   STORAGE_BUCKET: z.string().default("submission-files"),
   STORAGE_SIGNED_URL_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
   TELEGRAM_BOT_TOKEN: z.string().min(1, "TELEGRAM_BOT_TOKEN is required"),
-  BOT_API_KEY: z.string().min(16, "BOT_API_KEY is required and must be at least 16 chars"),
+  BOT_API_KEY: z
+    .string()
+    .min(
+      16,
+      "BOT_API_KEY must match bot BOT_API_KEY (min 16 chars after trim); set in backend/.env with no surrounding quotes or spaces.",
+    ),
   DB_POOL_MAX: z.coerce.number().int().positive().default(20),
   DB_POOL_IDLE_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
   DB_POOL_CONNECTION_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),

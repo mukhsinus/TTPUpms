@@ -5,6 +5,10 @@ import { errorCodeFromStatus, failure } from "../utils/http-response";
 export function setGlobalErrorHandler(app: FastifyInstance): void {
   app.setErrorHandler(
     (error: FastifyError, _request: FastifyRequest, reply: FastifyReply): void => {
+      if (reply.sent) {
+        return;
+      }
+
       const mapped = mapPgErrorToClient(error);
       if (mapped) {
         reply.status(mapped.status).send(failure(mapped.message, mapped.code, {}));

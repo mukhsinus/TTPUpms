@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { env } from "../../config/env";
 import { botWriteIdempotency } from "../../middleware/bot-idempotency.middleware";
@@ -78,9 +78,50 @@ const submitDraftBodySchema = z.object({
   telegram_id: z.string().regex(/^\d+$/, "telegram_id must be numeric"),
 });
 
-function verifyBotApiKey(headers: Record<string, unknown>): boolean {
-  const token = headers["x-bot-api-key"];
-  return typeof token === "string" && token === env.BOT_API_KEY;
+function pickHeaderValue(value: string | string[] | undefined): string | undefined {
+  if (typeof value === "string") {
+    const t = value.replace(/^\uFEFF/, "").trim();
+    return t.length ? t : undefined;
+  }
+  if (Array.isArray(value) && value.length > 0 && typeof value[0] === "string") {
+    const t = value[0].replace(/^\uFEFF/, "").trim();
+    return t.length ? t : undefined;
+  }
+  return undefined;
+}
+
+/** Resolve bot API key from Node/Fastify header shapes (do not rely on Object.entries). */
+function readBotApiKeyHeader(request: FastifyRequest): string | undefined {
+  const h = request.headers;
+  const fromParsed =
+    pickHeaderValue(h["x-bot-api-key"]) ??
+    pickHeaderValue(h["X-Bot-Api-Key"] as string | string[] | undefined);
+
+  if (fromParsed) {
+    return fromParsed;
+  }
+
+  const want = "x-bot-api-key";
+  for (const [key, value] of Object.entries(h)) {
+    if (key.toLowerCase() !== want) {
+      continue;
+    }
+    const picked = pickHeaderValue(value as string | string[] | undefined);
+    if (picked) {
+      return picked;
+    }
+  }
+
+  const raw = request.raw.headers["x-bot-api-key"];
+  return pickHeaderValue(typeof raw === "string" || Array.isArray(raw) ? raw : undefined);
+}
+
+function verifyBotApiKey(request: FastifyRequest): boolean {
+  const token = readBotApiKeyHeader(request);
+  if (token === undefined) {
+    return false;
+  }
+  return token === env.BOT_API_KEY;
 }
 
 const botPostRate = userWriteRateLimitPreHandler({
@@ -90,6 +131,10 @@ const botPostRate = userWriteRateLimitPreHandler({
 });
 
 function handleRouteError(app: FastifyInstance, reply: FastifyReply, error: unknown): void {
+  if (reply.sent) {
+    return;
+  }
+
   if (error instanceof z.ZodError) {
     reply.status(400).send(
       failure("Validation error", "VALIDATION_ERROR", {
@@ -122,7 +167,7 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("onSend", idempotencyOnSend(app));
 
   app.addHook("preHandler", async (request, reply) => {
-    if (!verifyBotApiKey(request.headers as Record<string, unknown>)) {
+    if (!verifyBotApiKey(request)) {
       return reply.status(401).send(failure("Unauthorized bot API access", "UNAUTHORIZED", {}));
     }
     if (request.method === "POST") {

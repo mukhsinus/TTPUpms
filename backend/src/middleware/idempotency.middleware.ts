@@ -176,7 +176,7 @@ export function idempotencyPreHandler(
 }
 
 export function idempotencyOnSend(app: FastifyInstance) {
-  return async (request: FastifyRequest, _reply: FastifyReply, payload: unknown): Promise<unknown> => {
+  return async (request: FastifyRequest, reply: FastifyReply, payload: unknown): Promise<unknown> => {
     const method = request.method;
     if (method === "GET" || method === "HEAD" || method === "OPTIONS") {
       return payload;
@@ -192,24 +192,36 @@ export function idempotencyOnSend(app: FastifyInstance) {
     const responseBody = payloadToJson(payload);
     if (responseBody === null) return payload;
 
-    await app.db.query(
-      `
-      UPDATE idempotency_keys
-      SET response_status = $1, response_body = $2::jsonb, updated_at = NOW()
-      WHERE user_id = $3
-        AND scope = $4
-        AND idempotency_key = $5
-        AND request_hash = $6
-      `,
-      [
-        request.raw.statusCode,
-        JSON.stringify(responseBody),
-        ownerId,
-        request.idempotencyContext.scope,
-        request.idempotencyContext.key,
-        request.idempotencyContext.hash,
-      ],
-    );
+    const statusCode = reply.statusCode ?? request.raw.statusCode ?? 500;
+    const scope = request.idempotencyContext.scope;
+    const idemKey = request.idempotencyContext.key;
+    const idemHash = request.idempotencyContext.hash;
+
+    let bodyJson: string;
+    try {
+      bodyJson = JSON.stringify(responseBody);
+    } catch (err) {
+      app.log.error({ err, reqId: request.id }, "idempotencyOnSend: stringify response body failed (non-fatal)");
+      return payload;
+    }
+
+    // Never await DB inside onSend: it can stall the reply pipeline and correlate with
+    // ERR_HTTP_HEADERS_SENT / empty bodies on the client. Persist after returning payload.
+    void app.db
+      .query(
+        `
+        UPDATE idempotency_keys
+        SET response_status = $1, response_body = $2::jsonb, updated_at = NOW()
+        WHERE user_id = $3
+          AND scope = $4
+          AND idempotency_key = $5
+          AND request_hash = $6
+        `,
+        [statusCode, bodyJson, ownerId, scope, idemKey, idemHash],
+      )
+      .catch((err) => {
+        app.log.error({ err, reqId: request.id }, "idempotencyOnSend: failed to persist idempotency row (non-fatal)");
+      });
 
     return payload;
   };

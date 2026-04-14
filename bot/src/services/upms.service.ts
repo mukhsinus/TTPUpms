@@ -1,5 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { env } from "../config/env";
 import type { CategoryCatalogEntry } from "../types/session";
+import { UpmsApiError } from "./upms-api-error";
+
+const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 interface BotApiUserRow {
   id: string;
@@ -38,25 +43,120 @@ interface ApiEnvelope<T> {
   } | null;
 }
 
-export class UpmsService {
-  private async requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-    const response = await fetch(`${env.BACKEND_API_URL}${path}`, {
-      ...init,
-      headers: {
-        "Content-Type": "application/json",
-        "x-bot-api-key": env.BOT_API_KEY,
-        ...(init?.headers ?? {}),
-      },
-    });
+function isApiEnvelope(value: unknown): value is ApiEnvelope<unknown> {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const o = value as Record<string, unknown>;
+  return "data" in o && "error" in o;
+}
 
-    const payload = (await response.json()) as ApiEnvelope<T>;
-    if (!response.ok || payload.error || payload.data === null) {
-      const code = payload.error?.code;
-      const msg = payload.error?.message ?? `Backend bot API call failed (${response.status})`;
-      throw new Error(code ? `[${code}] ${msg}` : msg);
+function parseEnvelopeFromText(rawText: string, httpStatus: number, pathForLog: string): ApiEnvelope<unknown> {
+  const trimmed = rawText.trim();
+  if (!trimmed) {
+    throw new UpmsApiError(`Empty response from UPMS (${httpStatus})`, {
+      code: "EMPTY_RESPONSE",
+      httpStatus,
+    });
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed) as unknown;
+  } catch {
+    throw new UpmsApiError(`Invalid JSON from UPMS (${httpStatus}) for ${pathForLog}`, {
+      code: "INVALID_JSON",
+      httpStatus,
+    });
+  }
+
+  if (!isApiEnvelope(parsed)) {
+    throw new UpmsApiError(`Unexpected response shape from UPMS (${httpStatus}) for ${pathForLog}`, {
+      code: "INVALID_ENVELOPE",
+      httpStatus,
+    });
+  }
+
+  return parsed;
+}
+
+export class UpmsService {
+  /**
+   * Builds fetch headers: auto `Idempotency-Key` only for mutating methods when missing.
+   * GET/HEAD/OPTIONS never auto-add idempotency; caller may still pass `Idempotency-Key` explicitly.
+   */
+  private buildBotApiHeaders(init?: RequestInit): Headers {
+    const method = (init?.method ?? "GET").toUpperCase();
+    const headers = new Headers();
+
+    if (init?.headers) {
+      new Headers(init.headers).forEach((value, key) => {
+        headers.set(key, value);
+      });
     }
 
-    return payload.data;
+    headers.set("x-bot-api-key", env.BOT_API_KEY);
+
+    if (READ_METHODS.has(method)) {
+      return headers;
+    }
+
+    if (MUTATING_METHODS.has(method)) {
+      headers.set("Content-Type", "application/json");
+      if (!headers.has("Idempotency-Key")) {
+        headers.set("Idempotency-Key", randomUUID());
+      }
+      return headers;
+    }
+
+    if (!headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+    return headers;
+  }
+
+  private readFailure(envelope: ApiEnvelope<unknown>, httpStatus: number): UpmsApiError {
+    const code = envelope.error?.code ?? "REQUEST_FAILED";
+    const msg = envelope.error?.message ?? `Backend bot API call failed (${httpStatus})`;
+    const details = envelope.error?.details;
+    return new UpmsApiError(msg, { code, httpStatus, details });
+  }
+
+  private async requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+    const headers = this.buildBotApiHeaders(init);
+    const url = `${env.BACKEND_API_URL}${path}`;
+
+    const response = await fetch(url, {
+      ...init,
+      headers,
+    });
+
+    const rawText = await response.text();
+    let envelope: ApiEnvelope<T>;
+    try {
+      envelope = parseEnvelopeFromText(rawText, response.status, path) as ApiEnvelope<T>;
+    } catch (err) {
+      // Backend sometimes completes status before body is intact (e.g. reply lifecycle bug).
+      // Draft 409 without body is almost always active-submission quota from Postgres.
+      if (
+        err instanceof UpmsApiError &&
+        err.code === "EMPTY_RESPONSE" &&
+        response.status === 409 &&
+        path === "/api/bot/submissions/draft"
+      ) {
+        throw new UpmsApiError("Maximum of 3 active submissions per user.", {
+          code: "SUBMISSION_LIMIT_EXCEEDED",
+          httpStatus: 409,
+        });
+      }
+      throw err;
+    }
+
+    if (!response.ok || envelope.error || envelope.data === null) {
+      throw this.readFailure(envelope as ApiEnvelope<unknown>, response.status);
+    }
+
+    return envelope.data;
   }
 
   /** Lookup only — does not create a user. */
@@ -65,12 +165,10 @@ export class UpmsService {
     telegramUsername?: string | null;
     fullName?: string | null;
   }): Promise<AuthenticatedTelegramUser | null> {
-    const payload = await fetch(`${env.BACKEND_API_URL}/api/bot/users/lookup`, {
+    const path = "/api/bot/users/lookup";
+    const response = await fetch(`${env.BACKEND_API_URL}${path}`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-bot-api-key": env.BOT_API_KEY,
-      },
+      headers: this.buildBotApiHeaders({ method: "POST" }),
       body: JSON.stringify({
         telegram_id: input.telegramId,
         telegram_username: input.telegramUsername ?? null,
@@ -78,15 +176,18 @@ export class UpmsService {
       }),
     });
 
-    const body = (await payload.json()) as ApiEnvelope<{ user: BotApiUserRow | null }>;
-    if (!payload.ok || body.error) {
-      throw new Error(body.error?.message ?? `Lookup failed (${payload.status})`);
+    const rawText = await response.text();
+    const envelope = parseEnvelopeFromText(rawText, response.status, path) as ApiEnvelope<{ user: BotApiUserRow | null }>;
+
+    if (!response.ok || envelope.error) {
+      throw this.readFailure(envelope, response.status);
     }
-    if (!body.data?.user) {
+
+    const user = envelope.data?.user;
+    if (!user) {
       return null;
     }
 
-    const user = body.data.user;
     return {
       id: user.id,
       role: user.role,
@@ -124,12 +225,10 @@ export class UpmsService {
     telegramUsername?: string | null;
     fullName?: string | null;
   }): Promise<AuthenticatedTelegramUser | null> {
-    const response = await fetch(`${env.BACKEND_API_URL}/api/bot/users/link-email`, {
+    const path = "/api/bot/users/link-email";
+    const response = await fetch(`${env.BACKEND_API_URL}${path}`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-bot-api-key": env.BOT_API_KEY,
-      },
+      headers: this.buildBotApiHeaders({ method: "POST" }),
       body: JSON.stringify({
         email: input.email,
         telegram_id: input.telegramId,
@@ -138,12 +237,14 @@ export class UpmsService {
       }),
     });
 
-    const payload = (await response.json()) as ApiEnvelope<BotApiUserRow | null>;
-    if (!response.ok || payload.error) {
-      throw new Error(payload.error?.message ?? `Link failed (${response.status})`);
+    const rawText = await response.text();
+    const envelope = parseEnvelopeFromText(rawText, response.status, path) as ApiEnvelope<BotApiUserRow | null>;
+
+    if (!response.ok || envelope.error) {
+      throw this.readFailure(envelope, response.status);
     }
 
-    const user = payload.data;
+    const user = envelope.data;
     return user
       ? {
           id: user.id,
@@ -155,19 +256,7 @@ export class UpmsService {
   }
 
   async getCategoriesCatalog(): Promise<CategoryCatalogEntry[]> {
-    const response = await fetch(`${env.BACKEND_API_URL}/api/bot/categories`, {
-      method: "GET",
-      headers: {
-        "x-bot-api-key": env.BOT_API_KEY,
-      },
-    });
-
-    const payload = (await response.json()) as ApiEnvelope<CategoryCatalogEntry[]>;
-    if (!response.ok || payload.error || payload.data === null) {
-      throw new Error(payload.error?.message ?? `Categories failed (${response.status})`);
-    }
-
-    return payload.data;
+    return this.requestJson<CategoryCatalogEntry[]>("/api/bot/categories", { method: "GET" });
   }
 
   async createDraftSubmission(telegramId: string): Promise<{ submissionId: string }> {

@@ -9,6 +9,7 @@ import {
   subcategoryPickerKeyboard,
 } from "../keyboards";
 import type { UpmsService } from "../services/upms.service";
+import { UpmsApiError } from "../services/upms-api-error";
 import type { BotContext, SubmitFlowState } from "../types/session";
 
 const TEN_MB = 10 * 1024 * 1024;
@@ -16,6 +17,34 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const NO_CATEGORIES_MSG = "No categories available. Please try later.";
 const SUCCESS_MSG = "Your achievement has been submitted and is under review.";
+
+function userFacingUpmsMessage(error: unknown, fallback: string): string {
+  if (error instanceof UpmsApiError) {
+    switch (error.code) {
+      case "SUBMISSION_LIMIT_EXCEEDED":
+        return "You already have 3 active submissions (draft, submitted, or under review). Finish or withdraw one in UPMS before starting another from Telegram.";
+      case "UNAUTHORIZED":
+        return "UPMS rejected this request (bot API key). If you manage the server, ensure BOT_API_KEY matches between the bot and backend.";
+      case "VALIDATION_ERROR":
+        return error.message;
+      case "TELEGRAM_NOT_LINKED":
+        return "Your Telegram account is not linked to a university profile in UPMS.";
+      case "EMPTY_RESPONSE":
+      case "INVALID_JSON":
+      case "INVALID_ENVELOPE":
+        return "UPMS returned an unreadable response. Please try again in a moment.";
+      case "IDEMPOTENCY_IN_PROGRESS":
+      case "IDEMPOTENCY_KEY_CONFLICT":
+        return "Please wait a moment and try again.";
+      default:
+        return error.message || fallback;
+    }
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return fallback;
+}
 
 function st(ctx: BotContext): SubmitFlowState {
   return ctx.wizard.state as SubmitFlowState;
@@ -70,28 +99,36 @@ async function presentCategoryStep(ctx: BotContext, upms: UpmsService): Promise<
   }
 
   const s = st(ctx);
+
+  let categories;
   try {
-    const categories = await upms.getCategoriesCatalog();
-
-    if (!categories || categories.length === 0) {
-      await ctx.reply(NO_CATEGORIES_MSG, mainMenuKeyboard());
-      return false;
-    }
-
-    // Create draft only after categories are available (avoid side-effects when categories fail).
-    if (!s.submissionId) {
-      const draft = await upms.createDraftSubmission(tgId);
-      s.submissionId = draft.submissionId;
-    }
-
-    s.categories = categories;
-    await ctx.reply("Select a category:", categoryPickerKeyboard(categories));
-    return true;
+    categories = await upms.getCategoriesCatalog();
   } catch (e) {
-    console.error("Categories error:", e);
-    await ctx.reply("Submission is temporarily unavailable. Please try again later.", mainMenuKeyboard());
+    console.error("Submit flow: categories fetch failed:", e);
+    await ctx.reply(userFacingUpmsMessage(e, "Could not load categories."), mainMenuKeyboard());
     return false;
   }
+
+  if (!categories || categories.length === 0) {
+    await ctx.reply(NO_CATEGORIES_MSG, mainMenuKeyboard());
+    return false;
+  }
+
+  // Create draft only after categories are available (avoid side-effects when categories fail).
+  if (!s.submissionId) {
+    try {
+      const draft = await upms.createDraftSubmission(tgId);
+      s.submissionId = draft.submissionId;
+    } catch (e) {
+      console.error("Submit flow: draft creation failed:", e);
+      await ctx.reply(userFacingUpmsMessage(e, "Could not start a new submission."), mainMenuKeyboard());
+      return false;
+    }
+  }
+
+  s.categories = categories;
+  await ctx.reply("Select a category:", categoryPickerKeyboard(categories));
+  return true;
 }
 
 function formatItemBlock(s: SubmitFlowState, externalLink: string | null): string {
@@ -150,8 +187,8 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
           fullName: [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") || null,
         });
       } catch (error) {
-        console.error("Submit flow lookup error:", error);
-        await ctx.reply("Submission is temporarily unavailable. Please try again later.", mainMenuKeyboard());
+        console.error("Submit flow: user lookup failed:", error);
+        await ctx.reply(userFacingUpmsMessage(error, "Could not verify your account."), mainMenuKeyboard());
         await leaveWithMenu(ctx);
         return;
       }
@@ -213,10 +250,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
         ctx.session.authenticatedTelegramId = String(fromId);
         st(ctx).needsEmailLink = false;
       } catch (e) {
-        await ctx.reply(
-          `Could not link account: ${e instanceof Error ? e.message : "Unknown error"}`,
-          cancelOnlyKeyboard(),
-        );
+        await ctx.reply(`Could not link account: ${userFacingUpmsMessage(e, "Unknown error")}`, cancelOnlyKeyboard());
         return;
       }
 
@@ -403,12 +437,19 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       }
 
       const bytes = Buffer.from(await downloadResponse.arrayBuffer());
-      const upload = await upms.uploadProofFile({
-        telegramId: tgId,
-        filename,
-        mimeType: mimeType as "application/pdf" | "image/jpeg" | "image/png",
-        bytes,
-      });
+      let upload;
+      try {
+        upload = await upms.uploadProofFile({
+          telegramId: tgId,
+          filename,
+          mimeType: mimeType as "application/pdf" | "image/jpeg" | "image/png",
+          bytes,
+        });
+      } catch (e) {
+        console.error("Submit flow: proof upload failed:", e);
+        await ctx.reply(userFacingUpmsMessage(e, "Could not upload proof to UPMS."), cancelOnlyKeyboard());
+        return;
+      }
 
       st(ctx).proofFileUrl = upload.proofFileUrl;
 
@@ -448,7 +489,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
         await persistItemAndRecordPreview(ctx, upms, externalLink);
       } catch (e) {
         await ctx.reply(
-          `Could not save this item: ${e instanceof Error ? e.message : "Unknown error"}. Check your data and try again.`,
+          `Could not save this item: ${userFacingUpmsMessage(e, "Unknown error")}. Check your data and try again.`,
           cancelOnlyKeyboard(),
         );
         return;
@@ -476,9 +517,8 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
 
       if (data === "flow_add_more") {
         await ctx.answerCbQuery();
-        try {
-          await presentCategoryStep(ctx, upms);
-        } catch {
+        const ok = await presentCategoryStep(ctx, upms);
+        if (!ok) {
           await leaveWithMenu(ctx);
           return;
         }
@@ -537,10 +577,8 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
         await upms.submitDraft(tgId, s.submissionId);
         await ctx.reply(SUCCESS_MSG, mainMenuKeyboard());
       } catch (e) {
-        await ctx.reply(
-          `Submission failed: ${e instanceof Error ? e.message : "Unknown error"}`,
-          mainMenuKeyboard(),
-        );
+        console.error("Submit flow: final submit failed:", e);
+        await ctx.reply(userFacingUpmsMessage(e, "Submission failed."), mainMenuKeyboard());
       }
 
       await leaveWithMenu(ctx);
