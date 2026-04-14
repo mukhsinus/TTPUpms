@@ -4,6 +4,7 @@ import type {
   SubmissionOwnerEntity,
 } from "./submission-items.repository";
 import type { AddSubmissionItemBody } from "./submission-items.schema";
+import { isPgUniqueViolation } from "../../utils/pg-errors";
 import { assertStudentMayEditSubmissionContent } from "../submissions/submission-transitions";
 
 type Role = "student" | "reviewer" | "admin";
@@ -50,18 +51,28 @@ export class SubmissionItemsService {
       throw new ServiceError(400, "Unknown category");
     }
 
-    return this.repository.createItem({
-      submissionId: submission.id,
-      userId: submission.userId,
-      categoryId: body.category_id,
-      categoryName,
-      subcategory: body.subcategory,
-      title: body.title,
-      description: body.description,
-      proofFileUrl: body.proof_file_url,
-      externalLink: body.external_link,
-      proposedScore: body.proposed_score,
-    });
+    try {
+      return await this.repository.createItem({
+        submissionId: submission.id,
+        userId: submission.userId,
+        categoryId: body.category_id,
+        categoryName,
+        subcategory: body.subcategory,
+        title: body.title,
+        description: body.description,
+        proofFileUrl: body.proof_file_url,
+        externalLink: body.external_link,
+        proposedScore: body.proposed_score,
+      });
+    } catch (err) {
+      if (isPgUniqueViolation(err)) {
+        throw new ServiceError(
+          409,
+          "A line with the same category, subcategory, and title already exists on this submission.",
+        );
+      }
+      throw err;
+    }
   }
 
   async listItems(user: AuthUser, submissionId: string): Promise<SubmissionItemEntity[]> {

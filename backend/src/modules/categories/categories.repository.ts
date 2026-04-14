@@ -1,5 +1,7 @@
 import type { FastifyInstance } from "fastify";
 
+// TODO(category_scoring_rules): reference table exists; no scoring path reads rules yet—define product selection before wiring.
+
 export type CategoryScoringType = "fixed" | "range" | "manual";
 
 interface CategoryRow {

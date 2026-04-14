@@ -1,6 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import { createHash, randomUUID } from "crypto";
 import { env } from "../../config/env";
+import { MAX_ACTIVE_SUBMISSIONS_PER_USER } from "../submissions/submission-quota";
+import { isPgUniqueViolation } from "../../utils/pg-errors";
+import { BotApiHttpError } from "./bot-api-errors";
 
 interface UserRow {
   id: string;
@@ -85,6 +88,54 @@ export class BotApiService {
     };
   }
 
+  private async countActiveSubmissionsForUser(userId: string): Promise<number> {
+    const result = await this.app.db.query<{ c: string }>(
+      `
+      SELECT COUNT(*)::text AS c
+      FROM submissions
+      WHERE user_id = $1
+        AND status IN ('draft', 'submitted', 'under_review', 'needs_revision')
+      `,
+      [userId],
+    );
+
+    return Number(result.rows[0]?.c ?? "0");
+  }
+
+  private async assertMayCreateActiveSubmission(userId: string): Promise<void> {
+    const active = await this.countActiveSubmissionsForUser(userId);
+    if (active >= MAX_ACTIVE_SUBMISSIONS_PER_USER) {
+      throw new BotApiHttpError(
+        409,
+        `Maximum of ${MAX_ACTIVE_SUBMISSIONS_PER_USER} active submissions (draft, submitted, under review, or needs revision). Resolve one before starting another.`,
+        "SUBMISSION_QUOTA_EXCEEDED",
+      );
+    }
+  }
+
+  /** Keeps Supabase JWT app_metadata.role aligned with public.users.role after linking. */
+  private async syncAuthAppMetadataRoleFromDb(userId: string, role: UserRow["role"]): Promise<void> {
+    try {
+      const { data, error } = await this.app.supabaseAdmin.auth.admin.getUserById(userId);
+      if (error || !data?.user) {
+        this.app.log.warn({ userId, err: error?.message }, "syncAuthAppMetadataRole: could not load auth user");
+        return;
+      }
+      const current = data.user.app_metadata?.role;
+      if (current === role) {
+        return;
+      }
+      const { error: updateError } = await this.app.supabaseAdmin.auth.admin.updateUserById(userId, {
+        app_metadata: { ...data.user.app_metadata, role },
+      });
+      if (updateError) {
+        this.app.log.warn({ userId, err: updateError.message }, "syncAuthAppMetadataRole: updateUserById failed");
+      }
+    } catch (err) {
+      this.app.log.warn({ err, userId }, "syncAuthAppMetadataRole: unexpected error");
+    }
+  }
+
   async getCategoriesCatalog(): Promise<
     Array<{
       id: string;
@@ -166,13 +217,15 @@ export class BotApiService {
   /** Draft submission for Telegram multi-item flow (POST /api/submissions equivalent). */
   async createDraftSubmissionForBot(telegramId: string): Promise<{ submissionId: string }> {
     const user = await this.findOrCreateUserByTelegramId(telegramId);
+    await this.assertMayCreateActiveSubmission(user.id);
+    const draftTitle = `Telegram submission ${randomUUID().slice(0, 8)}`;
     const result = await this.app.db.query<{ id: string }>(
       `
       INSERT INTO submissions (user_id, title, description, status)
       VALUES ($1, $2, $3, 'draft')
       RETURNING id
       `,
-      [user.id, "Telegram achievement submission", null],
+      [user.id, draftTitle, null],
     );
 
     return { submissionId: result.rows[0].id };
@@ -315,7 +368,18 @@ export class BotApiService {
 
       return { itemId: insert.rows[0].id };
     } catch (error) {
-      await client.query("ROLLBACK");
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // ignore
+      }
+      if (isPgUniqueViolation(error)) {
+        throw new BotApiHttpError(
+          409,
+          "This achievement line already exists on this submission (same category, subcategory, and title).",
+          "DUPLICATE_SUBMISSION_ITEM",
+        );
+      }
       throw error;
     } finally {
       client.release();
@@ -354,6 +418,19 @@ export class BotApiService {
 
       if (Number(itemsCount.rows[0]?.c ?? "0") < 1) {
         throw new Error("Add at least one achievement item before submitting");
+      }
+
+      const proofCheck = await client.query<{ c: string }>(
+        `
+        SELECT COUNT(*)::text AS c
+        FROM submission_items
+        WHERE submission_id = $1
+          AND (proof_file_url IS NULL OR btrim(proof_file_url) = '')
+        `,
+        [submissionId],
+      );
+      if (Number(proofCheck.rows[0]?.c ?? "0") > 0) {
+        throw new Error("Each line must include a proof file before submitting");
       }
 
       await client.query(
@@ -399,6 +476,7 @@ export class BotApiService {
     this.validateProofStorageUrl(input.proofFileUrl);
 
     const user = await this.findOrCreateUserByTelegramId(input.telegramId);
+    await this.assertMayCreateActiveSubmission(user.id);
     const client = await this.app.db.connect();
     try {
       await client.query("BEGIN");
@@ -495,7 +573,11 @@ export class BotApiService {
       );
       return { submissionId };
     } catch (error) {
-      await client.query("ROLLBACK");
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // ignore
+      }
       throw error;
     } finally {
       client.release();
@@ -580,43 +662,55 @@ export class BotApiService {
     telegramId: string,
     identity?: { telegramUsername: string | null; fullName: string | null },
   ): Promise<BotUser | null> {
-    const hasTelegramUsername = await this.hasTelegramUsernameColumn();
-    const nextUsername = identity?.telegramUsername ? identity.telegramUsername.trim() : null;
-    const nextFullName = identity?.fullName ? identity.fullName.trim() : null;
+    try {
+      const hasTelegramUsername = await this.hasTelegramUsernameColumn();
+      const nextUsername = identity?.telegramUsername ? identity.telegramUsername.trim() : null;
+      const nextFullName = identity?.fullName ? identity.fullName.trim() : null;
 
-    const result = hasTelegramUsername
-      ? await this.app.db.query<UserRow>(
-          `
-          UPDATE users
-          SET telegram_id = $2::bigint,
-              telegram_username = COALESCE($3, telegram_username),
-              full_name = COALESCE($4, full_name),
-              updated_at = NOW()
-          WHERE lower(email) = lower($1)
-          RETURNING id, role, full_name, telegram_id, telegram_username
-          `,
-          [email, telegramId, nextUsername, nextFullName],
-        )
-      : await this.app.db.query<UserRow>(
-          `
-          UPDATE users
-          SET telegram_id = $2::bigint,
-              full_name = COALESCE($3, full_name),
-              updated_at = NOW()
-          WHERE lower(email) = lower($1)
-          RETURNING id, role, full_name, telegram_id, NULL::text AS telegram_username
-          `,
-          [email, telegramId, nextFullName],
-        );
+      const result = hasTelegramUsername
+        ? await this.app.db.query<UserRow>(
+            `
+            UPDATE users
+            SET telegram_id = $2::bigint,
+                telegram_username = COALESCE($3, telegram_username),
+                full_name = COALESCE($4, full_name),
+                updated_at = NOW()
+            WHERE lower(email) = lower($1)
+            RETURNING id, role, full_name, telegram_id, telegram_username
+            `,
+            [email, telegramId, nextUsername, nextFullName],
+          )
+        : await this.app.db.query<UserRow>(
+            `
+            UPDATE users
+            SET telegram_id = $2::bigint,
+                full_name = COALESCE($3, full_name),
+                updated_at = NOW()
+            WHERE lower(email) = lower($1)
+            RETURNING id, role, full_name, telegram_id, NULL::text AS telegram_username
+            `,
+            [email, telegramId, nextFullName],
+          );
 
-    const row = result.rows[0];
-    if (!row) return null;
+      const row = result.rows[0];
+      if (!row) return null;
 
-    this.app.log.info(
-      { telegram_id: telegramId, user_id: row.id, source: "linked_by_email" },
-      "Resolved bot user mapping",
-    );
-    return this.toBotUser(row);
+      await this.syncAuthAppMetadataRoleFromDb(row.id, row.role);
+
+      this.app.log.info(
+        { telegram_id: telegramId, user_id: row.id, source: "linked_by_email" },
+        "Resolved bot user mapping",
+      );
+      return this.toBotUser(row);
+    } catch (err) {
+      const code =
+        typeof err === "object" && err !== null && "code" in err
+          ? String((err as { code?: unknown }).code)
+          : undefined;
+      const emailDomain = email.includes("@") ? email.split("@")[1] : "invalid";
+      this.app.log.error({ err, code, emailDomain }, "linkTelegramByEmail: database or auth sync failed");
+      throw err;
+    }
   }
 
   async createAchievementSubmission(input: {
@@ -642,6 +736,7 @@ export class BotApiService {
     }
 
     const user = await this.findOrCreateUserByTelegramId(input.telegramId);
+    await this.assertMayCreateActiveSubmission(user.id);
     const client = await this.app.db.connect();
     try {
       await client.query("BEGIN");
@@ -688,7 +783,11 @@ export class BotApiService {
       );
       return { submissionId };
     } catch (error) {
-      await client.query("ROLLBACK");
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // ignore
+      }
       throw error;
     } finally {
       client.release();

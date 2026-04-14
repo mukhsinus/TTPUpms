@@ -1,6 +1,7 @@
 import { ServiceError } from "../../utils/service-error";
 import type { NotificationService } from "../notifications/notification.service";
 import type { AntiFraudService } from "../validation/anti-fraud.service";
+import { MAX_ACTIVE_SUBMISSIONS_PER_USER } from "./submission-quota";
 import { assertStudentMaySubmitFromStatus } from "./submission-transitions";
 import type { SubmissionsRepository, SubmissionEntity } from "./submissions.repository";
 import type { CreateSubmissionBody } from "./submissions.schema";
@@ -31,6 +32,14 @@ export class SubmissionsService {
       title: input.title,
       description: input.description,
     });
+
+    const activeCount = await this.repository.countActiveSubmissionsForUser(targetUserId);
+    if (activeCount >= MAX_ACTIVE_SUBMISSIONS_PER_USER) {
+      throw new ServiceError(
+        409,
+        `You already have ${MAX_ACTIVE_SUBMISSIONS_PER_USER} active submissions (draft, submitted, under review, or awaiting revision). Complete or resolve one before creating another.`,
+      );
+    }
 
     return this.repository.create({
       userId: targetUserId,
@@ -69,6 +78,14 @@ export class SubmissionsService {
     }
 
     assertStudentMaySubmitFromStatus(submission.status);
+
+    const missingProof = await this.repository.countItemsMissingProof(submissionId);
+    if (missingProof > 0) {
+      throw new ServiceError(
+        400,
+        "Every submission line must have a proof file URL before you can submit.",
+      );
+    }
 
     const updated = await this.repository.updateStatus({
       id: submission.id,

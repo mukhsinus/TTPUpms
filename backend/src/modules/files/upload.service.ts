@@ -252,6 +252,7 @@ export class UploadService {
     sizeBytes: number;
     checksum: string;
   }): Promise<InsertedFileRow> {
+    // Dashboard multipart flow: persists metadata in `files`. Telegram bot proofs use `submission_items.proof_file_url` only.
     const result = await this.app.db.query<InsertedFileRow>(
       `
       INSERT INTO files (

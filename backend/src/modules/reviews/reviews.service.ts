@@ -182,7 +182,10 @@ export class ReviewsService {
 
     const bounds = await this.repository.findCategoryBoundsForItem(item.id);
     if (!bounds) {
-      return;
+      throw new ServiceError(
+        400,
+        "Cannot score this item: no category scoring bounds found (category_id or category name must match a configured category).",
+      );
     }
 
     if (score < bounds.minScore || score > bounds.maxScore) {

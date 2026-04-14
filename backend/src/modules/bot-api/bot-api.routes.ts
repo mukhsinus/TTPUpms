@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
 import { env } from "../../config/env";
 import { failure, success } from "../../utils/http-response";
+import { BotApiHttpError } from "./bot-api-errors";
 import { BotApiService } from "./bot-api.service";
 
 const linkSchema = z.object({
@@ -75,6 +76,11 @@ function verifyBotApiKey(headers: Record<string, unknown>): boolean {
 function handleRouteError(app: FastifyInstance, reply: FastifyReply, error: unknown): void {
   if (error instanceof z.ZodError) {
     reply.status(400).send(failure("Validation error", "VALIDATION_ERROR"));
+    return;
+  }
+
+  if (error instanceof BotApiHttpError) {
+    reply.status(error.statusCode).send(failure(error.message, error.errorCode));
     return;
   }
 

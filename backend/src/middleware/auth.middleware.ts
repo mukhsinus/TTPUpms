@@ -56,10 +56,9 @@ export async function authMiddleware(request: FastifyRequest, reply: FastifyRepl
   }
 
   const appRole = data.user.app_metadata?.role;
-  let role: Role = "student";
+  let roleFromJwt: Role = "student";
 
   if (appRole === undefined || appRole === null) {
-    // Missing role metadata must never escalate privileges.
     request.log.warn({ userId: data.user.id }, "Missing app_metadata.role; defaulting to student");
   } else {
     const parsedRole = toRole(appRole);
@@ -68,7 +67,33 @@ export async function authMiddleware(request: FastifyRequest, reply: FastifyRepl
       reply.status(403).send(failure("Forbidden", "FORBIDDEN"));
       return;
     }
-    role = parsedRole;
+    roleFromJwt = parsedRole;
+  }
+
+  let role: Role = roleFromJwt;
+  try {
+    const dbRes = await request.server.db.query<{ role: string }>(
+      `
+      SELECT role::text AS role
+      FROM public.users
+      WHERE id = $1
+      LIMIT 1
+      `,
+      [data.user.id],
+    );
+    const dbRoleRaw = dbRes.rows[0]?.role;
+    const dbRole = dbRoleRaw ? toRole(dbRoleRaw) : null;
+    if (dbRole) {
+      if (dbRole !== roleFromJwt) {
+        request.log.warn(
+          { userId: data.user.id, jwtRole: roleFromJwt, dbRole },
+          "public.users.role differs from JWT app_metadata.role; authorizing with database role",
+        );
+      }
+      role = dbRole;
+    }
+  } catch (err) {
+    request.log.error({ err, userId: data.user.id }, "Failed to load public.users.role; using JWT role");
   }
 
   request.user = {
