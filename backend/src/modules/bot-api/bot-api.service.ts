@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { createHash, randomUUID } from "crypto";
 import { env } from "../../config/env";
-import { MAX_ACTIVE_SUBMISSIONS_PER_USER } from "../submissions/submission-quota";
+import type { AuditLogRepository } from "../audit/audit-log.repository";
 import { isPgUniqueViolation } from "../../utils/pg-errors";
 import { BotApiHttpError } from "./bot-api-errors";
 
@@ -58,7 +58,10 @@ function isMissingRelationError(error: unknown): boolean {
 export class BotApiService {
   private telegramUsernameColumnAvailable: boolean | null = null;
 
-  constructor(private readonly app: FastifyInstance) {}
+  constructor(
+    private readonly app: FastifyInstance,
+    private readonly audit: AuditLogRepository,
+  ) {}
 
   private async hasTelegramUsernameColumn(): Promise<boolean> {
     if (this.telegramUsernameColumnAvailable !== null) {
@@ -86,31 +89,6 @@ export class BotApiService {
       telegramUsername: row.telegram_username,
       fullName: row.full_name,
     };
-  }
-
-  private async countActiveSubmissionsForUser(userId: string): Promise<number> {
-    const result = await this.app.db.query<{ c: string }>(
-      `
-      SELECT COUNT(*)::text AS c
-      FROM submissions
-      WHERE user_id = $1
-        AND status IN ('draft', 'submitted', 'under_review', 'needs_revision')
-      `,
-      [userId],
-    );
-
-    return Number(result.rows[0]?.c ?? "0");
-  }
-
-  private async assertMayCreateActiveSubmission(userId: string): Promise<void> {
-    const active = await this.countActiveSubmissionsForUser(userId);
-    if (active >= MAX_ACTIVE_SUBMISSIONS_PER_USER) {
-      throw new BotApiHttpError(
-        409,
-        `Maximum of ${MAX_ACTIVE_SUBMISSIONS_PER_USER} active submissions (draft, submitted, under review, or needs revision). Resolve one before starting another.`,
-        "SUBMISSION_QUOTA_EXCEEDED",
-      );
-    }
   }
 
   /** Keeps Supabase JWT app_metadata.role aligned with public.users.role after linking. */
@@ -217,7 +195,6 @@ export class BotApiService {
   /** Draft submission for Telegram multi-item flow (POST /api/submissions equivalent). */
   async createDraftSubmissionForBot(telegramId: string): Promise<{ submissionId: string }> {
     const user = await this.findOrCreateUserByTelegramId(telegramId);
-    await this.assertMayCreateActiveSubmission(user.id);
     const draftTitle = `Telegram submission ${randomUUID().slice(0, 8)}`;
     const result = await this.app.db.query<{ id: string }>(
       `
@@ -228,7 +205,17 @@ export class BotApiService {
       [user.id, draftTitle, null],
     );
 
-    return { submissionId: result.rows[0].id };
+    const submissionId = result.rows[0].id;
+    await this.audit.insert({
+      actorUserId: user.id,
+      targetUserId: user.id,
+      entityTable: "submissions",
+      entityId: submissionId,
+      action: "submission_created",
+      newValues: { source: "telegram_bot", title: draftTitle, status: "draft" },
+    });
+
+    return { submissionId };
   }
 
   /**
@@ -377,7 +364,7 @@ export class BotApiService {
         throw new BotApiHttpError(
           409,
           "This achievement line already exists on this submission (same category, subcategory, and title).",
-          "DUPLICATE_SUBMISSION_ITEM",
+          "DUPLICATE_ITEM",
         );
       }
       throw error;
@@ -448,8 +435,21 @@ export class BotApiService {
         { telegram_id: telegramId, user_id: user.id, submission_id: submissionId },
         "Bot submitted draft submission",
       );
+
+      await this.audit.insert({
+        actorUserId: user.id,
+        targetUserId: user.id,
+        entityTable: "submissions",
+        entityId: submissionId,
+        action: "submission_submitted",
+        newValues: { source: "telegram_bot", status: "submitted" },
+      });
     } catch (error) {
-      await client.query("ROLLBACK");
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // ignore
+      }
       throw error;
     } finally {
       client.release();
@@ -476,7 +476,6 @@ export class BotApiService {
     this.validateProofStorageUrl(input.proofFileUrl);
 
     const user = await this.findOrCreateUserByTelegramId(input.telegramId);
-    await this.assertMayCreateActiveSubmission(user.id);
     const client = await this.app.db.connect();
     try {
       await client.query("BEGIN");
@@ -736,10 +735,33 @@ export class BotApiService {
     }
 
     const user = await this.findOrCreateUserByTelegramId(input.telegramId);
-    await this.assertMayCreateActiveSubmission(user.id);
     const client = await this.app.db.connect();
     try {
       await client.query("BEGIN");
+
+      let catRes = await client.query<{ id: string; name: string }>(
+        `
+        SELECT id, name
+        FROM categories
+        WHERE name = $1
+        LIMIT 1
+        `,
+        [input.category],
+      );
+      if (!catRes.rows[0]) {
+        catRes = await client.query<{ id: string; name: string }>(
+          `
+          SELECT id, name
+          FROM categories
+          WHERE name = 'legacy_uncategorized'
+          LIMIT 1
+          `,
+        );
+      }
+      const categoryRow = catRes.rows[0];
+      if (!categoryRow) {
+        throw new Error("Unknown category for achievement");
+      }
 
       const submissionResult = await client.query<{ id: string }>(
         `
@@ -757,18 +779,20 @@ export class BotApiService {
         INSERT INTO submission_items (
           submission_id,
           user_id,
+          category_id,
           category,
           title,
           description,
           proof_file_url,
           proposed_score
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         `,
         [
           submissionId,
           user.id,
-          input.category,
+          categoryRow.id,
+          categoryRow.name,
           `Achievement: ${input.category}`,
           input.details,
           input.proofFileUrl,

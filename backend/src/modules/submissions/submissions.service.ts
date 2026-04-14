@@ -1,7 +1,7 @@
 import { ServiceError } from "../../utils/service-error";
+import type { AuditLogRepository } from "../audit/audit-log.repository";
 import type { NotificationService } from "../notifications/notification.service";
 import type { AntiFraudService } from "../validation/anti-fraud.service";
-import { MAX_ACTIVE_SUBMISSIONS_PER_USER } from "./submission-quota";
 import { assertStudentMaySubmitFromStatus } from "./submission-transitions";
 import type { SubmissionsRepository, SubmissionEntity } from "./submissions.repository";
 import type { CreateSubmissionBody } from "./submissions.schema";
@@ -18,6 +18,7 @@ export class SubmissionsService {
     private readonly repository: SubmissionsRepository,
     private readonly notifications: NotificationService,
     private readonly antiFraud: AntiFraudService,
+    private readonly audit: AuditLogRepository,
   ) {}
 
   async createSubmission(user: AuthUser, input: CreateSubmissionBody): Promise<SubmissionEntity> {
@@ -33,19 +34,22 @@ export class SubmissionsService {
       description: input.description,
     });
 
-    const activeCount = await this.repository.countActiveSubmissionsForUser(targetUserId);
-    if (activeCount >= MAX_ACTIVE_SUBMISSIONS_PER_USER) {
-      throw new ServiceError(
-        409,
-        `You already have ${MAX_ACTIVE_SUBMISSIONS_PER_USER} active submissions (draft, submitted, under review, or awaiting revision). Complete or resolve one before creating another.`,
-      );
-    }
-
-    return this.repository.create({
+    const created = await this.repository.create({
       userId: targetUserId,
       title: input.title,
       description: input.description,
     });
+
+    await this.audit.insert({
+      actorUserId: user.id,
+      targetUserId: targetUserId,
+      entityTable: "submissions",
+      entityId: created.id,
+      action: "submission_created",
+      newValues: { title: created.title, status: created.status },
+    });
+
+    return created;
   }
 
   async getUserSubmissions(user: AuthUser, requestedUserId?: string): Promise<SubmissionEntity[]> {
@@ -84,6 +88,7 @@ export class SubmissionsService {
       throw new ServiceError(
         400,
         "Every submission line must have a proof file URL before you can submit.",
+        "VALIDATION_ERROR",
       );
     }
 
@@ -91,6 +96,15 @@ export class SubmissionsService {
       id: submission.id,
       status: "submitted",
       submittedAt: true,
+    });
+
+    await this.audit.insert({
+      actorUserId: user.id,
+      targetUserId: updated.userId,
+      entityTable: "submissions",
+      entityId: updated.id,
+      action: "submission_submitted",
+      newValues: { status: updated.status },
     });
 
     this.notifications.notifySubmissionSubmitted({

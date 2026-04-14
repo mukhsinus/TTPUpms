@@ -1,5 +1,7 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { ZodError } from "zod";
+import { ServiceError } from "../../utils/service-error";
+import { mapPgErrorToClient } from "../../utils/pg-http-map";
 import { errorCodeFromStatus, failure, success } from "../../utils/http-response";
 import {
   addSubmissionItemBodySchema,
@@ -79,7 +81,20 @@ export class SubmissionItemsController {
 
   private handleError(reply: FastifyReply, error: unknown): void {
     if (error instanceof ZodError) {
-      reply.status(400).send(failure("Validation error", "VALIDATION_ERROR"));
+      reply.status(400).send(failure("Validation error", "VALIDATION_ERROR", {}));
+      return;
+    }
+
+    if (error instanceof ServiceError) {
+      reply.status(error.statusCode).send(
+        failure(error.message, error.clientCode ?? errorCodeFromStatus(error.statusCode), {}),
+      );
+      return;
+    }
+
+    const mapped = mapPgErrorToClient(error);
+    if (mapped) {
+      reply.status(mapped.status).send(failure(mapped.message, mapped.code, {}));
       return;
     }
 
@@ -93,6 +108,6 @@ export class SubmissionItemsController {
 
     const message = statusCode >= 500 ? "Internal Server Error" : error instanceof Error ? error.message : "Error";
 
-    reply.status(statusCode).send(failure(message, errorCodeFromStatus(statusCode)));
+    reply.status(statusCode).send(failure(message, errorCodeFromStatus(statusCode), {}));
   }
 }

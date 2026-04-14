@@ -5,6 +5,7 @@ import type {
 } from "./submission-items.repository";
 import type { AddSubmissionItemBody } from "./submission-items.schema";
 import { isPgUniqueViolation } from "../../utils/pg-errors";
+import { ServiceError } from "../../utils/service-error";
 import { assertStudentMayEditSubmissionContent } from "../submissions/submission-transitions";
 
 type Role = "student" | "reviewer" | "admin";
@@ -12,16 +13,6 @@ type Role = "student" | "reviewer" | "admin";
 export interface AuthUser {
   id: string;
   role: Role;
-}
-
-class ServiceError extends Error {
-  statusCode: number;
-
-  constructor(statusCode: number, message: string) {
-    super(message);
-    this.statusCode = statusCode;
-    this.name = "ServiceError";
-  }
 }
 
 export class SubmissionItemsService {
@@ -69,6 +60,7 @@ export class SubmissionItemsService {
         throw new ServiceError(
           409,
           "A line with the same category, subcategory, and title already exists on this submission.",
+          "DUPLICATE_ITEM",
         );
       }
       throw err;

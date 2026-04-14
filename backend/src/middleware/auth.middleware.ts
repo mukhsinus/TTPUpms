@@ -37,7 +37,7 @@ export async function authMiddleware(request: FastifyRequest, reply: FastifyRepl
   const token = parseBearerToken(request.headers.authorization);
 
   if (!token) {
-    reply.status(401).send(failure("Missing or invalid Authorization header", "UNAUTHORIZED"));
+    reply.status(401).send(failure("Missing or invalid Authorization header", "UNAUTHORIZED", {}));
     return;
   }
 
@@ -46,31 +46,22 @@ export async function authMiddleware(request: FastifyRequest, reply: FastifyRepl
   if (error || !data.user) {
     if (isRetryableAuthError(error)) {
       request.log.error({ err: error }, "Supabase auth service unavailable");
-      reply.status(503).send(failure("Authentication service unavailable", "AUTH_SERVICE_UNAVAILABLE"));
+      reply.status(503).send(failure("Authentication service unavailable", "AUTH_SERVICE_UNAVAILABLE", {}));
       return;
     }
 
     request.log.warn({ err: error }, "JWT validation failed");
-    reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
+    reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED", {}));
     return;
   }
 
-  const appRole = data.user.app_metadata?.role;
-  let roleFromJwt: Role = "student";
-
-  if (appRole === undefined || appRole === null) {
-    request.log.warn({ userId: data.user.id }, "Missing app_metadata.role; defaulting to student");
-  } else {
-    const parsedRole = toRole(appRole);
-    if (!parsedRole) {
-      request.log.warn({ userId: data.user.id, appRole }, "Invalid app_metadata.role");
-      reply.status(403).send(failure("Forbidden", "FORBIDDEN"));
-      return;
-    }
-    roleFromJwt = parsedRole;
+  const jwtRoleRaw = data.user.app_metadata?.role;
+  const jwtRoleParsed = jwtRoleRaw !== undefined && jwtRoleRaw !== null ? toRole(jwtRoleRaw) : null;
+  if (jwtRoleRaw !== undefined && jwtRoleRaw !== null && !jwtRoleParsed) {
+    request.log.warn({ userId: data.user.id, appRole: jwtRoleRaw }, "Invalid app_metadata.role on JWT (ignored)");
   }
 
-  let role: Role = roleFromJwt;
+  let role: Role;
   try {
     const dbRes = await request.server.db.query<{ role: string }>(
       `
@@ -81,19 +72,26 @@ export async function authMiddleware(request: FastifyRequest, reply: FastifyRepl
       `,
       [data.user.id],
     );
-    const dbRoleRaw = dbRes.rows[0]?.role;
-    const dbRole = dbRoleRaw ? toRole(dbRoleRaw) : null;
-    if (dbRole) {
-      if (dbRole !== roleFromJwt) {
-        request.log.warn(
-          { userId: data.user.id, jwtRole: roleFromJwt, dbRole },
-          "public.users.role differs from JWT app_metadata.role; authorizing with database role",
-        );
-      }
-      role = dbRole;
+    const dbRole = dbRes.rows[0]?.role ? toRole(dbRes.rows[0].role) : null;
+    if (!dbRole) {
+      reply
+        .status(403)
+        .send(failure("User profile is missing in the database. Contact an administrator.", "PROFILE_INCOMPLETE", {}));
+      return;
     }
+
+    if (jwtRoleParsed !== null && jwtRoleParsed !== dbRole) {
+      request.log.warn(
+        { userId: data.user.id, jwtRole: jwtRoleParsed, dbRole },
+        "JWT app_metadata.role does not match public.users.role; using database role only",
+      );
+    }
+
+    role = dbRole;
   } catch (err) {
-    request.log.error({ err, userId: data.user.id }, "Failed to load public.users.role; using JWT role");
+    request.log.error({ err, userId: data.user.id }, "Failed to load public.users.role");
+    reply.status(503).send(failure("Unable to verify user role.", "ROLE_LOOKUP_FAILED", {}));
+    return;
   }
 
   request.user = {

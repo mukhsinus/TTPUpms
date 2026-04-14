@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { ZodError } from "zod";
+import { mapPgErrorToClient } from "../../utils/pg-http-map";
 import { errorCodeFromStatus, failure, success } from "../../utils/http-response";
 import {
   completeSubmissionReviewBodySchema,
@@ -115,22 +116,27 @@ export class ReviewsController {
 
   private handleError(reply: FastifyReply, error: unknown): void {
     if (error instanceof ZodError) {
-      reply.status(400).send(failure("Validation error", "VALIDATION_ERROR"));
+      reply.status(400).send(failure("Validation error", "VALIDATION_ERROR", {}));
       return;
     }
 
     if (error instanceof ReviewsServiceError) {
-      reply
-        .status(error.statusCode)
-        .send(
-          failure(
-            error.statusCode >= 500 ? "Internal Server Error" : error.message,
-            errorCodeFromStatus(error.statusCode),
-          ),
-        );
+      reply.status(error.statusCode).send(
+        failure(
+          error.statusCode >= 500 ? "Internal Server Error" : error.message,
+          error.clientCode ?? errorCodeFromStatus(error.statusCode),
+          {},
+        ),
+      );
       return;
     }
 
-    reply.status(500).send(failure("Internal Server Error", "INTERNAL_SERVER_ERROR"));
+    const mapped = mapPgErrorToClient(error);
+    if (mapped) {
+      reply.status(mapped.status).send(failure(mapped.message, mapped.code, {}));
+      return;
+    }
+
+    reply.status(500).send(failure("Internal Server Error", "INTERNAL_SERVER_ERROR", {}));
   }
 }

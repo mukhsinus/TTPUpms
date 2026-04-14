@@ -24,6 +24,8 @@ declare module "fastify" {
 
   interface FastifyRequest {
     user?: AuthenticatedUser;
+    /** Bot API: resolved `public.users.id` from `telegram_id` in body (idempotency + rate limits). */
+    idempotencySubjectUserId?: string;
     idempotencyContext?: IdempotencyContext;
   }
 }

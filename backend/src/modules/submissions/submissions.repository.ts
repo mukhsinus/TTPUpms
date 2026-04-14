@@ -45,7 +45,7 @@ function mapSubmission(row: SubmissionRow): SubmissionEntity {
 export class SubmissionsRepository {
   constructor(private readonly app: FastifyInstance) {}
 
-  /** Counts submissions that consume the per-user active quota (excludes approved/rejected). */
+  /** Lines on a submission missing proof URL (must be zero before submit). */
   async countItemsMissingProof(submissionId: string): Promise<number> {
     const result = await this.app.db.query<{ c: string }>(
       `
@@ -55,20 +55,6 @@ export class SubmissionsRepository {
         AND (proof_file_url IS NULL OR btrim(proof_file_url) = '')
       `,
       [submissionId],
-    );
-
-    return Number(result.rows[0]?.c ?? "0");
-  }
-
-  async countActiveSubmissionsForUser(userId: string): Promise<number> {
-    const result = await this.app.db.query<{ c: string }>(
-      `
-      SELECT COUNT(*)::text AS c
-      FROM submissions
-      WHERE user_id = $1
-        AND status IN ('draft', 'submitted', 'under_review', 'needs_revision')
-      `,
-      [userId],
     );
 
     return Number(result.rows[0]?.c ?? "0");

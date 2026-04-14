@@ -34,6 +34,6 @@ export async function registerSecurityPlugins(app: FastifyInstance): Promise<voi
     },
     keyGenerator: (request) => request.ip,
     errorResponseBuilder: (_request, context) =>
-      failure(`Rate limit exceeded. Retry in ${context.after}.`, "RATE_LIMITED"),
+      failure(`Rate limit exceeded. Retry in ${context.after}.`, "RATE_LIMITED", { retryAfter: context.after }),
   });
 }

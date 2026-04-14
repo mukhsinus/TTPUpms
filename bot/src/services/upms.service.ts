@@ -34,6 +34,7 @@ interface ApiEnvelope<T> {
   error: {
     message: string;
     code: string;
+    details?: Record<string, unknown>;
   } | null;
 }
 
@@ -50,7 +51,9 @@ export class UpmsService {
 
     const payload = (await response.json()) as ApiEnvelope<T>;
     if (!response.ok || payload.error || payload.data === null) {
-      throw new Error(payload.error?.message ?? `Backend bot API call failed (${response.status})`);
+      const code = payload.error?.code;
+      const msg = payload.error?.message ?? `Backend bot API call failed (${response.status})`;
+      throw new Error(code ? `[${code}] ${msg}` : msg);
     }
 
     return payload.data;

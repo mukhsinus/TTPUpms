@@ -1,15 +1,26 @@
 import type { FastifyInstance } from "fastify";
 import { authMiddleware } from "../../middleware/auth.middleware";
 import { idempotencyOnSend, idempotencyPreHandler } from "../../middleware/idempotency.middleware";
+import { userWriteRateLimitPreHandler } from "../../middleware/user-write-rate-limit.middleware";
 import { SubmissionItemsController } from "./submission-items.controller";
 import { SubmissionItemsRepository } from "./submission-items.repository";
 import { SubmissionItemsService } from "./submission-items.service";
+
+const submissionItemsWriteRate = userWriteRateLimitPreHandler({
+  max: 10,
+  windowMs: 60_000,
+  namespace: "submission-items-write",
+});
 
 export async function submissionItemsRoutes(app: FastifyInstance): Promise<void> {
   const repository = new SubmissionItemsRepository(app);
   const service = new SubmissionItemsService(repository);
   const controller = new SubmissionItemsController(service);
-  const itemsIdempotency = idempotencyPreHandler(app, "submission-items");
+  const itemsPostIdempotency = idempotencyPreHandler(app, "submission-items", { requireIdempotencyKey: true });
+  const itemsFlatPostIdempotency = idempotencyPreHandler(app, "submission-items-flat", {
+    requireIdempotencyKey: true,
+  });
+  const itemsDeleteIdempotency = idempotencyPreHandler(app, "submission-items-delete");
   const onSendIdempotency = idempotencyOnSend(app);
 
   await app.register(
@@ -17,12 +28,15 @@ export async function submissionItemsRoutes(app: FastifyInstance): Promise<void>
       scope.get("/", { preHandler: [authMiddleware] }, controller.listItems);
       scope.post(
         "/",
-        { preHandler: [authMiddleware, itemsIdempotency], onSend: [onSendIdempotency] },
+        {
+          preHandler: [authMiddleware, submissionItemsWriteRate, itemsPostIdempotency],
+          onSend: [onSendIdempotency],
+        },
         controller.addItem,
       );
       scope.delete(
         "/:itemId",
-        { preHandler: [authMiddleware, itemsIdempotency], onSend: [onSendIdempotency] },
+        { preHandler: [authMiddleware, itemsDeleteIdempotency], onSend: [onSendIdempotency] },
         controller.deleteItem,
       );
     },
@@ -34,7 +48,10 @@ export async function submissionItemsRoutes(app: FastifyInstance): Promise<void>
       scope.get("/:submissionId", { preHandler: [authMiddleware] }, controller.listItems);
       scope.post(
         "/",
-        { preHandler: [authMiddleware, itemsIdempotency], onSend: [onSendIdempotency] },
+        {
+          preHandler: [authMiddleware, submissionItemsWriteRate, itemsFlatPostIdempotency],
+          onSend: [onSendIdempotency],
+        },
         controller.addItemFlat,
       );
     },

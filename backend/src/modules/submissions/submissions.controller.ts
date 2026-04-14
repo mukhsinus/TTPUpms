@@ -1,6 +1,7 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { ZodError } from "zod";
 import { assertAuthenticated } from "../../utils/assert-authenticated";
+import { mapPgErrorToClient } from "../../utils/pg-http-map";
 import { errorCodeFromStatus, failure, success } from "../../utils/http-response";
 import { ServiceError } from "../../utils/service-error";
 import {
@@ -86,9 +87,19 @@ export class SubmissionsController {
     }
 
     if (error instanceof ServiceError) {
-      reply
-        .status(error.statusCode)
-        .send(failure(error.message, errorCodeFromStatus(error.statusCode)));
+      reply.status(error.statusCode).send(
+        failure(
+          error.message,
+          error.clientCode ?? errorCodeFromStatus(error.statusCode),
+          {},
+        ),
+      );
+      return;
+    }
+
+    const mapped = mapPgErrorToClient(error);
+    if (mapped) {
+      reply.status(mapped.status).send(failure(mapped.message, mapped.code, {}));
       return;
     }
 

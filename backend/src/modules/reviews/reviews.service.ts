@@ -4,6 +4,7 @@ import type {
   ReviewSubmissionItemEntity,
 } from "./reviews.repository";
 import type { CompleteSubmissionReviewBody, ReviewItemBody } from "./reviews.schema";
+import type { AuditLogRepository } from "../audit/audit-log.repository";
 import type { NotificationService } from "../notifications/notification.service";
 import type { ScoringService } from "../scoring/scoring.service";
 import {
@@ -24,6 +25,7 @@ export class ReviewsService {
     private readonly repository: ReviewsRepository,
     private readonly notifications: NotificationService,
     private readonly scoring: ScoringService,
+    private readonly audit: AuditLogRepository,
   ) {}
 
   async getReviewableSubmissions(user: AuthUser): Promise<ReviewSubmissionEntity[]> {
@@ -169,14 +171,32 @@ export class ReviewsService {
       });
     }
 
+    await this.audit.insert({
+      actorUserId: user.id,
+      targetUserId: submission.userId,
+      entityTable: "submissions",
+      entityId: submissionId,
+      action: "review_completed",
+      newValues: {
+        decision: body.decision,
+        totalPoints: updated.totalPoints,
+        status: updated.status,
+      },
+    });
+
     return updated;
   }
 
   private async assertValidItemScore(item: ReviewSubmissionItemEntity, score: number): Promise<void> {
+    if (!Number.isFinite(score)) {
+      throw new ServiceError(400, "Score must be a finite number.", "VALIDATION_ERROR");
+    }
+
     if (score > item.proposedScore) {
       throw new ServiceError(
         400,
         `Score cannot exceed the proposed maximum (${item.proposedScore})`,
+        "VALIDATION_ERROR",
       );
     }
 
@@ -185,6 +205,7 @@ export class ReviewsService {
       throw new ServiceError(
         400,
         "Cannot score this item: no category scoring bounds found (category_id or category name must match a configured category).",
+        "VALIDATION_ERROR",
       );
     }
 
@@ -192,6 +213,7 @@ export class ReviewsService {
       throw new ServiceError(
         400,
         `Score must be within the category range ${bounds.minScore}–${bounds.maxScore}`,
+        "VALIDATION_ERROR",
       );
     }
   }

@@ -46,6 +46,15 @@ export function parseReviewItemBody(body: unknown): ReviewItemBody {
       },
     ]);
   }
+  if (!Number.isFinite(score)) {
+    throw new z.ZodError([
+      {
+        code: "custom",
+        path: ["score"],
+        message: "Score must be a finite number",
+      },
+    ]);
+  }
   return { score, decision, comment };
 }
 

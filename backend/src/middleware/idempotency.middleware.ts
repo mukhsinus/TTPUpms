@@ -10,6 +10,10 @@ interface IdempotencyRow {
   response_body: unknown | null;
 }
 
+export function resolveIdempotencyUserId(request: FastifyRequest): string | null {
+  return request.user?.id ?? request.idempotencySubjectUserId ?? null;
+}
+
 function resolveKey(headerValue: string | string[] | undefined): string | null {
   if (typeof headerValue !== "string") return null;
   const value = headerValue.trim();
@@ -51,18 +55,49 @@ function payloadToJson(payload: unknown): unknown | null {
   return null;
 }
 
-export function idempotencyPreHandler(app: FastifyInstance, scope: string) {
+export interface IdempotencyPreHandlerOptions {
+  /** When true, mutating requests without Idempotency-Key receive 400. */
+  requireIdempotencyKey?: boolean;
+}
+
+export function idempotencyPreHandler(
+  app: FastifyInstance,
+  scope: string,
+  opts: IdempotencyPreHandlerOptions = {},
+) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (!IDEMPOTENT_METHODS.has(request.method)) return;
-    if (!request.user) return;
 
+    const ownerId = resolveIdempotencyUserId(request);
     const key = resolveKey(request.headers["idempotency-key"]);
-    if (!key) return;
+
+    if (!key) {
+      if (opts.requireIdempotencyKey) {
+        reply
+          .status(400)
+          .send(
+            failure(
+              "Idempotency-Key header is required for this request.",
+              "MISSING_IDEMPOTENCY_KEY",
+              { scope },
+            ),
+          );
+        return;
+      }
+      return;
+    }
+
+    if (!ownerId) {
+      reply
+        .status(401)
+        .send(failure("Authenticated user or resolved bot subject required for idempotent writes.", "UNAUTHORIZED"));
+      return;
+    }
 
     const hash = requestHash({
       method: request.method,
       url: request.url,
-      userId: request.user.id,
+      userId: ownerId,
       body: request.body,
     });
 
@@ -75,7 +110,7 @@ export function idempotencyPreHandler(app: FastifyInstance, scope: string) {
         AND idempotency_key = $3
       LIMIT 1
       `,
-      [request.user.id, scope, key],
+      [ownerId, scope, key],
     );
 
     const row = existing.rows[0];
@@ -83,7 +118,11 @@ export function idempotencyPreHandler(app: FastifyInstance, scope: string) {
       if (row.request_hash !== hash) {
         reply
           .status(409)
-          .send(failure("Idempotency-Key already used with different payload", "IDEMPOTENCY_KEY_CONFLICT"));
+          .send(
+            failure("Idempotency-Key already used with different payload.", "IDEMPOTENCY_KEY_CONFLICT", {
+              scope,
+            }),
+          );
         return;
       }
 
@@ -100,7 +139,7 @@ export function idempotencyPreHandler(app: FastifyInstance, scope: string) {
 
       reply
         .status(409)
-        .send(failure("Request with this Idempotency-Key is already processing", "IDEMPOTENCY_IN_PROGRESS"));
+        .send(failure("Request with this Idempotency-Key is already processing.", "IDEMPOTENCY_IN_PROGRESS", { scope }));
       return;
     }
 
@@ -110,13 +149,13 @@ export function idempotencyPreHandler(app: FastifyInstance, scope: string) {
       VALUES ($1, $2, $3, $4)
       ON CONFLICT (user_id, scope, idempotency_key) DO NOTHING
       `,
-      [request.user.id, scope, key, hash],
+      [ownerId, scope, key, hash],
     );
 
     if (insert.rowCount === 0) {
       reply
         .status(409)
-        .send(failure("Request with this Idempotency-Key is already processing", "IDEMPOTENCY_IN_PROGRESS"));
+        .send(failure("Request with this Idempotency-Key is already processing.", "IDEMPOTENCY_IN_PROGRESS", { scope }));
       return;
     }
 
@@ -131,7 +170,8 @@ export function idempotencyPreHandler(app: FastifyInstance, scope: string) {
 
 export function idempotencyOnSend(app: FastifyInstance) {
   return async (request: FastifyRequest, _reply: FastifyReply, payload: unknown): Promise<unknown> => {
-    if (!request.user || !request.idempotencyContext) return payload;
+    const ownerId = resolveIdempotencyUserId(request);
+    if (!ownerId || !request.idempotencyContext) return payload;
     if (request.idempotencyContext.replayed) return payload;
 
     const responseBody = payloadToJson(payload);
@@ -149,7 +189,7 @@ export function idempotencyOnSend(app: FastifyInstance) {
       [
         request.raw.statusCode,
         JSON.stringify(responseBody),
-        request.user.id,
+        ownerId,
         request.idempotencyContext.scope,
         request.idempotencyContext.key,
         request.idempotencyContext.hash,

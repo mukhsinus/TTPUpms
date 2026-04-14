@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { authMiddleware } from "../../middleware/auth.middleware";
 import { allowRoles } from "../../middleware/role.middleware";
+import { AuditLogRepository } from "../audit/audit-log.repository";
 import { NotificationService } from "../notifications/notification.service";
 import { ScoringService } from "../scoring/scoring.service";
 import { ReviewsController } from "./reviews.controller";
@@ -11,7 +12,8 @@ export async function reviewsRoutes(app: FastifyInstance): Promise<void> {
   const repository = new ReviewsRepository(app);
   const notifications = new NotificationService(app);
   const scoring = new ScoringService(app);
-  const service = new ReviewsService(repository, notifications, scoring);
+  const audit = new AuditLogRepository(app);
+  const service = new ReviewsService(repository, notifications, scoring, audit);
   const controller = new ReviewsController(service);
   const reviewerGuard = allowRoles(["reviewer", "admin"]);
 
