@@ -29,24 +29,28 @@ const reviewItemBodyFlexibleSchema = z.object({
   reviewer_comment: z.string().trim().max(5000).optional(),
 });
 
-export type ReviewItemBody = z.infer<typeof reviewItemBodySchema>;
+export type ReviewItemBody = {
+  score?: number;
+  decision: "approved" | "rejected";
+  comment?: string;
+};
 
-/** Normalizes flexible field names to ReviewItemBody. */
+/** Normalizes flexible field names to ReviewItemBody. Score may be omitted for fixed categories (rule-based). */
 export function parseReviewItemBody(body: unknown): ReviewItemBody {
   const raw = reviewItemBodyFlexibleSchema.parse(body);
   const score = raw.approved_score ?? raw.score;
   const decision = raw.status ?? raw.decision;
   const comment = raw.reviewer_comment ?? raw.comment;
-  if (score === undefined || decision === undefined) {
+  if (decision === undefined) {
     throw new z.ZodError([
       {
         code: "custom",
         path: [],
-        message: "Provide score or approved_score, and decision or status",
+        message: "Provide decision or status",
       },
     ]);
   }
-  if (!Number.isFinite(score)) {
+  if (score !== undefined && !Number.isFinite(score)) {
     throw new z.ZodError([
       {
         code: "custom",

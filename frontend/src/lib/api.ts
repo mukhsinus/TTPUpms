@@ -51,6 +51,9 @@ export interface ReviewSubmissionItemResponse {
   userId: string;
   category: string;
   subcategory: string | null;
+  subcategoryId?: string;
+  metadata?: Record<string, unknown>;
+  categoryType?: string;
   title: string;
   description: string | null;
   proposedScore: number;
@@ -310,12 +313,14 @@ export const api = {
   createSubmissionItem(input: {
     submission_id: string;
     category_id: string;
+    subcategory_id?: string;
     subcategory?: string;
+    metadata?: Record<string, string | number | boolean>;
     title: string;
     description?: string;
     proof_file_url?: string;
     external_link?: string;
-    proposed_score: number;
+    proposed_score?: number;
   }): Promise<SubmissionItem> {
     return request<SubmissionItem>("/api/submission-items", {
       method: "POST",
@@ -343,14 +348,15 @@ export const api = {
   /** PATCH /api/reviews/items/:itemId — reviewer/admin; sets approved score, status, comment. */
   patchReviewItem(input: {
     itemId: string;
-    approved_score: number;
+    /** Omitted for fixed categories (server derives score from scoring_rules + metadata). */
+    approved_score?: number;
     status: "approved" | "rejected";
     reviewer_comment?: string;
   }): Promise<ReviewSubmissionItemResponse> {
     return request<ReviewSubmissionItemResponse>(`/api/reviews/items/${input.itemId}`, {
       method: "PATCH",
       body: JSON.stringify({
-        approved_score: input.approved_score,
+        ...(input.approved_score !== undefined ? { approved_score: input.approved_score } : {}),
         status: input.status,
         reviewer_comment: input.reviewer_comment,
       }),

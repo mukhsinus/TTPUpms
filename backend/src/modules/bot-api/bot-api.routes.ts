@@ -7,6 +7,7 @@ import { userWriteRateLimitPreHandler } from "../../middleware/user-write-rate-l
 import { mapPgErrorToClient } from "../../utils/pg-http-map";
 import { failure, success } from "../../utils/http-response";
 import { AuditLogRepository } from "../audit/audit-log.repository";
+import { ScoringRulesRepository } from "../scoring/scoring-rules.repository";
 import { BotApiHttpError } from "./bot-api-errors";
 import { BotApiService } from "./bot-api.service";
 
@@ -41,6 +42,8 @@ const uploadProofSchema = z.object({
   fileBase64: z.string().min(1),
 });
 
+const metadataRecordSchema = z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional();
+
 const createStudentSubmissionSchema = z.object({
   telegram_id: z.string().regex(/^\d+$/, "telegram_id must be numeric"),
   category_id: z.string().uuid(),
@@ -48,6 +51,7 @@ const createStudentSubmissionSchema = z.object({
   title: z.string().min(1).max(200),
   description: z.string().min(1).max(5000),
   proof_file_url: z.string().url(),
+  metadata: metadataRecordSchema,
 });
 
 const createDraftSubmissionSchema = z.object({
@@ -63,6 +67,7 @@ const addBotSubmissionItemSchema = z.object({
   description: z.string().min(1).max(5000),
   proof_file_url: z.string().url(),
   external_link: z.union([z.string().url(), z.literal("")]).optional().nullable(),
+  metadata: metadataRecordSchema,
 });
 
 const submitDraftParamsSchema = z.object({
@@ -111,7 +116,8 @@ function handleRouteError(app: FastifyInstance, reply: FastifyReply, error: unkn
 
 export async function botApiRoutes(app: FastifyInstance): Promise<void> {
   const audit = new AuditLogRepository(app);
-  const service = new BotApiService(app, audit);
+  const scoringRules = new ScoringRulesRepository(app);
+  const service = new BotApiService(app, audit, scoringRules);
 
   app.addHook("onSend", idempotencyOnSend(app));
 
@@ -214,6 +220,7 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
           description: body.description,
           proofFileUrl: body.proof_file_url,
           externalLink: ext,
+          metadata: body.metadata,
         });
         reply.status(201).send(success(data));
       } catch (error) {
@@ -250,6 +257,7 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
           title: body.title,
           description: body.description,
           proofFileUrl: body.proof_file_url,
+          metadata: body.metadata,
         });
         reply.status(201).send(success(data));
       } catch (error) {

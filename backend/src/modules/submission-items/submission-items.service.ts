@@ -4,6 +4,8 @@ import type {
   SubmissionOwnerEntity,
 } from "./submission-items.repository";
 import type { AddSubmissionItemBody } from "./submission-items.schema";
+import type { ScoringRulesRepository } from "../scoring/scoring-rules.repository";
+import { normalizeMetadata, resolveFixedPointsFromRules } from "../scoring/scoring-metadata";
 import { isPgUniqueViolation } from "../../utils/pg-errors";
 import { ServiceError } from "../../utils/service-error";
 import { assertStudentMayEditSubmissionContent } from "../submissions/submission-transitions";
@@ -16,7 +18,10 @@ export interface AuthUser {
 }
 
 export class SubmissionItemsService {
-  constructor(private readonly repository: SubmissionItemsRepository) {}
+  constructor(
+    private readonly repository: SubmissionItemsRepository,
+    private readonly scoringRules: ScoringRulesRepository,
+  ) {}
 
   async addItem(
     user: AuthUser,
@@ -30,10 +35,48 @@ export class SubmissionItemsService {
       throw new ServiceError(400, "Unknown category");
     }
 
-    if (body.proposed_score < bounds.minScore || body.proposed_score > bounds.maxScore) {
+    const categoryTypeRaw = await this.repository.findCategoryScoringType(body.category_id);
+    if (!categoryTypeRaw) {
+      throw new ServiceError(400, "Unknown category");
+    }
+    const categoryKind = categoryTypeRaw === "manual" ? "expert" : categoryTypeRaw;
+
+    let subcategoryId = body.subcategory_id ?? null;
+    if (!subcategoryId) {
+      const slug = body.subcategory?.trim();
+      if (!slug) {
+        throw new ServiceError(400, "Provide subcategory_id or subcategory slug", "VALIDATION_ERROR");
+      }
+      subcategoryId = await this.repository.findSubcategoryIdBySlug(body.category_id, slug);
+      if (!subcategoryId) {
+        throw new ServiceError(400, "Unknown subcategory slug for this category", "VALIDATION_ERROR");
+      }
+    } else {
+      const ok = await this.repository.isSubcategoryUnderCategory(subcategoryId, body.category_id);
+      if (!ok) {
+        throw new ServiceError(400, "subcategory_id does not belong to category_id", "VALIDATION_ERROR");
+      }
+    }
+
+    const metadata = normalizeMetadata(body.metadata);
+    let proposedScore = body.proposed_score;
+
+    if (categoryKind === "fixed") {
+      const rules = await this.scoringRules.findRulesBySubcategoryId(subcategoryId);
+      const resolved = resolveFixedPointsFromRules(metadata, rules);
+      if (resolved === null) {
+        throw new ServiceError(
+          400,
+          "metadata does not match any scoring rule for this category/subcategory",
+          "VALIDATION_ERROR",
+        );
+      }
+      proposedScore = resolved;
+    } else if (proposedScore < bounds.minScore || proposedScore > bounds.maxScore) {
       throw new ServiceError(
         400,
         `proposed_score must be between ${bounds.minScore} and ${bounds.maxScore} for this category`,
+        "VALIDATION_ERROR",
       );
     }
 
@@ -48,12 +91,13 @@ export class SubmissionItemsService {
         userId: submission.userId,
         categoryId: body.category_id,
         categoryName,
-        subcategory: body.subcategory,
+        subcategoryId,
         title: body.title,
         description: body.description,
         proofFileUrl: body.proof_file_url,
         externalLink: body.external_link,
-        proposedScore: body.proposed_score,
+        proposedScore,
+        metadata,
       });
     } catch (err) {
       if (isPgUniqueViolation(err)) {

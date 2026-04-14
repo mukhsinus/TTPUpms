@@ -47,6 +47,9 @@ function mergeReviewIntoSubmissionItem(
     title: r.title,
     category: r.category,
     subcategory: r.subcategory,
+    subcategoryId: r.subcategoryId,
+    metadata: r.metadata,
+    categoryType: r.categoryType,
     description: r.description,
     proposedScore: r.proposedScore,
     status: r.status,
@@ -171,8 +174,9 @@ export function SubmissionDetailPage(): ReactElement {
   const submitItemReview = async (item: SubmissionItem, decision: "approved" | "rejected"): Promise<void> => {
     if (!submissionId || !canReview) return;
     const draft = itemDrafts[item.id];
+    const isFixed = item.categoryType === "fixed";
     const score = Number(draft?.score ?? "");
-    if (Number.isNaN(score) || score < 0) {
+    if (!isFixed && (Number.isNaN(score) || score < 0)) {
       setActionError("Enter a valid score for this item.");
       return;
     }
@@ -182,7 +186,7 @@ export function SubmissionDetailPage(): ReactElement {
       setSavingItemId(item.id);
       const updated = await api.patchReviewItem({
         itemId: item.id,
-        approved_score: score,
+        ...(isFixed ? {} : { approved_score: score }),
         status: decision,
         reviewer_comment: draft?.comment?.trim() || undefined,
       });

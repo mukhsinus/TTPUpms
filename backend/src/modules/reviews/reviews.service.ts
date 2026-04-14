@@ -7,6 +7,8 @@ import type { CompleteSubmissionReviewBody, ReviewItemBody } from "./reviews.sch
 import type { AuditLogRepository } from "../audit/audit-log.repository";
 import type { NotificationService } from "../notifications/notification.service";
 import type { ScoringService } from "../scoring/scoring.service";
+import type { ScoringRulesRepository } from "../scoring/scoring-rules.repository";
+import { resolveFixedPointsFromRules } from "../scoring/scoring-metadata";
 import {
   assertValidTransition,
   REVIEW_ACTIVE_STATUSES,
@@ -26,6 +28,7 @@ export class ReviewsService {
     private readonly notifications: NotificationService,
     private readonly scoring: ScoringService,
     private readonly audit: AuditLogRepository,
+    private readonly scoringRules: ScoringRulesRepository,
   ) {}
 
   async getReviewableSubmissions(user: AuthUser): Promise<ReviewSubmissionEntity[]> {
@@ -81,7 +84,39 @@ export class ReviewsService {
       throw new ServiceError(404, "Submission item not found");
     }
 
-    await this.assertValidItemScore(item, body.score);
+    const scoringKind: "fixed" | "range" | "expert" =
+      item.categoryType === "manual" ? "expert" : (item.categoryType as "fixed" | "range" | "expert");
+    let finalScore = body.score;
+
+    if (scoringKind === "fixed") {
+      const rules = await this.scoringRules.findRulesBySubcategoryId(item.subcategoryId);
+      const resolved = resolveFixedPointsFromRules(item.metadata, rules);
+      if (resolved === null) {
+        throw new ServiceError(
+          400,
+          "No scoring rule matches item metadata for this subcategory",
+          "VALIDATION_ERROR",
+        );
+      }
+      if (finalScore !== undefined && finalScore !== resolved) {
+        throw new ServiceError(
+          400,
+          `Score for fixed categories must equal ${resolved} (rule-based)`,
+          "VALIDATION_ERROR",
+        );
+      }
+      finalScore = resolved;
+    } else {
+      if (finalScore === undefined || !Number.isFinite(finalScore)) {
+        throw new ServiceError(
+          400,
+          "score is required for range and expert categories",
+          "VALIDATION_ERROR",
+        );
+      }
+    }
+
+    await this.assertValidItemScore(item, finalScore, scoringKind);
 
     let reviewed: ReviewSubmissionItemEntity;
     if (submission.status === "submitted") {
@@ -90,7 +125,7 @@ export class ReviewsService {
         submissionId,
         itemId,
         reviewerId: user.id,
-        score: body.score,
+        score: finalScore,
         comment: body.comment,
         decision: body.decision,
       });
@@ -98,7 +133,7 @@ export class ReviewsService {
       reviewed = await this.repository.reviewItem({
         itemId,
         reviewerId: user.id,
-        score: body.score,
+        score: finalScore,
         comment: body.comment,
         decision: body.decision,
       });
@@ -187,17 +222,13 @@ export class ReviewsService {
     return updated;
   }
 
-  private async assertValidItemScore(item: ReviewSubmissionItemEntity, score: number): Promise<void> {
+  private async assertValidItemScore(
+    item: ReviewSubmissionItemEntity,
+    score: number,
+    scoringKind: "fixed" | "range" | "expert",
+  ): Promise<void> {
     if (!Number.isFinite(score)) {
       throw new ServiceError(400, "Score must be a finite number.", "VALIDATION_ERROR");
-    }
-
-    if (score > item.proposedScore) {
-      throw new ServiceError(
-        400,
-        `Score cannot exceed the proposed maximum (${item.proposedScore})`,
-        "VALIDATION_ERROR",
-      );
     }
 
     const bounds = await this.repository.findCategoryBoundsForItem(item.id);
@@ -213,6 +244,14 @@ export class ReviewsService {
       throw new ServiceError(
         400,
         `Score must be within the category range ${bounds.minScore}–${bounds.maxScore}`,
+        "VALIDATION_ERROR",
+      );
+    }
+
+    if (scoringKind !== "fixed" && score > item.proposedScore) {
+      throw new ServiceError(
+        400,
+        `Score cannot exceed the proposed maximum (${item.proposedScore})`,
         "VALIDATION_ERROR",
       );
     }

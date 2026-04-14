@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { normalizeMetadata } from "../scoring/scoring-metadata";
 
 interface SubmissionOwnerRow {
   id: string;
@@ -18,6 +19,9 @@ interface SubmissionItemRow {
   category_id: string | null;
   category: string;
   subcategory: string | null;
+  subcategory_id: string | null;
+  metadata: unknown;
+  category_type: string | null;
   title: string;
   description: string | null;
   proof_file_url: string | null;
@@ -37,6 +41,9 @@ export interface SubmissionItemEntity {
   categoryId: string | null;
   category: string;
   subcategory: string | null;
+  subcategoryId: string;
+  metadata: Record<string, unknown>;
+  categoryType: string;
   title: string;
   description: string | null;
   proofFileUrl: string | null;
@@ -63,6 +70,9 @@ function mapItem(row: SubmissionItemRow): SubmissionItemEntity {
     categoryId: row.category_id,
     category: row.category,
     subcategory: row.subcategory,
+    subcategoryId: row.subcategory_id ?? "",
+    metadata: normalizeMetadata(row.metadata),
+    categoryType: row.category_type ?? "range",
     title: row.title,
     description: row.description,
     proofFileUrl: row.proof_file_url,
@@ -77,9 +87,16 @@ function mapItem(row: SubmissionItemRow): SubmissionItemEntity {
 }
 
 const itemSelectColumns = `
-  id, submission_id, user_id, category_id, category, subcategory, title, description,
-  proof_file_url, external_link, proposed_score, approved_score, status, reviewer_comment,
-  created_at, updated_at
+  si.id, si.submission_id, si.user_id, si.category_id, si.category, si.subcategory, si.subcategory_id, si.metadata,
+  si.title, si.description,
+  si.proof_file_url, si.external_link, si.proposed_score, si.approved_score, si.status, si.reviewer_comment,
+  si.created_at, si.updated_at,
+  c.type::text AS category_type
+`;
+
+const itemFromJoin = `
+  FROM submission_items si
+  LEFT JOIN categories c ON c.id = si.category_id
 `;
 
 export class SubmissionItemsRepository {
@@ -152,17 +169,72 @@ export class SubmissionItemsRepository {
     return result.rows[0]?.name ?? null;
   }
 
+  async findCategoryScoringType(categoryId: string): Promise<string | null> {
+    const result = await this.app.db.query<{ type: string }>(
+      `
+      SELECT type::text AS type FROM categories WHERE id = $1
+      `,
+      [categoryId],
+    );
+
+    return result.rows[0]?.type ?? null;
+  }
+
+  async findSubcategoryIdBySlug(categoryId: string, slug: string): Promise<string | null> {
+    const result = await this.app.db.query<{ id: string }>(
+      `
+      SELECT id
+      FROM category_subcategories
+      WHERE category_id = $1 AND slug = $2
+      LIMIT 1
+      `,
+      [categoryId, slug],
+    );
+
+    return result.rows[0]?.id ?? null;
+  }
+
+  async findFirstSubcategoryIdForCategory(categoryId: string): Promise<string | null> {
+    const result = await this.app.db.query<{ id: string }>(
+      `
+      SELECT id
+      FROM category_subcategories
+      WHERE category_id = $1
+      ORDER BY sort_order ASC, id ASC
+      LIMIT 1
+      `,
+      [categoryId],
+    );
+
+    return result.rows[0]?.id ?? null;
+  }
+
+  async isSubcategoryUnderCategory(subcategoryId: string, categoryId: string): Promise<boolean> {
+    const result = await this.app.db.query<{ ok: boolean }>(
+      `
+      SELECT true AS ok
+      FROM category_subcategories
+      WHERE id = $1 AND category_id = $2
+      LIMIT 1
+      `,
+      [subcategoryId, categoryId],
+    );
+
+    return Boolean(result.rows[0]?.ok);
+  }
+
   async createItem(input: {
     submissionId: string;
     userId: string;
     categoryId: string;
     categoryName: string;
-    subcategory?: string;
+    subcategoryId: string;
     title: string;
     description?: string;
     proofFileUrl?: string;
     externalLink?: string;
     proposedScore: number;
+    metadata: Record<string, unknown>;
   }): Promise<SubmissionItemEntity> {
     const result = await this.app.db.query<SubmissionItemRow>(
       `
@@ -171,28 +243,49 @@ export class SubmissionItemsRepository {
         user_id,
         category_id,
         category,
-        subcategory,
+        subcategory_id,
         title,
         description,
         proof_file_url,
         external_link,
         proposed_score,
+        metadata,
         status
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending')
-      RETURNING ${itemSelectColumns}
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, 'pending')
+      RETURNING
+        submission_items.id,
+        submission_items.submission_id,
+        submission_items.user_id,
+        submission_items.category_id,
+        submission_items.category,
+        submission_items.subcategory,
+        submission_items.subcategory_id,
+        submission_items.metadata,
+        submission_items.title,
+        submission_items.description,
+        submission_items.proof_file_url,
+        submission_items.external_link,
+        submission_items.proposed_score,
+        submission_items.approved_score,
+        submission_items.status,
+        submission_items.reviewer_comment,
+        submission_items.created_at,
+        submission_items.updated_at,
+        (SELECT c.type::text FROM categories c WHERE c.id = submission_items.category_id LIMIT 1) AS category_type
       `,
       [
         input.submissionId,
         input.userId,
         input.categoryId,
         input.categoryName,
-        input.subcategory ?? null,
+        input.subcategoryId,
         input.title,
         input.description ?? null,
         input.proofFileUrl ?? null,
         input.externalLink ?? null,
         input.proposedScore,
+        JSON.stringify(input.metadata ?? {}),
       ],
     );
 
@@ -203,9 +296,9 @@ export class SubmissionItemsRepository {
     const result = await this.app.db.query<SubmissionItemRow>(
       `
       SELECT ${itemSelectColumns}
-      FROM submission_items
-      WHERE submission_id = $1
-      ORDER BY created_at ASC
+      ${itemFromJoin}
+      WHERE si.submission_id = $1
+      ORDER BY si.created_at ASC
       `,
       [submissionId],
     );
@@ -217,8 +310,8 @@ export class SubmissionItemsRepository {
     const result = await this.app.db.query<SubmissionItemRow>(
       `
       SELECT ${itemSelectColumns}
-      FROM submission_items
-      WHERE id = $1
+      ${itemFromJoin}
+      WHERE si.id = $1
       `,
       [itemId],
     );

@@ -2,6 +2,8 @@ import type { FastifyInstance } from "fastify";
 import { createHash, randomUUID } from "crypto";
 import { env } from "../../config/env";
 import type { AuditLogRepository } from "../audit/audit-log.repository";
+import type { ScoringRulesRepository } from "../scoring/scoring-rules.repository";
+import { normalizeMetadata, resolveFixedPointsFromRules } from "../scoring/scoring-metadata";
 import { isPgUniqueViolation } from "../../utils/pg-errors";
 import { BotApiHttpError } from "./bot-api-errors";
 
@@ -61,7 +63,37 @@ export class BotApiService {
   constructor(
     private readonly app: FastifyInstance,
     private readonly audit: AuditLogRepository,
+    private readonly scoringRules: ScoringRulesRepository,
   ) {}
+
+  private async resolveProposedScoreForBot(
+    categoryId: string,
+    subcategoryId: string,
+    metadata: Record<string, unknown>,
+  ): Promise<number> {
+    const typeRow = await this.app.db.query<{ type: string; max_score: string }>(
+      `
+      SELECT type::text AS type, max_score::text
+      FROM categories
+      WHERE id = $1
+      `,
+      [categoryId],
+    );
+    const row = typeRow.rows[0];
+    if (!row) {
+      throw new Error("Unknown category");
+    }
+    const kind = row.type === "manual" ? "expert" : row.type;
+    if (kind === "fixed") {
+      const rules = await this.scoringRules.findRulesBySubcategoryId(subcategoryId);
+      const resolved = resolveFixedPointsFromRules(metadata, rules);
+      if (resolved === null) {
+        throw new Error("Metadata does not match any scoring rule for this subcategory");
+      }
+      return resolved;
+    }
+    return Number(row.max_score);
+  }
 
   private async hasTelegramUsernameColumn(): Promise<boolean> {
     if (this.telegramUsernameColumnAvailable !== null) {
@@ -230,6 +262,7 @@ export class BotApiService {
     description: string;
     proofFileUrl: string;
     externalLink?: string | null;
+    metadata?: Record<string, unknown>;
   }): Promise<{ itemId: string }> {
     this.validateProofStorageUrl(input.proofFileUrl);
 
@@ -238,12 +271,12 @@ export class BotApiService {
     try {
       await client.query("BEGIN");
 
-      const subRow = await client.query<{ user_id: string; status: string }>(
+      const submissionLock = await client.query<{ user_id: string; status: string }>(
         `SELECT user_id, status FROM submissions WHERE id = $1 FOR UPDATE`,
         [input.submissionId],
       );
 
-      const submission = subRow.rows[0];
+      const submission = submissionLock.rows[0];
       if (!submission) {
         throw new Error("Submission not found");
       }
@@ -282,30 +315,28 @@ export class BotApiService {
       );
 
       const hasSubs = Number(subCount.rows[0]?.c ?? "0") > 0;
-      let subcategoryValue: string | null = input.subcategory;
-
-      if (hasSubs) {
-        if (!input.subcategory) {
-          throw new Error("Subcategory is required for this category");
-        }
-        const subCheck = await client.query<{ ok: boolean }>(
-          `
-          SELECT true AS ok
-          FROM category_subcategories
-          WHERE category_id = $1 AND slug = $2
-          LIMIT 1
-          `,
-          [input.categoryId, input.subcategory],
-        );
-
-        if (!subCheck.rows[0]) {
-          throw new Error("Invalid subcategory for this category");
-        }
-      } else {
-        subcategoryValue = input.subcategory ?? "general";
+      const slug = hasSubs ? input.subcategory?.trim() : "general";
+      if (hasSubs && !slug) {
+        throw new Error("Subcategory is required for this category");
       }
 
-      const proposedScore = Number(categoryRow.max_score);
+      const subcategoryRow = await client.query<{ id: string }>(
+        `
+        SELECT id
+        FROM category_subcategories
+        WHERE category_id = $1 AND slug = $2
+        LIMIT 1
+        `,
+        [input.categoryId, slug ?? "general"],
+      );
+
+      if (!subcategoryRow.rows[0]) {
+        throw new Error("Invalid subcategory for this category");
+      }
+
+      const subcategoryId = subcategoryRow.rows[0].id;
+      const metadata = normalizeMetadata(input.metadata);
+      const proposedScore = await this.resolveProposedScoreForBot(input.categoryId, subcategoryId, metadata);
 
       const ext =
         input.externalLink && input.externalLink.trim() !== "" ? input.externalLink.trim() : null;
@@ -317,15 +348,16 @@ export class BotApiService {
           user_id,
           category_id,
           category,
-          subcategory,
+          subcategory_id,
           title,
           description,
           proof_file_url,
           external_link,
           proposed_score,
+          metadata,
           status
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending')
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, 'pending')
         RETURNING id
         `,
         [
@@ -333,12 +365,13 @@ export class BotApiService {
           user.id,
           input.categoryId,
           categoryRow.name,
-          subcategoryValue,
+          subcategoryId,
           input.title,
           input.description,
           input.proofFileUrl,
           ext,
           proposedScore,
+          JSON.stringify(metadata),
         ],
       );
 
@@ -472,6 +505,7 @@ export class BotApiService {
     title: string;
     description: string;
     proofFileUrl: string;
+    metadata?: Record<string, unknown>;
   }): Promise<{ submissionId: string }> {
     this.validateProofStorageUrl(input.proofFileUrl);
 
@@ -508,23 +542,28 @@ export class BotApiService {
       );
 
       const hasSubs = Number(subCount.rows[0]?.c ?? "0") > 0;
-      if (hasSubs) {
-        const subCheck = await client.query<{ ok: boolean }>(
-          `
-          SELECT true AS ok
-          FROM category_subcategories
-          WHERE category_id = $1 AND slug = $2
-          LIMIT 1
-          `,
-          [input.categoryId, input.subcategory],
-        );
-
-        if (!subCheck.rows[0]) {
-          throw new Error("Invalid subcategory for this category");
-        }
+      const slug = hasSubs ? input.subcategory.trim() : "general";
+      if (hasSubs && !input.subcategory?.trim()) {
+        throw new Error("Subcategory is required for this category");
       }
 
-      const proposedScore = Number(categoryRow.max_score);
+      const subcategoryRow = await client.query<{ id: string }>(
+        `
+        SELECT id
+        FROM category_subcategories
+        WHERE category_id = $1 AND slug = $2
+        LIMIT 1
+        `,
+        [input.categoryId, slug],
+      );
+
+      if (!subcategoryRow.rows[0]) {
+        throw new Error("Invalid subcategory for this category");
+      }
+
+      const subcategoryId = subcategoryRow.rows[0].id;
+      const metadata = normalizeMetadata(input.metadata);
+      const proposedScore = await this.resolveProposedScoreForBot(input.categoryId, subcategoryId, metadata);
 
       const submissionResult = await client.query<{ id: string }>(
         `
@@ -544,24 +583,26 @@ export class BotApiService {
           user_id,
           category_id,
           category,
-          subcategory,
+          subcategory_id,
           title,
           description,
           proof_file_url,
-          proposed_score
+          proposed_score,
+          metadata
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
         `,
         [
           submissionId,
           user.id,
           input.categoryId,
           categoryRow.name,
-          input.subcategory,
+          subcategoryId,
           input.title,
           input.description,
           input.proofFileUrl,
           proposedScore,
+          JSON.stringify(metadata),
         ],
       );
 
@@ -763,6 +804,27 @@ export class BotApiService {
         throw new Error("Unknown category for achievement");
       }
 
+      const genSub = await client.query<{ id: string }>(
+        `
+        SELECT id
+        FROM category_subcategories
+        WHERE category_id = $1 AND slug = 'general'
+        LIMIT 1
+        `,
+        [categoryRow.id],
+      );
+      const defaultSubId = genSub.rows[0]?.id;
+      if (!defaultSubId) {
+        throw new Error("Category is missing default subcategory");
+      }
+
+      const achievementMeta: Record<string, unknown> = {};
+      const proposedScore = await this.resolveProposedScoreForBot(
+        categoryRow.id,
+        defaultSubId,
+        achievementMeta,
+      );
+
       const submissionResult = await client.query<{ id: string }>(
         `
         INSERT INTO submissions (user_id, title, description, status, submitted_at)
@@ -781,22 +843,26 @@ export class BotApiService {
           user_id,
           category_id,
           category,
+          subcategory_id,
           title,
           description,
           proof_file_url,
-          proposed_score
+          proposed_score,
+          metadata
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
         `,
         [
           submissionId,
           user.id,
           categoryRow.id,
           categoryRow.name,
+          defaultSubId,
           `Achievement: ${input.category}`,
           input.details,
           input.proofFileUrl,
-          0,
+          proposedScore,
+          JSON.stringify(achievementMeta),
         ],
       );
 

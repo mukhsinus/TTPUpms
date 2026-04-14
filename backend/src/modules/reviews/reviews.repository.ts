@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { ServiceError } from "../../utils/service-error";
+import { normalizeMetadata } from "../scoring/scoring-metadata";
 
 type SubmissionStatus = "draft" | "submitted" | "under_review" | "approved" | "rejected" | "needs_revision";
 type ItemDecision = "approved" | "rejected" | null;
@@ -36,6 +37,9 @@ interface SubmissionItemRow {
   reviewed_at: string | null;
   created_at: string;
   updated_at: string;
+  subcategory_id: string | null;
+  metadata: unknown;
+  category_type: string | null;
 }
 
 interface ReviewAssignmentRow {
@@ -61,6 +65,11 @@ export interface ReviewSubmissionItemEntity {
   userId: string;
   category: string;
   subcategory: string | null;
+  /** FK to category_subcategories (drives scoring_rules lookup for fixed categories). */
+  subcategoryId: string;
+  metadata: Record<string, unknown>;
+  /** categories.type — fixed | range | expert | manual (legacy). */
+  categoryType: string;
   title: string;
   description: string | null;
   proposedScore: number;
@@ -118,6 +127,9 @@ function mapItem(row: SubmissionItemRow): ReviewSubmissionItemEntity {
     userId: row.user_id,
     category: row.category,
     subcategory: row.subcategory,
+    subcategoryId: row.subcategory_id ?? "",
+    metadata: normalizeMetadata(row.metadata),
+    categoryType: row.category_type ?? "range",
     title: row.title,
     description: row.description,
     proposedScore: Number(row.proposed_score),
@@ -133,10 +145,50 @@ function mapItem(row: SubmissionItemRow): ReviewSubmissionItemEntity {
   };
 }
 
-const submissionItemSelectColumns = `
-  id, submission_id, user_id, category, subcategory, title, description, proposed_score,
-  reviewer_score, approved_score, reviewer_comment, review_decision, status::text AS status,
-  reviewed_by, reviewed_at, created_at, updated_at
+const submissionItemJoinedSelectColumns = `
+  si.id,
+  si.submission_id,
+  si.user_id,
+  si.category,
+  si.subcategory,
+  si.title,
+  si.description,
+  si.proposed_score,
+  si.reviewer_score,
+  si.approved_score,
+  si.reviewer_comment,
+  si.review_decision,
+  si.status::text AS status,
+  si.reviewed_by,
+  si.reviewed_at,
+  si.created_at,
+  si.updated_at,
+  si.subcategory_id,
+  coalesce(si.metadata, '{}'::jsonb) AS metadata,
+  c.type::text AS category_type
+`;
+
+const submissionItemReturningColumns = `
+  submission_items.id,
+  submission_items.submission_id,
+  submission_items.user_id,
+  submission_items.category,
+  submission_items.subcategory,
+  submission_items.title,
+  submission_items.description,
+  submission_items.proposed_score,
+  submission_items.reviewer_score,
+  submission_items.approved_score,
+  submission_items.reviewer_comment,
+  submission_items.review_decision,
+  submission_items.status::text AS status,
+  submission_items.reviewed_by,
+  submission_items.reviewed_at,
+  submission_items.created_at,
+  submission_items.updated_at,
+  submission_items.subcategory_id,
+  coalesce(submission_items.metadata, '{}'::jsonb) AS metadata,
+  (SELECT c.type::text FROM categories c WHERE c.id = submission_items.category_id LIMIT 1) AS category_type
 `;
 
 export class ReviewsRepository {
@@ -202,10 +254,11 @@ export class ReviewsRepository {
   async findSubmissionItems(submissionId: string): Promise<ReviewSubmissionItemEntity[]> {
     const result = await this.app.db.query<SubmissionItemRow>(
       `
-      SELECT ${submissionItemSelectColumns}
-      FROM submission_items
-      WHERE submission_id = $1
-      ORDER BY created_at ASC
+      SELECT ${submissionItemJoinedSelectColumns}
+      FROM submission_items si
+      LEFT JOIN categories c ON c.id = si.category_id
+      WHERE si.submission_id = $1
+      ORDER BY si.created_at ASC
       `,
       [submissionId],
     );
@@ -254,9 +307,10 @@ export class ReviewsRepository {
   async findSubmissionItemById(itemId: string): Promise<ReviewSubmissionItemEntity | null> {
     const result = await this.app.db.query<SubmissionItemRow>(
       `
-      SELECT ${submissionItemSelectColumns}
-      FROM submission_items
-      WHERE id = $1
+      SELECT ${submissionItemJoinedSelectColumns}
+      FROM submission_items si
+      LEFT JOIN categories c ON c.id = si.category_id
+      WHERE si.id = $1
       `,
       [itemId],
     );
@@ -286,7 +340,7 @@ export class ReviewsRepository {
         reviewed_at = NOW(),
         updated_at = NOW()
       WHERE id = $1
-      RETURNING ${submissionItemSelectColumns}
+      RETURNING ${submissionItemReturningColumns}
       `,
       [input.itemId, input.score, input.comment ?? null, input.decision, input.reviewerId],
     );
@@ -353,7 +407,7 @@ export class ReviewsRepository {
           reviewed_at = NOW(),
           updated_at = NOW()
         WHERE id = $1
-        RETURNING ${submissionItemSelectColumns}
+        RETURNING ${submissionItemReturningColumns}
         `,
         [
           input.itemId,
