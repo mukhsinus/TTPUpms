@@ -8,6 +8,9 @@ import { idempotencyPreHandler } from "./idempotency.middleware";
  */
 export function botIdempotencySubjectFromBodyPreHandler() {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (request.method === "GET" || request.method === "HEAD" || request.method === "OPTIONS") {
+      return;
+    }
     const body = request.body;
     if (typeof body !== "object" || body === null) {
       reply.status(400).send(failure("JSON body required.", "VALIDATION_ERROR", {}));

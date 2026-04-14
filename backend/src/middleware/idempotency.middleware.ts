@@ -2,7 +2,8 @@ import { createHash } from "crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { failure } from "../utils/http-response";
 
-const IDEMPOTENT_METHODS = new Set(["POST", "PATCH", "DELETE"]);
+/** Idempotency applies only to mutating methods; GET/HEAD/OPTIONS never participate (see preHandler + onSend). */
+const IDEMPOTENCY_MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 interface IdempotencyRow {
   request_hash: string;
@@ -66,7 +67,13 @@ export function idempotencyPreHandler(
   opts: IdempotencyPreHandlerOptions = {},
 ) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
-    if (!IDEMPOTENT_METHODS.has(request.method)) return;
+    const method = request.method;
+    if (method === "GET" || method === "HEAD" || method === "OPTIONS") {
+      return;
+    }
+    if (!IDEMPOTENCY_MUTATING_METHODS.has(method)) {
+      return;
+    }
 
     const ownerId = resolveIdempotencyUserId(request);
     const key = resolveKey(request.headers["idempotency-key"]);
@@ -77,9 +84,9 @@ export function idempotencyPreHandler(
           .status(400)
           .send(
             failure(
-              "Idempotency-Key header is required for this request.",
+              "Idempotency-Key header is required",
               "MISSING_IDEMPOTENCY_KEY",
-              { scope },
+              {},
             ),
           );
         return;
@@ -170,6 +177,14 @@ export function idempotencyPreHandler(
 
 export function idempotencyOnSend(app: FastifyInstance) {
   return async (request: FastifyRequest, _reply: FastifyReply, payload: unknown): Promise<unknown> => {
+    const method = request.method;
+    if (method === "GET" || method === "HEAD" || method === "OPTIONS") {
+      return payload;
+    }
+    if (!IDEMPOTENCY_MUTATING_METHODS.has(method)) {
+      return payload;
+    }
+
     const ownerId = resolveIdempotencyUserId(request);
     if (!ownerId || !request.idempotencyContext) return payload;
     if (request.idempotencyContext.replayed) return payload;
