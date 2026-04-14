@@ -72,7 +72,6 @@ async function presentCategoryStep(ctx: BotContext, upms: UpmsService): Promise<
   const s = st(ctx);
   try {
     const categories = await upms.getCategoriesCatalog();
-    console.log("Categories response:", categories);
 
     if (!categories || categories.length === 0) {
       await ctx.reply(NO_CATEGORIES_MSG, mainMenuKeyboard());

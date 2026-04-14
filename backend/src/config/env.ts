@@ -3,11 +3,18 @@ import { z } from "zod";
 
 dotenv.config();
 
+const resolvedDatabaseUrl =
+  process.env.DATABASE_URL ??
+  process.env.SUPABASE_DB_URL ??
+  (process.env.SUPABASE_URL?.startsWith("postgresql://") || process.env.SUPABASE_URL?.startsWith("postgres://")
+    ? process.env.SUPABASE_URL
+    : undefined);
+
 const envInput = {
   ...process.env,
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN ?? process.env.BOT_TOKEN,
-  DATABASE_URL: process.env.DATABASE_URL,
-  SUPABASE_DB_URL: process.env.SUPABASE_DB_URL ?? process.env.DATABASE_URL ?? process.env.SUPABASE_URL,
+  DATABASE_URL: resolvedDatabaseUrl,
+  SUPABASE_DB_URL: process.env.SUPABASE_DB_URL ?? resolvedDatabaseUrl,
 };
 
 const envSchema = z.object({

@@ -583,24 +583,31 @@ export class BotApiService {
     const hasTelegramUsername = await this.hasTelegramUsernameColumn();
     const nextUsername = identity?.telegramUsername ? identity.telegramUsername.trim() : null;
     const nextFullName = identity?.fullName ? identity.fullName.trim() : null;
-    const telegramUsernameUpdate = hasTelegramUsername
-      ? "telegram_username = COALESCE($3, telegram_username),"
-      : "";
-    const telegramUsernameSelect = hasTelegramUsername
-      ? "telegram_username"
-      : "NULL::text AS telegram_username";
-    const result = await this.app.db.query<UserRow>(
-      `
-      UPDATE users
-      SET telegram_id = $2::bigint,
-          ${telegramUsernameUpdate}
-          full_name = COALESCE($4, full_name),
-          updated_at = NOW()
-      WHERE lower(email) = lower($1)
-      RETURNING id, role, full_name, telegram_id, ${telegramUsernameSelect}
-      `,
-      [email, telegramId, nextUsername, nextFullName],
-    );
+
+    const result = hasTelegramUsername
+      ? await this.app.db.query<UserRow>(
+          `
+          UPDATE users
+          SET telegram_id = $2::bigint,
+              telegram_username = COALESCE($3, telegram_username),
+              full_name = COALESCE($4, full_name),
+              updated_at = NOW()
+          WHERE lower(email) = lower($1)
+          RETURNING id, role, full_name, telegram_id, telegram_username
+          `,
+          [email, telegramId, nextUsername, nextFullName],
+        )
+      : await this.app.db.query<UserRow>(
+          `
+          UPDATE users
+          SET telegram_id = $2::bigint,
+              full_name = COALESCE($3, full_name),
+              updated_at = NOW()
+          WHERE lower(email) = lower($1)
+          RETURNING id, role, full_name, telegram_id, NULL::text AS telegram_username
+          `,
+          [email, telegramId, nextFullName],
+        );
 
     const row = result.rows[0];
     if (!row) return null;
