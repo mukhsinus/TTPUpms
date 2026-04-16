@@ -402,11 +402,19 @@ export const api = {
     return shouldHydrateSessionRole();
   },
 
-  async loginWithCredentials(email: string, password: string): Promise<void> {
+  async loginWithCredentials(
+    email: string,
+    password: string,
+    options?: { authSource?: "admin_panel" },
+  ): Promise<void> {
     const token = await signInWithSupabasePassword(email, password);
+    const headers = new Headers();
+    if (options?.authSource === "admin_panel") {
+      headers.set("X-Upms-Auth-Source", "admin_panel");
+    }
     const me = await requestResult<AuthMePayload>(
       "/api/auth/me",
-      { method: "GET" },
+      { method: "GET", headers },
       token,
       { skipUnauthorizedRedirect: true },
     );

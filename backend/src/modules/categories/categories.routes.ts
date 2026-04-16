@@ -7,8 +7,8 @@ import { CategoriesService } from "./categories.service";
 export async function categoriesRoutes(app: FastifyInstance): Promise<void> {
   const service = new CategoriesService(app);
   const controller = new CategoriesController(service);
-  const readGuard = allowRoles(["student", "reviewer", "admin"]);
-  const adminOnly = allowRoles(["admin"]);
+  const readGuard = allowRoles(["student", "reviewer", "admin", "superadmin"]);
+  const adminOnly = allowRoles(["admin", "superadmin"]);
 
   app.get("/", { preHandler: [authMiddleware, readGuard] }, controller.listCategories);
   app.post("/", { preHandler: [authMiddleware, adminOnly] }, controller.createCategory);

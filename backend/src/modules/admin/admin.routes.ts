@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { authMiddleware } from "../../middleware/auth.middleware";
-import { allowRoles } from "../../middleware/role.middleware";
+import { requireAdmin } from "../../middleware/admin.middleware";
 import { AuditLogRepository } from "../audit/audit-log.repository";
 import { NotificationService } from "../notifications/notification.service";
 import { AdminOverrideController } from "./admin-override.controller";
@@ -9,8 +9,6 @@ import { AdminOverrideService } from "./admin-override.service";
 import { AdminController } from "./admin.controller";
 import { AdminRepository } from "./admin.repository";
 import { AdminService } from "./admin.service";
-
-const adminGuard = allowRoles(["admin"]);
 
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
   const notifications = new NotificationService(app);
@@ -24,51 +22,54 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   const overrideService = new AdminOverrideService(overrideRepository, notifications);
   const overrideController = new AdminOverrideController(overrideService);
 
-  app.get(
-    "/metrics",
-    { preHandler: [authMiddleware, adminGuard], config: { rateLimit: { max: 120, timeWindow: "1 minute" } } },
-    moderationController.getMetrics,
-  );
+  await app.register(async (r) => {
+    r.addHook("preHandler", authMiddleware);
+    r.addHook("preHandler", requireAdmin);
 
-  app.get(
-    "/submissions",
-    { preHandler: [authMiddleware, adminGuard], config: { rateLimit: { max: 120, timeWindow: "1 minute" } } },
-    moderationController.listSubmissions,
-  );
+    r.get(
+      "/metrics",
+      { config: { rateLimit: { max: 120, timeWindow: "1 minute" } } },
+      moderationController.getMetrics,
+    );
 
-  app.get(
-    "/submissions/:id",
-    { preHandler: [authMiddleware, adminGuard], config: { rateLimit: { max: 120, timeWindow: "1 minute" } } },
-    moderationController.getSubmission,
-  );
+    r.get(
+      "/submissions",
+      { config: { rateLimit: { max: 120, timeWindow: "1 minute" } } },
+      moderationController.listSubmissions,
+    );
 
-  app.post(
-    "/submissions/:id/approve",
-    { preHandler: [authMiddleware, adminGuard], config: { rateLimit: { max: 50, timeWindow: "1 minute" } } },
-    moderationController.approveSubmission,
-  );
+    r.get(
+      "/submissions/:id",
+      { config: { rateLimit: { max: 120, timeWindow: "1 minute" } } },
+      moderationController.getSubmission,
+    );
 
-  app.post(
-    "/submissions/:id/reject",
-    { preHandler: [authMiddleware, adminGuard], config: { rateLimit: { max: 50, timeWindow: "1 minute" } } },
-    moderationController.rejectSubmission,
-  );
+    r.post(
+      "/submissions/:id/approve",
+      { config: { rateLimit: { max: 50, timeWindow: "1 minute" } } },
+      moderationController.approveSubmission,
+    );
 
-  app.patch(
-    "/submissions/:submissionId/override-score",
-    {
-      preHandler: [authMiddleware, adminGuard],
-      config: { rateLimit: { max: 50, timeWindow: "1 minute" } },
-    },
-    overrideController.overrideScore,
-  );
+    r.post(
+      "/submissions/:id/reject",
+      { config: { rateLimit: { max: 50, timeWindow: "1 minute" } } },
+      moderationController.rejectSubmission,
+    );
 
-  app.patch(
-    "/submissions/:submissionId/override-status",
-    {
-      preHandler: [authMiddleware, adminGuard],
-      config: { rateLimit: { max: 50, timeWindow: "1 minute" } },
-    },
-    overrideController.overrideStatus,
-  );
+    r.patch(
+      "/submissions/:submissionId/override-score",
+      {
+        config: { rateLimit: { max: 50, timeWindow: "1 minute" } },
+      },
+      overrideController.overrideScore,
+    );
+
+    r.patch(
+      "/submissions/:submissionId/override-status",
+      {
+        config: { rateLimit: { max: 50, timeWindow: "1 minute" } },
+      },
+      overrideController.overrideStatus,
+    );
+  });
 }

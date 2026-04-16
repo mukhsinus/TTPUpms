@@ -14,7 +14,7 @@ create extension if not exists citext;
 do $$
 begin
   if not exists (select 1 from pg_type where typname = 'user_role') then
-    create type public.user_role as enum ('student', 'reviewer', 'admin');
+    create type public.user_role as enum ('student', 'reviewer', 'admin', 'superadmin');
   end if;
 
   if not exists (select 1 from pg_type where typname = 'submission_status') then

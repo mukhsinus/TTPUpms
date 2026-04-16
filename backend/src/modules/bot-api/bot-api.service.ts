@@ -24,6 +24,9 @@ import { getPostgresDriverErrorFields } from "../../utils/pg-http-map";
 import { BotApiHttpError } from "./bot-api-errors";
 
 function parseUserRole(value: string): "student" | "reviewer" | "admin" {
+  if (value === "superadmin") {
+    return "admin";
+  }
   if (value === "student" || value === "reviewer" || value === "admin") {
     return value;
   }

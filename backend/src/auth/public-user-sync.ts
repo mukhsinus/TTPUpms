@@ -23,18 +23,28 @@ export function isAdminEmail(email: string | null | undefined, admins: Set<strin
   return admins.has(email.trim().toLowerCase());
 }
 
+export interface SyncPublicUserOptions {
+  /**
+   * When true (admin web login with `X-Upms-Auth-Source: admin_panel`), set `role` to `admin`
+   * for this principal, except existing `superadmin` is preserved. Bot/API flows omit this flag.
+   */
+  adminPanelLogin?: boolean;
+}
+
 /**
  * Ensures `public.users` has a row for this Supabase user and normalizes `role`:
- * - New row: `student`, or `admin` when email is listed in ADMIN_EMAILS.
- * - Existing row: promote to `admin` when email matches; fill null role with `student`; preserve reviewer/student otherwise.
+ * - New row: `student`, or `admin` when email is listed in ADMIN_EMAILS or `adminPanelLogin`.
+ * - Existing: promote via admin email list; `adminPanelLogin` forces `admin` unless `superadmin`.
  */
 export async function syncPublicUserRoleFromAuth(
   db: Pool,
   authUser: AuthUserLike,
   adminEmails: Set<string>,
+  options?: SyncPublicUserOptions,
 ): Promise<{ roleText: string }> {
   const email = authUser.email?.trim() ?? null;
   const forceAdmin = isAdminEmail(email, adminEmails);
+  const adminPanelLogin = Boolean(options?.adminPanelLogin);
   const fullName =
     typeof authUser.user_metadata?.full_name === "string"
       ? authUser.user_metadata.full_name
@@ -45,7 +55,7 @@ export async function syncPublicUserRoleFromAuth(
   const emailForInsert =
     email && email.length > 0 ? email : `${authUser.id}@users.supabase.local`;
 
-  const initialRole = forceAdmin ? "admin" : "student";
+  const initialRole = forceAdmin || adminPanelLogin ? "admin" : "student";
 
   const res = await db.query<{ role: string }>(
     `
@@ -57,7 +67,9 @@ export async function syncPublicUserRoleFromAuth(
         ELSE public.users.email
       END,
       role = CASE
+        WHEN public.users.role::text = 'superadmin' THEN public.users.role
         WHEN $5::boolean THEN 'admin'::public.user_role
+        WHEN $6::boolean THEN 'admin'::public.user_role
         WHEN public.users.role IS NULL THEN 'student'::public.user_role
         ELSE public.users.role
       END,
@@ -65,7 +77,7 @@ export async function syncPublicUserRoleFromAuth(
       updated_at = NOW()
     RETURNING role::text AS role
     `,
-    [authUser.id, emailForInsert, initialRole, fullName, forceAdmin],
+    [authUser.id, emailForInsert, initialRole, fullName, forceAdmin, adminPanelLogin],
   );
 
   const roleText = res.rows[0]?.role ?? "student";

@@ -8,6 +8,7 @@ import { normalizeExternalLinkForPersistence } from "./external-link-normalize";
 import { normalizeMetadata } from "../scoring/scoring-metadata";
 import { isPgUniqueViolation } from "../../utils/pg-errors";
 import { ServiceError } from "../../utils/service-error";
+import { isAdminPanelOperator } from "../../utils/admin-roles";
 import type { AuthUser } from "../../types/auth-user";
 import type { UsersRepository } from "../users/users.repository";
 import { assertStudentMayEditSubmissionContent } from "../submissions/submission-transitions";
@@ -147,7 +148,7 @@ export class SubmissionItemsService {
       throw new ServiceError(404, "Submission not found");
     }
 
-    if (user.role === "admin") {
+    if (isAdminPanelOperator(user.role)) {
       return submission;
     }
 

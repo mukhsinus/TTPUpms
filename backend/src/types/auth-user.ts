@@ -1,4 +1,4 @@
-export type AppRole = "student" | "reviewer" | "admin";
+export type AppRole = "student" | "reviewer" | "admin" | "superadmin";
 
 /** RBAC identity shared across services (JWT adds `email` on the request). */
 export interface AuthUser {

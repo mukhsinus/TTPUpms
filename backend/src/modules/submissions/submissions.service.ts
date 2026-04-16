@@ -8,6 +8,7 @@ import { MAX_ACTIVE_SUBMISSIONS_PER_USER } from "./submission-quota";
 import type { UsersRepository } from "../users/users.repository";
 import type { SubmissionsRepository, SubmissionEntity } from "./submissions.repository";
 import type { CreateSubmissionBody } from "./submissions.schema";
+import { isAdminPanelOperator } from "../../utils/admin-roles";
 
 export class SubmissionsService {
   constructor(
@@ -19,9 +20,9 @@ export class SubmissionsService {
   ) {}
 
   async createSubmission(user: AuthUser, input: CreateSubmissionBody): Promise<SubmissionEntity> {
-    const targetUserId = user.role === "admin" && input.userId ? input.userId : user.id;
+    const targetUserId = isAdminPanelOperator(user.role) && input.userId ? input.userId : user.id;
 
-    if (user.role !== "admin" && input.userId && input.userId !== user.id) {
+    if (!isAdminPanelOperator(user.role) && input.userId && input.userId !== user.id) {
       throw new ServiceError(403, "You cannot create submissions for another user");
     }
 
@@ -54,7 +55,7 @@ export class SubmissionsService {
   }
 
   async getUserSubmissions(user: AuthUser, requestedUserId?: string): Promise<SubmissionEntity[]> {
-    if (user.role === "admin") {
+    if (isAdminPanelOperator(user.role)) {
       if (requestedUserId) {
         return this.repository.findByUserId(requestedUserId);
       }
@@ -120,7 +121,7 @@ export class SubmissionsService {
   }
 
   private async assertActiveSubmissionQuota(targetUserId: string, actorRole: AuthUser["role"]): Promise<void> {
-    if (actorRole === "admin") {
+    if (isAdminPanelOperator(actorRole)) {
       return;
     }
 
@@ -145,7 +146,7 @@ export class SubmissionsService {
   }
 
   private async assertReadAccess(user: AuthUser, submission: SubmissionEntity): Promise<void> {
-    if (user.role === "admin") {
+    if (isAdminPanelOperator(user.role)) {
       return;
     }
 

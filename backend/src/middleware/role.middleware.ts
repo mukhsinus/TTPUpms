@@ -1,14 +1,14 @@
 import type { FastifyReply, FastifyRequest, preHandlerHookHandler } from "fastify";
+import type { AppRole } from "../types/auth-user";
+import { isAdminPanelOperator } from "../utils/admin-roles";
 import { failure } from "../utils/http-response";
-
-type Role = "student" | "reviewer" | "admin";
 
 interface SubmissionAccessContext {
   studentId: string;
   reviewerId?: string | null;
 }
 
-export function allowRoles(allowedRoles: Role[]): preHandlerHookHandler {
+export function allowRoles(allowedRoles: AppRole[]): preHandlerHookHandler {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (!request.user) {
       reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
@@ -27,7 +27,7 @@ export function canAccessOwnData(request: FastifyRequest, ownerUserId: string): 
     return false;
   }
 
-  if (request.user.role === "admin") {
+  if (isAdminPanelOperator(request.user.role)) {
     return true;
   }
 
@@ -46,7 +46,7 @@ export function canAccessSubmission(
     return false;
   }
 
-  if (request.user.role === "admin") {
+  if (isAdminPanelOperator(request.user.role)) {
     return true;
   }
 

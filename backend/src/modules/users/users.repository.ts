@@ -10,7 +10,7 @@ export interface UserProfileEntity {
   faculty: string | null;
   studentId: string | null;
   isProfileCompleted: boolean;
-  role: "student" | "reviewer" | "admin";
+  role: "student" | "reviewer" | "admin" | "superadmin";
 }
 
 interface UserProfileRow {
@@ -26,7 +26,7 @@ interface UserProfileRow {
 }
 
 function parseRole(value: string): UserProfileEntity["role"] {
-  if (value === "student" || value === "reviewer" || value === "admin") {
+  if (value === "student" || value === "reviewer" || value === "admin" || value === "superadmin") {
     return value;
   }
   return "student";

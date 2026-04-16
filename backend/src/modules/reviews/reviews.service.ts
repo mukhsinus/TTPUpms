@@ -15,6 +15,7 @@ import {
 } from "../submissions/submission-transitions";
 import { ServiceError } from "../../utils/service-error";
 import type { AuthUser } from "../../types/auth-user";
+import { isAdminPanelOperator } from "../../utils/admin-roles";
 
 export class ReviewsService {
   constructor(
@@ -26,7 +27,7 @@ export class ReviewsService {
   ) {}
 
   async getReviewableSubmissions(user: AuthUser): Promise<ReviewSubmissionEntity[]> {
-    if (user.role === "admin") {
+    if (isAdminPanelOperator(user.role)) {
       return this.repository.findAllSubmissions();
     }
 
@@ -252,7 +253,7 @@ export class ReviewsService {
       throw new ServiceError(404, "Submission not found");
     }
 
-    if (user.role === "admin") {
+    if (isAdminPanelOperator(user.role)) {
       return submission;
     }
 

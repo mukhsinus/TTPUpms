@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent, type ReactElement } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, ApiError } from "../lib/api";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -12,7 +12,11 @@ export function LoginPage(): ReactElement {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const supabaseEnv = validateSupabaseEnvForUi();
+
+  const adminPanelLogin =
+    searchParams.get("panel") === "admin" || searchParams.get("source") === "admin_panel";
 
   useEffect(() => {
     if (api.isSessionValid()) {
@@ -29,7 +33,7 @@ export function LoginPage(): ReactElement {
       if (import.meta.env.DEV) {
         console.log("[upms:auth] login submit", { email: `${email.slice(0, 2)}***` });
       }
-      await api.loginWithCredentials(email, password);
+      await api.loginWithCredentials(email, password, adminPanelLogin ? { authSource: "admin_panel" } : undefined);
       navigate("/dashboard", { replace: true });
     } catch (err) {
       if (import.meta.env.DEV) {
@@ -57,7 +61,9 @@ export function LoginPage(): ReactElement {
             <p className="ui-card-subtitle">Turin Polytechnic University in Tashkent</p>
           </div>
         </div>
-        <p className="auth-subtitle">Sign in with your university account</p>
+        <p className="auth-subtitle">
+          {adminPanelLogin ? "Admin panel sign-in (elevates this account to admin)." : "Sign in with your university account"}
+        </p>
         <form className="auth-form" onSubmit={(event) => void onSubmit(event)}>
           <label>
             <span>Email</span>

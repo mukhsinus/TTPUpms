@@ -67,6 +67,6 @@ export interface User {
   id: string;
   email: string;
   fullName: string | null;
-  role: "student" | "reviewer" | "admin";
+  role: "student" | "reviewer" | "admin" | "superadmin";
   telegramUserId?: string | null;
 }

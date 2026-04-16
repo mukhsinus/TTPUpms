@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactElement } from "react";
 import { AlertCircle, Award, CheckCircle2, ClipboardList, Gavel, XCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
-import { normalizeRole } from "../lib/rbac";
+import { isAdminPanelRole, normalizeRole } from "../lib/rbac";
 import { EmptyState } from "../components/ui/EmptyState";
 import { DashboardStatsSkeleton, TableSkeleton } from "../components/ui/PageSkeletons";
 import { StatusBadge } from "../components/ui/Badge";
@@ -19,7 +19,7 @@ export function DashboardPage(): ReactElement {
 
   const sessionUser = api.getSessionUser();
   const role = normalizeRole(sessionUser?.role ?? "student");
-  const isAdmin = role === "admin";
+  const isAdmin = isAdminPanelRole(sessionUser);
 
   useEffect(() => {
     void (async () => {

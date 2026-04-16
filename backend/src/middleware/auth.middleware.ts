@@ -1,11 +1,10 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { parseAdminEmailSet, syncPublicUserRoleFromAuth } from "../auth/public-user-sync";
 import { env } from "../config/env";
+import type { AppRole } from "../types/auth-user";
 import { failure } from "../utils/http-response";
 
 const ADMIN_EMAIL_SET = parseAdminEmailSet(env.ADMIN_EMAILS);
-
-type Role = "student" | "reviewer" | "admin";
 
 function parseBearerToken(authorizationHeader?: string): string | null {
   if (!authorizationHeader) {
@@ -20,8 +19,26 @@ function parseBearerToken(authorizationHeader?: string): string | null {
   return token.trim();
 }
 
-function toRole(value: unknown): Role | null {
-  if (value === "admin" || value === "reviewer" || value === "student") {
+function readAdminPanelLoginHeader(request: FastifyRequest): boolean {
+  const raw = request.headers["x-upms-auth-source"] ?? request.headers["X-Upms-Auth-Source"];
+  const v = Array.isArray(raw) ? raw[0] : raw;
+  return typeof v === "string" && v.trim().toLowerCase() === "admin_panel";
+}
+
+/**
+ * Only `GET /api/auth/me` may promote via `X-Upms-Auth-Source: admin_panel` (login handshake).
+ * Prevents privilege escalation if a student reuses the header on other authenticated routes.
+ */
+function isAuthMeGet(request: FastifyRequest): boolean {
+  if (request.method !== "GET") {
+    return false;
+  }
+  const path = request.url.split("?")[0] ?? "";
+  return path === "/api/auth/me" || path.endsWith("/api/auth/me") || path === "/me";
+}
+
+function toRole(value: unknown): AppRole | null {
+  if (value === "admin" || value === "reviewer" || value === "student" || value === "superadmin") {
     return value;
   }
 
@@ -65,9 +82,12 @@ export async function authMiddleware(request: FastifyRequest, reply: FastifyRepl
     request.log.warn({ userId: data.user.id, appRole: jwtRoleRaw }, "Invalid app_metadata.role on JWT (ignored)");
   }
 
-  let role: Role;
+  let role: AppRole;
   try {
-    const { roleText } = await syncPublicUserRoleFromAuth(request.server.db, data.user, ADMIN_EMAIL_SET);
+    const adminPanelLogin = readAdminPanelLoginHeader(request) && isAuthMeGet(request);
+    const { roleText } = await syncPublicUserRoleFromAuth(request.server.db, data.user, ADMIN_EMAIL_SET, {
+      adminPanelLogin,
+    });
     const dbRole = toRole(roleText);
     if (!dbRole) {
       request.log.warn(

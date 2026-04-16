@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { env } from "../../config/env";
 import type { AuthUser } from "../../types/auth-user";
 import { ServiceError } from "../../utils/service-error";
+import { isAdminPanelOperator } from "../../utils/admin-roles";
 import type { SubmissionStatus } from "../submissions/submissions.schema";
 import { assertStudentMayEditSubmissionContent } from "../submissions/submission-transitions";
 import type { AntiFraudService } from "../validation/anti-fraud.service";
@@ -79,7 +80,7 @@ export class UploadService {
       throw new ServiceError(404, "Submission not found");
     }
 
-    if (input.user.role !== "admin" && submission.user_id !== input.user.id) {
+    if (!isAdminPanelOperator(input.user.role) && submission.user_id !== input.user.id) {
       throw new ServiceError(403, "You cannot upload files for another user's submission");
     }
 
@@ -189,11 +190,11 @@ export class UploadService {
     submissionOwnerId: string;
     submissionItemId: string;
   }): Promise<void> {
-    if (params.user.role !== "admin" && params.submissionOwnerId !== params.user.id) {
+    if (!isAdminPanelOperator(params.user.role) && params.submissionOwnerId !== params.user.id) {
       throw new ServiceError(403, "Only the submission owner can attach proof to items");
     }
 
-    if (params.user.role !== "admin") {
+    if (!isAdminPanelOperator(params.user.role)) {
       assertStudentMayEditSubmissionContent(params.submissionStatus as SubmissionStatus);
     }
 

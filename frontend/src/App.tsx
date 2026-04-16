@@ -1,10 +1,12 @@
 import type { ReactElement } from "react";
 import { Navigate, Outlet, Route, Routes } from "react-router-dom";
+import { AdminLayout } from "./components/AdminLayout";
 import { AppLayout } from "./components/AppLayout";
 import { RequireAuth } from "./components/RequireAuth";
 import { RequireRole } from "./components/RequireRole";
+import { RoleGuard } from "./components/guards/RoleGuard";
 import { api } from "./lib/api";
-import { isAdminRole } from "./lib/rbac";
+import { isAdminPanelRole } from "./lib/rbac";
 import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -16,11 +18,27 @@ import { CategoriesSettingsPage } from "./pages/CategoriesSettingsPage";
 import { UsersPage } from "./pages/UsersPage";
 
 function SubmissionsEntry(): ReactElement {
-  return isAdminRole(api.getSessionUser()) ? <AdminSubmissionsPage /> : <SubmissionsPage />;
+  return isAdminPanelRole(api.getSessionUser()) ? <AdminSubmissionsPage /> : <SubmissionsPage />;
 }
 
 function SubmissionDetailEntry(): ReactElement {
-  return isAdminRole(api.getSessionUser()) ? <AdminSubmissionDetailPage /> : <SubmissionDetailPage />;
+  return isAdminPanelRole(api.getSessionUser()) ? <AdminSubmissionDetailPage /> : <SubmissionDetailPage />;
+}
+
+function AuthenticatedShell({ onLogout }: { onLogout: () => void }): ReactElement {
+  const user = api.getSessionUser();
+  if (isAdminPanelRole(user)) {
+    return (
+      <AdminLayout onLogout={onLogout}>
+        <Outlet />
+      </AdminLayout>
+    );
+  }
+  return (
+    <AppLayout onLogout={onLogout}>
+      <Outlet />
+    </AppLayout>
+  );
 }
 
 export default function App(): ReactElement {
@@ -33,20 +51,14 @@ export default function App(): ReactElement {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route element={<RequireAuth />}>
-        <Route
-          element={
-            <AppLayout onLogout={handleLogout}>
-              <Outlet />
-            </AppLayout>
-          }
-        >
+        <Route element={<AuthenticatedShell onLogout={handleLogout} />}>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/submissions" element={<SubmissionsEntry />} />
           <Route
             path="/reviews"
             element={
-              <RequireRole roles={["admin", "reviewer"]}>
+              <RequireRole roles={["admin", "superadmin", "reviewer"]}>
                 <SubmissionsPage />
               </RequireRole>
             }
@@ -55,7 +67,7 @@ export default function App(): ReactElement {
           <Route
             path="/analytics"
             element={
-              <RequireRole roles={["admin", "reviewer"]}>
+              <RequireRole roles={["admin", "superadmin", "reviewer"]}>
                 <AnalyticsPage />
               </RequireRole>
             }
@@ -63,17 +75,17 @@ export default function App(): ReactElement {
           <Route
             path="/settings/categories"
             element={
-              <RequireRole roles={["admin"]}>
+              <RoleGuard allow={["admin", "superadmin"]} redirectTo="/dashboard">
                 <CategoriesSettingsPage />
-              </RequireRole>
+              </RoleGuard>
             }
           />
           <Route
             path="/users"
             element={
-              <RequireRole roles={["admin"]}>
+              <RoleGuard allow={["admin", "superadmin"]} redirectTo="/dashboard">
                 <UsersPage />
-              </RequireRole>
+              </RoleGuard>
             }
           />
         </Route>

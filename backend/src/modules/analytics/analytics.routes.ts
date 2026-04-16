@@ -7,7 +7,7 @@ import { AnalyticsService } from "./analytics.service";
 export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
   const service = new AnalyticsService(app);
   const controller = new AnalyticsController(service);
-  const analyticsGuard = allowRoles(["admin", "reviewer"]);
+  const analyticsGuard = allowRoles(["admin", "superadmin", "reviewer"]);
 
   app.get("/top-students", { preHandler: [authMiddleware, analyticsGuard] }, controller.getTopStudents);
   app.get(

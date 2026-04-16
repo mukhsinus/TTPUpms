@@ -1,33 +1,24 @@
-import { BarChart3, ClipboardList, LayoutDashboard, LogOut, Search, ShieldCheck, X } from "lucide-react";
+import { ClipboardList, LayoutDashboard, LogOut, X } from "lucide-react";
 import { useMemo, useState, type PropsWithChildren, type ReactElement } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { api } from "../lib/api";
-import { canAccessReviewerRoutes, normalizeRole } from "../lib/rbac";
+import { normalizeRole } from "../lib/rbac";
 import { Button } from "./ui/Button";
-import { Input } from "./ui/Input";
 
-interface AppLayoutProps extends PropsWithChildren {
+interface AdminLayoutProps extends PropsWithChildren {
   onLogout: () => void;
 }
 
-/** Student / reviewer portal shell (not the admin moderation layout). */
-export function AppLayout({ children, onLogout }: AppLayoutProps): ReactElement {
+/** Shell for admin / superadmin — moderation UI only (no student copy). */
+export function AdminLayout({ children, onLogout }: AdminLayoutProps): ReactElement {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
   const user = api.getSessionUser();
   const role = normalizeRole(user?.role ?? "student");
-  const canAccessReviewerFeatures = canAccessReviewerRoutes(user);
-
-  const brandTitle = role === "reviewer" ? "PMS Reviewer" : "Student Portal";
-  const brandSubtitle = role === "student" ? "My achievements" : "Review & analytics";
 
   const pageTitle = useMemo(() => {
-    if (location.pathname.startsWith("/submissions/")) return "Submission Detail";
+    if (location.pathname.startsWith("/submissions/")) return "Submission detail";
     if (location.pathname.startsWith("/submissions")) return "Submissions";
-    if (location.pathname.startsWith("/reviews")) return "Reviews";
-    if (location.pathname.startsWith("/analytics")) return "Analytics";
-    if (location.pathname.startsWith("/settings/categories")) return "Categories";
-    if (location.pathname.startsWith("/users")) return "Users";
     return "Dashboard";
   }, [location.pathname]);
 
@@ -37,8 +28,8 @@ export function AppLayout({ children, onLogout }: AppLayoutProps): ReactElement 
         <div className="sidebar-brand">
           <div className="brand-logo">TTPU</div>
           <div>
-            <strong>{brandTitle}</strong>
-            <p>{brandSubtitle}</p>
+            <strong>PMS Admin</strong>
+            <p>Moderation & scoring</p>
           </div>
         </div>
         <nav className="sidebar-nav">
@@ -50,18 +41,6 @@ export function AppLayout({ children, onLogout }: AppLayoutProps): ReactElement 
             <ClipboardList size={16} />
             Submissions
           </NavLink>
-          {canAccessReviewerFeatures ? (
-            <NavLink to="/reviews" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-              <ShieldCheck size={16} />
-              Reviews
-            </NavLink>
-          ) : null}
-          {canAccessReviewerFeatures ? (
-            <NavLink to="/analytics" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-              <BarChart3 size={16} />
-              Analytics
-            </NavLink>
-          ) : null}
         </nav>
         <div className="sidebar-user">
           <p className="user-name">{user?.fullName ?? user?.email ?? "User"}</p>
@@ -95,13 +74,6 @@ export function AppLayout({ children, onLogout }: AppLayoutProps): ReactElement 
                 })}
               </p>
             </div>
-          </div>
-          <div className="top-header-right">
-            <label className="search-shell">
-              <Search size={16} />
-              <Input placeholder="Quick search..." />
-            </label>
-            <div className="header-user-avatar">{(user?.fullName ?? user?.email ?? "A").charAt(0).toUpperCase()}</div>
           </div>
         </header>
         <main className="main-area">{children}</main>
