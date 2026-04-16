@@ -7,7 +7,13 @@ export interface CategoryCatalogEntry {
   type: string;
   minScore: number;
   maxScore: number;
-  subcategories: Array<{ slug: string; label: string }>;
+  subcategories: Array<{
+    slug: string;
+    label: string;
+    minScore: number;
+    maxScore: number;
+    scoringMode: string;
+  }>;
 }
 
 export interface SubmitFlowState extends Scenes.WizardSessionData {
@@ -22,6 +28,8 @@ export interface SubmitFlowState extends Scenes.WizardSessionData {
   categoryName?: string;
   subcategorySlug?: string;
   subcategoryLabel?: string;
+  /** Rubric keys for fixed rules (e.g. internal competitions `place`). */
+  itemMetadata?: Record<string, string>;
   title?: string;
   description?: string;
   proofFileUrl?: string;

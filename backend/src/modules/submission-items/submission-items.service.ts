@@ -9,6 +9,10 @@ import {
   normalizeMetadata,
   resolveFixedProposedScore,
 } from "../scoring/scoring-metadata";
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
+}
 import { isPgUniqueViolation } from "../../utils/pg-errors";
 import { ServiceError } from "../../utils/service-error";
 import type { AuthUser } from "../../types/auth-user";
@@ -31,8 +35,8 @@ export class SubmissionItemsService {
 
     await this.users.assertStudentProfileCompleteForSubmission(submission.userId);
 
-    const bounds = await this.repository.findCategoryBounds(body.category_id);
-    if (!bounds) {
+    const categoryBounds = await this.repository.findCategoryBounds(body.category_id);
+    if (!categoryBounds) {
       throw new ServiceError(400, "Unknown category");
     }
 
@@ -40,7 +44,6 @@ export class SubmissionItemsService {
     if (!categoryTypeRaw) {
       throw new ServiceError(400, "Unknown category");
     }
-    const categoryKind = categoryTypeRaw === "manual" ? "expert" : categoryTypeRaw;
 
     let subcategoryId = body.subcategory_id ?? null;
     if (!subcategoryId) {
@@ -59,10 +62,26 @@ export class SubmissionItemsService {
       }
     }
 
+    const subMeta = await this.repository.findSubcategoryScoringMeta(subcategoryId);
+    const lineMode = (subMeta?.scoringMode ?? categoryTypeRaw) as string;
+    const bounds = {
+      minScore: subMeta?.minPoints ?? categoryBounds.minScore,
+      maxScore: subMeta?.maxPoints ?? categoryBounds.maxScore,
+    };
+    if (bounds.minScore > bounds.maxScore) {
+      throw new ServiceError(400, "Invalid scoring bounds for this line", "VALIDATION_ERROR");
+    }
+
     const metadata = normalizeMetadata(body.metadata);
     let proposedScore = body.proposed_score;
 
-    if (categoryKind === "fixed") {
+    if (
+      subMeta?.defaultPoints != null &&
+      !Number.isNaN(subMeta.defaultPoints) &&
+      (lineMode === "fixed" || (subMeta.scoringMode === null && categoryTypeRaw === "fixed"))
+    ) {
+      proposedScore = round2(subMeta.defaultPoints);
+    } else if (lineMode === "fixed" || (subMeta?.scoringMode === null && categoryTypeRaw === "fixed")) {
       const rules = await this.scoringRules.findRulesBySubcategoryId(subcategoryId);
       const categoryBand = await this.scoringRules.findCategoryScoringBand(
         body.category_id,
@@ -74,7 +93,21 @@ export class SubmissionItemsService {
         categoryScoring: categoryBand,
         bounds,
       });
-    } else if (proposedScore < bounds.minScore || proposedScore > bounds.maxScore) {
+    } else if (lineMode === "range" || (subMeta?.scoringMode === null && categoryTypeRaw === "range")) {
+      if (proposedScore === 0 || proposedScore === undefined || Number.isNaN(proposedScore)) {
+        proposedScore = round2((bounds.minScore + bounds.maxScore) / 2);
+      }
+    } else if (
+      lineMode === "manual" ||
+      lineMode === "expert" ||
+      (subMeta?.scoringMode === null && (categoryTypeRaw === "manual" || categoryTypeRaw === "expert"))
+    ) {
+      if (proposedScore === 0 || proposedScore === undefined || Number.isNaN(proposedScore)) {
+        proposedScore = round2(bounds.minScore);
+      }
+    }
+
+    if (proposedScore < bounds.minScore || proposedScore > bounds.maxScore) {
       throw new ServiceError(
         400,
         `proposed_score must be between ${bounds.minScore} and ${bounds.maxScore} for this category`,

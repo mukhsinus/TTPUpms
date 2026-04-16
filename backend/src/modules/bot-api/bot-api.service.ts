@@ -284,7 +284,13 @@ export class BotApiService {
       type: string;
       minScore: number;
       maxScore: number;
-      subcategories: Array<{ slug: string; label: string }>;
+      subcategories: Array<{
+        slug: string;
+        label: string;
+        minScore: number;
+        maxScore: number;
+        scoringMode: string;
+      }>;
     }>
   > {
     let result;
@@ -298,6 +304,9 @@ export class BotApiService {
         slug: string | null;
         label: string | null;
         sort_order: number | null;
+        sub_min: string | null;
+        sub_max: string | null;
+        scoring_mode: string | null;
       }>(
         `
         SELECT
@@ -308,9 +317,14 @@ export class BotApiService {
           c.max_score,
           cs.slug,
           cs.label,
-          cs.sort_order
+          cs.sort_order,
+          cs.min_points::text AS sub_min,
+          cs.max_points::text AS sub_max,
+          cs.scoring_mode::text AS scoring_mode
         FROM categories c
         LEFT JOIN category_subcategories cs ON cs.category_id = c.id
+          AND cs.slug IS DISTINCT FROM 'general'
+        WHERE c.name IS DISTINCT FROM 'legacy_uncategorized'
         ORDER BY c.name ASC, cs.sort_order ASC NULLS LAST, cs.slug ASC NULLS LAST
         `,
       );
@@ -330,7 +344,13 @@ export class BotApiService {
         type: string;
         minScore: number;
         maxScore: number;
-        subcategories: Array<{ slug: string; label: string }>;
+        subcategories: Array<{
+          slug: string;
+          label: string;
+          minScore: number;
+          maxScore: number;
+          scoringMode: string;
+        }>;
       }
     >();
 
@@ -348,7 +368,15 @@ export class BotApiService {
         byId.set(row.id, entry);
       }
       if (row.slug && row.label) {
-        entry.subcategories.push({ slug: row.slug, label: row.label });
+        const subMin = row.sub_min !== null && row.sub_min !== "" ? Number(row.sub_min) : entry.minScore;
+        const subMax = row.sub_max !== null && row.sub_max !== "" ? Number(row.sub_max) : entry.maxScore;
+        entry.subcategories.push({
+          slug: row.slug,
+          label: row.label,
+          minScore: subMin,
+          maxScore: subMax,
+          scoringMode: row.scoring_mode ?? row.type,
+        });
       }
     }
 
@@ -865,7 +893,7 @@ export class BotApiService {
         `
         SELECT id, name
         FROM categories
-        WHERE name = 'legacy_uncategorized'
+        WHERE name = 'internal_competitions'
         LIMIT 1
         `,
       );
@@ -875,17 +903,18 @@ export class BotApiService {
       throw new BotApiHttpError(400, "Unknown category for achievement", "VALIDATION_ERROR");
     }
 
-    const genSub = await this.app.db.query<{ id: string }>(
+    const genSub = await this.app.db.query<{ id: string; slug: string }>(
       `
-      SELECT id
+      SELECT id, slug
       FROM category_subcategories
-      WHERE category_id = $1 AND slug = 'general'
+      WHERE category_id = $1
+      ORDER BY sort_order ASC NULLS LAST, slug ASC
       LIMIT 1
       `,
       [categoryRow.id],
     );
     if (!genSub.rows[0]) {
-      throw new BotApiHttpError(400, "Category is missing default subcategory", "VALIDATION_ERROR");
+      throw new BotApiHttpError(400, "Category is missing a subcategory", "VALIDATION_ERROR");
     }
 
     try {
@@ -896,12 +925,12 @@ export class BotApiService {
 
       await this.submissionItems.addItem(auth, created.id, {
         category_id: categoryRow.id,
-        subcategory: "general",
+        subcategory: genSub.rows[0].slug,
         title: `Achievement: ${input.category}`,
         description: input.details,
         proof_file_url: input.proofFileUrl,
         proposed_score: 0,
-        metadata: {},
+        metadata: categoryRow.name === "internal_competitions" ? { place: "1" } : {},
       });
 
       await this.submissions.submitSubmission(auth, created.id);

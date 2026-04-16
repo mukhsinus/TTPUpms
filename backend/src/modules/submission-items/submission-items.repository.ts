@@ -180,6 +180,42 @@ export class SubmissionItemsRepository {
     };
   }
 
+  /** Per-line bounds/mode from `category_subcategories` (official model). */
+  async findSubcategoryScoringMeta(subcategoryId: string): Promise<{
+    minPoints: number | null;
+    maxPoints: number | null;
+    defaultPoints: number | null;
+    scoringMode: string | null;
+  } | null> {
+    const result = await this.app.db.query<{
+      min_points: string | null;
+      max_points: string | null;
+      default_points: string | null;
+      scoring_mode: string | null;
+    }>(
+      `
+      SELECT
+        min_points::text,
+        max_points::text,
+        default_points::text,
+        scoring_mode::text
+      FROM category_subcategories
+      WHERE id = $1
+      `,
+      [subcategoryId],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+    return {
+      minPoints: row.min_points === null ? null : Number(row.min_points),
+      maxPoints: row.max_points === null ? null : Number(row.max_points),
+      defaultPoints: row.default_points === null ? null : Number(row.default_points),
+      scoringMode: row.scoring_mode,
+    };
+  }
+
   async resolveCategoryName(categoryId: string): Promise<string | null> {
     const result = await this.app.db.query<{ name: string }>(
       `

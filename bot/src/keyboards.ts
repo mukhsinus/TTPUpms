@@ -36,7 +36,7 @@ export function categoryPickerKeyboard(categories: CategoryCatalogEntry[]) {
 }
 
 /** Callback sub_<slug> — category is already chosen in session */
-export function subcategoryPickerKeyboard(subcategories: Array<{ slug: string; label: string }>) {
+export function subcategoryPickerKeyboard(subcategories: CategoryCatalogEntry["subcategories"]) {
   const rows: ReturnType<typeof Markup.button.callback>[][] = [];
   for (let i = 0; i < subcategories.length; i += 2) {
     const row = [Markup.button.callback(subcategories[i].label, `sub_${subcategories[i].slug}`)];
@@ -49,6 +49,17 @@ export function subcategoryPickerKeyboard(subcategories: Array<{ slug: string; l
   }
   rows.push(CANCEL_ROW);
   return Markup.inlineKeyboard(rows);
+}
+
+export function internalCompetitionPlaceKeyboard() {
+  return Markup.inlineKeyboard([
+    [
+      Markup.button.callback("1st place", "place_1"),
+      Markup.button.callback("2nd place", "place_2"),
+      Markup.button.callback("3rd place", "place_3"),
+    ],
+    CANCEL_ROW,
+  ]);
 }
 
 export const cancelOnlyKeyboard = () => Markup.inlineKeyboard([CANCEL_ROW]);

@@ -327,10 +327,11 @@ export class ReviewsRepository {
     const result = await this.app.db.query<{ min_score: string | null; max_score: string | null }>(
       `
       SELECT
-        COALESCE(c.min_score, 0)::text AS min_score,
-        COALESCE(c.max_points, c.max_score, 0)::text AS max_score
+        COALESCE(cs.min_points, c.min_score, 0)::text AS min_score,
+        COALESCE(cs.max_points, c.max_points, c.max_score, 0)::text AS max_score
       FROM submission_items si
       LEFT JOIN categories c ON c.id = si.category_id
+      LEFT JOIN category_subcategories cs ON cs.id = si.subcategory_id
       WHERE si.id = $1
       `,
       [itemId],
