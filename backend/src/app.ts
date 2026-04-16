@@ -1,7 +1,7 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import { env } from "./config/env";
 import { setGlobalErrorHandler } from "./middleware/error-handler";
-import { adminOverrideRoutes } from "./modules/admin/admin-override.routes";
+import { adminRoutes } from "./modules/admin/admin.routes";
 import { analyticsRoutes } from "./modules/analytics/analytics.routes";
 import { authRoutes } from "./modules/auth/auth.routes";
 import { botApiRoutes } from "./modules/bot-api/bot-api.routes";
@@ -72,7 +72,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(uploadRoutes, { prefix: "/files" });
   await app.register(reviewsRoutes, { prefix: "/api/reviews" });
   await app.register(reviewsRoutes, { prefix: "/reviews" });
-  await app.register(adminOverrideRoutes, { prefix: "/api/admin" });
+  await app.register(adminRoutes, { prefix: "/api/admin" });
   await app.register(analyticsRoutes, { prefix: "/api/analytics" });
   await app.register(botApiRoutes, {
     prefix: "/api/bot",

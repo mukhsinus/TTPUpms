@@ -4,13 +4,24 @@ import { AppLayout } from "./components/AppLayout";
 import { RequireAuth } from "./components/RequireAuth";
 import { RequireRole } from "./components/RequireRole";
 import { api } from "./lib/api";
+import { isAdminRole } from "./lib/rbac";
 import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
+import { AdminSubmissionDetailPage } from "./pages/AdminSubmissionDetailPage";
+import { AdminSubmissionsPage } from "./pages/AdminSubmissionsPage";
 import { SubmissionDetailPage } from "./pages/SubmissionDetailPage";
 import { SubmissionsPage } from "./pages/SubmissionsPage";
 import { CategoriesSettingsPage } from "./pages/CategoriesSettingsPage";
 import { UsersPage } from "./pages/UsersPage";
+
+function SubmissionsEntry(): ReactElement {
+  return isAdminRole(api.getSessionUser()) ? <AdminSubmissionsPage /> : <SubmissionsPage />;
+}
+
+function SubmissionDetailEntry(): ReactElement {
+  return isAdminRole(api.getSessionUser()) ? <AdminSubmissionDetailPage /> : <SubmissionDetailPage />;
+}
 
 export default function App(): ReactElement {
   const handleLogout = (): void => {
@@ -31,7 +42,7 @@ export default function App(): ReactElement {
         >
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/submissions" element={<SubmissionsPage />} />
+          <Route path="/submissions" element={<SubmissionsEntry />} />
           <Route
             path="/reviews"
             element={
@@ -40,7 +51,7 @@ export default function App(): ReactElement {
               </RequireRole>
             }
           />
-          <Route path="/submissions/:submissionId" element={<SubmissionDetailPage />} />
+          <Route path="/submissions/:submissionId" element={<SubmissionDetailEntry />} />
           <Route
             path="/analytics"
             element={

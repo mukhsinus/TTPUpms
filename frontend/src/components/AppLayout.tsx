@@ -1,4 +1,4 @@
-import { BarChart3, ClipboardList, LayoutDashboard, LogOut, Search, Settings, ShieldCheck, Users, X } from "lucide-react";
+import { BarChart3, ClipboardList, LayoutDashboard, LogOut, Search, ShieldCheck, X } from "lucide-react";
 import { useMemo, useState, type PropsWithChildren, type ReactElement } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { api } from "../lib/api";
@@ -19,8 +19,13 @@ export function AppLayout({ children, onLogout }: AppLayoutProps): ReactElement 
   const isAdmin = isAdminRole(user);
 
   const brandTitle = isAdmin ? "PMS Admin" : role === "reviewer" ? "PMS Reviewer" : "Student Portal";
-  const brandSubtitle =
-    role === "student" ? "My achievements" : role === "reviewer" ? "Review & analytics" : "Achievement management";
+  const brandSubtitle = isAdmin
+    ? "Moderation & scoring"
+    : role === "student"
+      ? "My achievements"
+      : role === "reviewer"
+        ? "Review & analytics"
+        : "Achievement management";
 
   const pageTitle = useMemo(() => {
     if (location.pathname.startsWith("/submissions/")) return "Submission Detail";
@@ -51,28 +56,16 @@ export function AppLayout({ children, onLogout }: AppLayoutProps): ReactElement 
             <ClipboardList size={16} />
             Submissions
           </NavLink>
-          {canAccessReviewerFeatures ? (
+          {!isAdmin && canAccessReviewerFeatures ? (
             <NavLink to="/reviews" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
               <ShieldCheck size={16} />
               Reviews
             </NavLink>
           ) : null}
-          {canAccessReviewerFeatures ? (
+          {!isAdmin && canAccessReviewerFeatures ? (
             <NavLink to="/analytics" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
               <BarChart3 size={16} />
               Analytics
-            </NavLink>
-          ) : null}
-          {isAdmin ? (
-            <NavLink to="/settings/categories" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-              <Settings size={16} />
-              Categories
-            </NavLink>
-          ) : null}
-          {isAdmin ? (
-            <NavLink to="/users" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-              <Users size={16} />
-              Users
             </NavLink>
           ) : null}
         </nav>

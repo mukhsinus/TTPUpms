@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type ReactElement } from "react";
-import { AlertCircle, Award, CheckCircle2, FileText } from "lucide-react";
+import { useEffect, useState, type ReactElement } from "react";
+import { AlertCircle, Award, CheckCircle2, ClipboardList, Gavel, XCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { normalizeRole } from "../lib/rbac";
@@ -10,41 +10,39 @@ import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Table } from "../components/ui/Table";
 
-function formatPoints(value: number): string {
-  return Number.isFinite(value) ? value.toFixed(2) : "0.00";
-}
-
 export function DashboardPage(): ReactElement {
   const navigate = useNavigate();
   const [submissions, setSubmissions] = useState<Awaited<ReturnType<typeof api.getSubmissions>>>([]);
+  const [adminMetrics, setAdminMetrics] = useState<Awaited<ReturnType<typeof api.getAdminMetrics>> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const sessionUser = api.getSessionUser();
+  const role = normalizeRole(sessionUser?.role ?? "student");
+  const isAdmin = role === "admin";
 
   useEffect(() => {
     void (async () => {
       try {
         setLoading(true);
-        setSubmissions(await api.getSubmissions());
+        if (isAdmin) {
+          setAdminMetrics(await api.getAdminMetrics());
+        } else {
+          setSubmissions(await api.getSubmissions());
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load dashboard");
       } finally {
         setLoading(false);
       }
     })();
-  }, []);
-
-  const { totalCount, approvedCount, totalPointsSum } = useMemo(() => {
-    const totalCount = submissions.length;
-    const approvedCount = submissions.filter((s) => s.status === "approved").length;
-    const totalPointsSum = submissions.reduce((sum, s) => sum + (Number(s.totalPoints) || 0), 0);
-    return { totalCount, approvedCount, totalPointsSum };
-  }, [submissions]);
+  }, [isAdmin]);
 
   if (loading) {
     return (
       <section className="dashboard-stack">
         <DashboardStatsSkeleton />
-        <Card title="Recent submissions">
+        <Card title={isAdmin ? "Moderation overview" : "Recent submissions"}>
           <TableSkeleton rows={6} cols={5} />
         </Card>
       </section>
@@ -70,10 +68,58 @@ export function DashboardPage(): ReactElement {
     );
   }
 
-  const sessionUser = api.getSessionUser();
-  const role = normalizeRole(sessionUser?.role ?? "student");
-  const totalLabel =
-    role === "student" ? "Your submissions" : role === "reviewer" ? "Assigned submissions" : "Total submissions";
+  if (isAdmin && adminMetrics) {
+    return (
+      <section className="dashboard-stack">
+        <div className="stats-grid stats-grid-four">
+          <Card className="stat-card stat-card-primary">
+            <div className="stat-card-header">
+              <p className="stat-card-label">Pending moderation</p>
+              <ClipboardList className="stat-card-icon" size={20} />
+            </div>
+            <h2 className="stat-card-value">{adminMetrics.pendingCount}</h2>
+            <p className="muted stat-card-footnote">Submitted, in review, or awaiting resubmission</p>
+          </Card>
+          <Card className="stat-card stat-card-success">
+            <div className="stat-card-header">
+              <p className="stat-card-label">Approved today</p>
+              <CheckCircle2 className="stat-card-icon" size={20} />
+            </div>
+            <h2 className="stat-card-value">{adminMetrics.approvedToday}</h2>
+          </Card>
+          <Card className="stat-card stat-card-accent">
+            <div className="stat-card-header">
+              <p className="stat-card-label">Rejected today</p>
+              <XCircle className="stat-card-icon" size={20} />
+            </div>
+            <h2 className="stat-card-value">{adminMetrics.rejectedToday}</h2>
+          </Card>
+          <Card className="stat-card stat-card-primary">
+            <div className="stat-card-header">
+              <p className="stat-card-label">Total processed</p>
+              <Gavel className="stat-card-icon" size={20} />
+            </div>
+            <h2 className="stat-card-value">{adminMetrics.totalProcessed}</h2>
+            <p className="muted stat-card-footnote">All-time approved or rejected</p>
+          </Card>
+        </div>
+        <Card title="Next step">
+          <p className="muted" style={{ marginTop: 0 }}>
+            Open the submissions queue to review evidence, assign scores, and record decisions.
+          </p>
+          <Button type="button" variant="primary" onClick={() => navigate("/submissions")}>
+            Go to submissions
+          </Button>
+        </Card>
+      </section>
+    );
+  }
+
+  const totalCount = submissions.length;
+  const approvedCount = submissions.filter((s) => s.status === "approved").length;
+  const totalPointsSum = submissions.reduce((sum, s) => sum + (Number(s.totalPoints) || 0), 0);
+
+  const totalLabel = role === "student" ? "Your submissions" : role === "reviewer" ? "Assigned submissions" : "Total submissions";
   const approvedLabel = role === "student" ? "Approved (yours)" : "Approved submissions";
   const pointsLabel = role === "student" ? "Your total points" : "Total points (sum)";
   const ownerColumnLabel = role === "student" ? "Account" : "Student";
@@ -86,7 +132,7 @@ export function DashboardPage(): ReactElement {
         <Card className="stat-card stat-card-primary">
           <div className="stat-card-header">
             <p className="stat-card-label">{totalLabel}</p>
-            <FileText className="stat-card-icon" size={20} />
+            <ClipboardList className="stat-card-icon" size={20} />
           </div>
           <h2 className="stat-card-value">{totalCount}</h2>
         </Card>
@@ -102,7 +148,7 @@ export function DashboardPage(): ReactElement {
             <p className="stat-card-label">{pointsLabel}</p>
             <Award className="stat-card-icon" size={20} />
           </div>
-          <h2 className="stat-card-value">{formatPoints(totalPointsSum)}</h2>
+          <h2 className="stat-card-value">{Number.isFinite(totalPointsSum) ? totalPointsSum.toFixed(2) : "0.00"}</h2>
           <p className="muted stat-card-footnote">Sum of stored submission totals</p>
         </Card>
       </div>
@@ -124,7 +170,7 @@ export function DashboardPage(): ReactElement {
                 <td colSpan={5} className="empty-table-cell">
                   <div className="empty-state-in-card">
                     <EmptyState
-                      icon={FileText}
+                      icon={ClipboardList}
                       tone="muted"
                       title="No submissions yet"
                       description={
@@ -152,7 +198,7 @@ export function DashboardPage(): ReactElement {
                   <td>
                     <StatusBadge status={submission.status} />
                   </td>
-                  <td>{formatPoints(Number(submission.totalPoints) || 0)}</td>
+                  <td>{Number.isFinite(submission.totalPoints) ? submission.totalPoints.toFixed(2) : submission.totalPoints}</td>
                   <td>{submission.createdAt ? new Date(submission.createdAt).toLocaleDateString("en-US") : "—"}</td>
                 </tr>
               ))

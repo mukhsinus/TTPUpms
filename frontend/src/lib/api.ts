@@ -52,6 +52,85 @@ export interface FileUploadResult {
   originalFilename: string;
 }
 
+export type AdminModerationStatus = "pending" | "approved" | "rejected";
+
+export interface AdminSubmissionListItem {
+  id: string;
+  userId: string;
+  categoryCode: string | null;
+  subcategorySlug: string | null;
+  title: string;
+  status: AdminModerationStatus;
+  createdAt: string;
+  proposedScore: number | null;
+  ownerEmail: string | null;
+  ownerName: string | null;
+}
+
+export interface AdminSubmissionsListPayload {
+  items: AdminSubmissionListItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface AdminDashboardMetrics {
+  pendingCount: number;
+  approvedToday: number;
+  rejectedToday: number;
+  totalProcessed: number;
+}
+
+export interface AdminSubmissionDetailPayload {
+  submission: {
+    id: string;
+    userId: string;
+    title: string;
+    description: string | null;
+    status: AdminModerationStatus;
+    workflowStatus?: string;
+    totalPoints: number;
+    submittedAt?: string | null;
+    reviewedAt?: string | null;
+    createdAt: string;
+    updatedAt: string;
+  };
+  items: Array<{
+    id: string;
+    title: string;
+    description: string | null;
+    proofFileUrl: string | null;
+    externalLink: string | null;
+    proposedScore: number | null;
+    approvedScore: number | null;
+    status: string;
+    categoryCode: string | null;
+    categoryName: string | null;
+    subcategorySlug: string | null;
+    subcategoryLabel: string | null;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  files: Array<{
+    id: string;
+    fileUrl: string | null;
+    originalFilename: string;
+    mimeType: string | null;
+    submissionItemId: string | null;
+    submissionId: string | null;
+    createdAt: string;
+  }>;
+  link: string | null;
+  user: {
+    id: string;
+    email: string | null;
+    studentFullName: string | null;
+    faculty: string | null;
+    studentId: string | null;
+    telegramUsername: string | null;
+  } | null;
+}
+
 /** Item payload from PATCH /api/reviews/items/:itemId (and POST review item). */
 export interface ReviewSubmissionItemResponse {
   id: string;
@@ -470,6 +549,70 @@ export const api = {
         totalScore: input.totalScore,
         reason: input.reason,
       }),
+    });
+  },
+
+  getAdminMetrics(): Promise<AdminDashboardMetrics> {
+    return request<AdminDashboardMetrics>("/api/admin/metrics");
+  },
+
+  getAdminSubmissions(params: {
+    page?: number;
+    pageSize?: number;
+    status?: AdminModerationStatus;
+    category?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    sort?: "created_at" | "title" | "status" | "score";
+    order?: "asc" | "desc";
+  }): Promise<AdminSubmissionsListPayload> {
+    const q = new URLSearchParams();
+    if (params.page !== undefined) {
+      q.set("page", String(params.page));
+    }
+    if (params.pageSize !== undefined) {
+      q.set("pageSize", String(params.pageSize));
+    }
+    if (params.status) {
+      q.set("status", params.status);
+    }
+    if (params.category) {
+      q.set("category", params.category);
+    }
+    if (params.dateFrom) {
+      q.set("dateFrom", params.dateFrom);
+    }
+    if (params.dateTo) {
+      q.set("dateTo", params.dateTo);
+    }
+    if (params.sort) {
+      q.set("sort", params.sort);
+    }
+    if (params.order) {
+      q.set("order", params.order);
+    }
+    const suffix = q.toString() ? `?${q.toString()}` : "";
+    return request<AdminSubmissionsListPayload>(`/api/admin/submissions${suffix}`);
+  },
+
+  getAdminSubmissionDetail(submissionId: string): Promise<AdminSubmissionDetailPayload> {
+    return request<AdminSubmissionDetailPayload>(`/api/admin/submissions/${submissionId}`);
+  },
+
+  adminApproveSubmission(submissionId: string, body: { score?: number }): Promise<AdminSubmissionDetailPayload["submission"]> {
+    return request<AdminSubmissionDetailPayload["submission"]>(`/api/admin/submissions/${submissionId}/approve`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  adminRejectSubmission(
+    submissionId: string,
+    body: { reason?: string },
+  ): Promise<AdminSubmissionDetailPayload["submission"]> {
+    return request<AdminSubmissionDetailPayload["submission"]>(`/api/admin/submissions/${submissionId}/reject`, {
+      method: "POST",
+      body: JSON.stringify(body),
     });
   },
 
