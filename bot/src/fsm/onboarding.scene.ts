@@ -147,10 +147,7 @@ export function createStudentOnboardingScene(upms: UpmsService): Scenes.WizardSc
           studentId,
         });
       } catch (error) {
-        await ctx.reply(
-          `Could not save your profile: ${userFacingUpmsMessage(error, "Unknown error")}. Check your student ID (it must be unique) and try again.`,
-          cancelOnlyKeyboard(),
-        );
+        await ctx.reply(userFacingUpmsMessage(error, "Could not save your profile. Please try again."), cancelOnlyKeyboard());
         return;
       }
 

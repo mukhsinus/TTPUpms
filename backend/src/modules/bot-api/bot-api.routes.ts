@@ -144,6 +144,32 @@ const botPostRate = userWriteRateLimitPreHandler({
   namespace: "bot-api",
 });
 
+/** Profile complete: clearer validation messages; raw PG edge cases if they bypass the service mapper. */
+function handleProfileCompleteRouteError(app: FastifyInstance, reply: FastifyReply, error: unknown): void {
+  if (reply.sent) {
+    return;
+  }
+
+  if (error instanceof z.ZodError) {
+    const primary = error.issues[0];
+    const msg = primary
+      ? `${primary.path.length ? primary.path.map(String).join(".") : "field"}: ${primary.message}`
+      : "Validation error";
+    app.log.warn(
+      { code: "VALIDATION_ERROR", message: msg, context: "profile_complete" },
+      "profile_complete: validation failed",
+    );
+    reply.status(400).send(
+      failure(msg, "VALIDATION_ERROR", {
+        issues: error.issues.map((i) => ({ path: i.path, message: i.message })),
+      }),
+    );
+    return;
+  }
+
+  handleRouteError(app, reply, error);
+}
+
 function handleRouteError(app: FastifyInstance, reply: FastifyReply, error: unknown): void {
   if (reply.sent) {
     return;
@@ -283,7 +309,7 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
         });
         reply.status(200).send(success(user));
       } catch (error) {
-        handleRouteError(app, reply, error);
+        handleProfileCompleteRouteError(app, reply, error);
       }
     },
   );

@@ -9,6 +9,7 @@ import type { SubmissionItemsService } from "../submission-items/submission-item
 import type { SubmissionsService } from "../submissions/submissions.service";
 import type { UsersRepository } from "../users/users.repository";
 import { AntiFraudError, type AntiFraudService } from "../validation/anti-fraud.service";
+import { getPostgresDriverErrorFields } from "../../utils/pg-http-map";
 import { BotApiHttpError } from "./bot-api-errors";
 
 function parseUserRole(value: string): "student" | "reviewer" | "admin" {
@@ -360,27 +361,56 @@ export class BotApiService {
       student_id: string;
     },
   ): Promise<BotUser> {
-    const user = await this.findOrCreateUserByTelegramId(telegramId);
-    if (user.role !== "student") {
-      throw new BotApiHttpError(403, "Only students complete this profile.", "FORBIDDEN");
-    }
-
     try {
+      const user = await this.findOrCreateUserByTelegramId(telegramId);
+      if (user.role !== "student") {
+        throw new BotApiHttpError(403, "Only students complete this profile.", "FORBIDDEN");
+      }
+
       await this.usersRepository.updateProfile(user.id, {
         studentFullName: input.student_full_name.trim(),
         degree: input.degree,
         faculty: input.faculty.trim(),
         studentId: input.student_id.trim(),
       });
+
+      const refreshed = await this.findUserByTelegramId(telegramId);
+      if (!refreshed) {
+        throw new BotApiHttpError(500, "Could not reload profile after update.", "INTERNAL_SERVER_ERROR");
+      }
+      return refreshed;
     } catch (error) {
+      if (error instanceof BotApiHttpError) {
+        throw error;
+      }
+
+      const pg = getPostgresDriverErrorFields(error);
+      if (pg?.code === "42703") {
+        this.app.log.error(
+          { code: pg.code, message: pg.message ?? String(error), context: "profile_complete" },
+          "profile_complete: postgres undefined_column",
+        );
+        throw new BotApiHttpError(
+          503,
+          "System is updating. Please try again in a moment.",
+          "SCHEMA_NOT_READY",
+        );
+      }
+      if (pg?.code === "23505") {
+        this.app.log.error(
+          {
+            code: pg.code,
+            message: pg.message ?? String(error),
+            context: "profile_complete",
+            constraint: pg.constraint,
+          },
+          "profile_complete: postgres unique_violation",
+        );
+        throw new BotApiHttpError(409, "Student ID already exists.", "DUPLICATE_STUDENT_ID");
+      }
+
       throw toBotApiError(error);
     }
-
-    const refreshed = await this.findUserByTelegramId(telegramId);
-    if (!refreshed) {
-      throw new BotApiHttpError(500, "Could not reload profile after update.", "INTERNAL_SERVER_ERROR");
-    }
-    return refreshed;
   }
 
   /**

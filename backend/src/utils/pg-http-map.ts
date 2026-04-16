@@ -1,3 +1,23 @@
+/** Extract Postgres driver fields when `error` is a node-pg / Postgres error object. */
+export function getPostgresDriverErrorFields(error: unknown): {
+  code: string;
+  message?: string;
+  constraint?: string;
+} | null {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return null;
+  }
+  const e = error as { code: unknown; message?: unknown; constraint?: unknown };
+  if (typeof e.code !== "string") {
+    return null;
+  }
+  return {
+    code: e.code,
+    message: typeof e.message === "string" ? e.message : undefined,
+    constraint: typeof e.constraint === "string" ? e.constraint : undefined,
+  };
+}
+
 /**
  * Maps Postgres driver errors to stable API codes (never expose raw SQLSTATE text to clients).
  */

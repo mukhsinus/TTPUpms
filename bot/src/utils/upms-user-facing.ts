@@ -11,6 +11,10 @@ export function userFacingUpmsMessage(error: unknown, fallback: string): string 
         return error.message;
       case "PROFILE_INCOMPLETE":
         return "Complete your student profile (full name, degree, faculty, student ID) before using submissions.";
+      case "SCHEMA_NOT_READY":
+        return "System is updating. Please try again in a moment.";
+      case "DUPLICATE_STUDENT_ID":
+        return "Student ID already exists.";
       case "DUPLICATE_ITEM":
         return "That student ID is already registered. Please verify your ID or contact support.";
       case "CONFLICT":
