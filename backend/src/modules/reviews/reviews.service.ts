@@ -83,21 +83,20 @@ export class ReviewsService {
     if (scoringKind === "fixed") {
       const rules = await this.scoringRules.findRulesBySubcategoryId(item.subcategoryId);
       const resolved = resolveFixedPointsFromRules(item.metadata, rules);
-      if (resolved === null) {
-        throw new ServiceError(
-          400,
-          "No scoring rule matches item metadata for this subcategory",
-          "VALIDATION_ERROR",
-        );
+      if (resolved !== null) {
+        if (finalScore !== undefined && finalScore !== resolved) {
+          throw new ServiceError(
+            400,
+            `Score for fixed categories must equal ${resolved} (rule-based)`,
+            "VALIDATION_ERROR",
+          );
+        }
+        finalScore = resolved;
+      } else if (finalScore !== undefined && Number.isFinite(finalScore)) {
+        // No metadata rule match: reviewer may set score explicitly (e.g. bot line without metadata).
+      } else {
+        finalScore = item.proposedScore;
       }
-      if (finalScore !== undefined && finalScore !== resolved) {
-        throw new ServiceError(
-          400,
-          `Score for fixed categories must equal ${resolved} (rule-based)`,
-          "VALIDATION_ERROR",
-        );
-      }
-      finalScore = resolved;
     } else {
       if (finalScore === undefined || !Number.isFinite(finalScore)) {
         throw new ServiceError(

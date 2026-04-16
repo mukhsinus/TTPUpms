@@ -5,7 +5,10 @@ import type {
 } from "./submission-items.repository";
 import type { AddSubmissionItemBody } from "./submission-items.schema";
 import type { ScoringRulesRepository } from "../scoring/scoring-rules.repository";
-import { normalizeMetadata, resolveFixedPointsFromRules } from "../scoring/scoring-metadata";
+import {
+  normalizeMetadata,
+  resolveFixedProposedScore,
+} from "../scoring/scoring-metadata";
 import { isPgUniqueViolation } from "../../utils/pg-errors";
 import { ServiceError } from "../../utils/service-error";
 import type { AuthUser } from "../../types/auth-user";
@@ -57,15 +60,16 @@ export class SubmissionItemsService {
 
     if (categoryKind === "fixed") {
       const rules = await this.scoringRules.findRulesBySubcategoryId(subcategoryId);
-      const resolved = resolveFixedPointsFromRules(metadata, rules);
-      if (resolved === null) {
-        throw new ServiceError(
-          400,
-          "metadata does not match any scoring rule for this category/subcategory",
-          "VALIDATION_ERROR",
-        );
-      }
-      proposedScore = resolved;
+      const categoryBand = await this.scoringRules.findCategoryScoringBand(
+        body.category_id,
+        subcategoryId,
+      );
+      proposedScore = resolveFixedProposedScore({
+        metadata,
+        scoringRules: rules,
+        categoryScoring: categoryBand,
+        bounds,
+      });
     } else if (proposedScore < bounds.minScore || proposedScore > bounds.maxScore) {
       throw new ServiceError(
         400,

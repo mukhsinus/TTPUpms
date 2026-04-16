@@ -35,7 +35,8 @@ const envSchema = z.object({
   HOST: z.string().default("0.0.0.0"),
   PORT: z.coerce.number().int().positive().default(3000),
   TRUST_PROXY: z.coerce.boolean().default(false),
-  BODY_LIMIT_BYTES: z.coerce.number().int().positive().default(1048576),
+  /** Must be >= max upload size (multipart + JSON base64); default 10 MiB matches bot/dashboard uploads. */
+  BODY_LIMIT_BYTES: z.coerce.number().int().positive().default(10 * 1024 * 1024),
   REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
   KEEP_ALIVE_TIMEOUT_MS: z.coerce.number().int().positive().default(72000),
   LOG_LEVEL: z.string().default("info"),

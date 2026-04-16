@@ -1,6 +1,11 @@
 import { buildApp } from "./app";
 import { env } from "./config/env";
 
+/**
+ * Upload limits: `buildApp` sets Fastify `bodyLimit` from `BODY_LIMIT_BYTES` and registers
+ * `@fastify/multipart` with `limits.fileSize` capped to the same budget (see `plugins/upload.ts`).
+ */
+
 async function startServer(): Promise<void> {
   const app = await buildApp();
 

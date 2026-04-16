@@ -32,6 +32,42 @@ function metaValueToComparableString(raw: unknown): string | null {
 /**
  * First matching rule wins (lowest sort_order first). Logic is generic; rules live in `scoring_rules`.
  */
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+export interface CategoryScoringBand {
+  min_score: number;
+  max_score: number;
+}
+
+/**
+ * Fixed categories: prefer `scoring_rules` row matched by metadata; if none match, use
+ * `category_scoring_rules` band intersected with category bounds; else category floor.
+ * Never throws — callers use this instead of failing when metadata is empty or incomplete.
+ */
+export function resolveFixedProposedScore(input: {
+  metadata: Record<string, unknown>;
+  scoringRules: ScoringRuleRow[];
+  categoryScoring: CategoryScoringBand | null;
+  bounds: { minScore: number; maxScore: number };
+}): number {
+  const matched = resolveFixedPointsFromRules(input.metadata, input.scoringRules);
+  if (matched !== null) {
+    return round2(matched);
+  }
+
+  if (input.categoryScoring) {
+    const lo = Math.max(input.categoryScoring.min_score, input.bounds.minScore);
+    const hi = Math.min(input.categoryScoring.max_score, input.bounds.maxScore);
+    if (lo <= hi) {
+      return round2(lo);
+    }
+  }
+
+  return round2(input.bounds.minScore);
+}
+
 export function resolveFixedPointsFromRules(
   metadata: Record<string, unknown>,
   rules: ScoringRuleRow[],
