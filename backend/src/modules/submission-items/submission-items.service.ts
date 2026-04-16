@@ -4,15 +4,7 @@ import type {
   SubmissionOwnerEntity,
 } from "./submission-items.repository";
 import type { AddSubmissionItemBody } from "./submission-items.schema";
-import type { ScoringRulesRepository } from "../scoring/scoring-rules.repository";
-import {
-  normalizeMetadata,
-  resolveFixedProposedScore,
-} from "../scoring/scoring-metadata";
-
-function round2(value: number): number {
-  return Math.round(value * 100) / 100;
-}
+import { normalizeMetadata } from "../scoring/scoring-metadata";
 import { isPgUniqueViolation } from "../../utils/pg-errors";
 import { ServiceError } from "../../utils/service-error";
 import type { AuthUser } from "../../types/auth-user";
@@ -22,9 +14,12 @@ import { assertStudentMayEditSubmissionContent } from "../submissions/submission
 export class SubmissionItemsService {
   constructor(
     private readonly repository: SubmissionItemsRepository,
-    private readonly scoringRules: ScoringRulesRepository,
     private readonly users: UsersRepository,
   ) {}
+
+  async categoryHasSubcategories(categoryId: string): Promise<boolean> {
+    return this.repository.categoryHasSubcategories(categoryId);
+  }
 
   async addItem(
     user: AuthUser,
@@ -35,89 +30,53 @@ export class SubmissionItemsService {
 
     await this.users.assertStudentProfileCompleteForSubmission(submission.userId);
 
-    const categoryBounds = await this.repository.findCategoryBounds(body.category_id);
-    if (!categoryBounds) {
-      throw new ServiceError(400, "Unknown category");
-    }
-
-    const categoryTypeRaw = await this.repository.findCategoryScoringType(body.category_id);
-    if (!categoryTypeRaw) {
-      throw new ServiceError(400, "Unknown category");
-    }
-
     let subcategoryId = body.subcategory_id ?? null;
-    if (!subcategoryId) {
-      const slug = body.subcategory?.trim();
-      if (!slug) {
-        throw new ServiceError(400, "Provide subcategory_id or subcategory slug", "VALIDATION_ERROR");
-      }
-      subcategoryId = await this.repository.findSubcategoryIdBySlug(body.category_id, slug);
-      if (!subcategoryId) {
-        throw new ServiceError(400, "Unknown subcategory slug for this category", "VALIDATION_ERROR");
-      }
-    } else {
+    if (subcategoryId) {
       const ok = await this.repository.isSubcategoryUnderCategory(subcategoryId, body.category_id);
       if (!ok) {
         throw new ServiceError(400, "subcategory_id does not belong to category_id", "VALIDATION_ERROR");
       }
+    } else {
+      const slug = body.subcategory?.trim() ?? "";
+      if (slug !== "") {
+        subcategoryId = await this.repository.findSubcategoryIdBySlug(body.category_id, slug);
+        if (!subcategoryId) {
+          throw new ServiceError(400, "Unknown subcategory slug for this category", "VALIDATION_ERROR");
+        }
+      }
     }
 
-    const subMeta = await this.repository.findSubcategoryScoringMeta(subcategoryId);
-    const lineMode = (subMeta?.scoringMode ?? categoryTypeRaw) as string;
-    const bounds = {
-      minScore: subMeta?.minPoints ?? categoryBounds.minScore,
-      maxScore: subMeta?.maxPoints ?? categoryBounds.maxScore,
-    };
-    if (bounds.minScore > bounds.maxScore) {
-      throw new ServiceError(400, "Invalid scoring bounds for this line", "VALIDATION_ERROR");
+    const hasSubcategories = await this.repository.categoryHasSubcategories(body.category_id);
+    if (subcategoryId === null && hasSubcategories) {
+      throw new ServiceError(400, "Subcategory is required for this category", "VALIDATION_ERROR");
     }
 
     const metadata = normalizeMetadata(body.metadata);
-    let proposedScore = body.proposed_score;
-
-    if (
-      subMeta?.defaultPoints != null &&
-      !Number.isNaN(subMeta.defaultPoints) &&
-      (lineMode === "fixed" || (subMeta.scoringMode === null && categoryTypeRaw === "fixed"))
-    ) {
-      proposedScore = round2(subMeta.defaultPoints);
-    } else if (lineMode === "fixed" || (subMeta?.scoringMode === null && categoryTypeRaw === "fixed")) {
-      const rules = await this.scoringRules.findRulesBySubcategoryId(subcategoryId);
-      const categoryBand = await this.scoringRules.findCategoryScoringBand(
-        body.category_id,
-        subcategoryId,
-      );
-      proposedScore = resolveFixedProposedScore({
-        metadata,
-        scoringRules: rules,
-        categoryScoring: categoryBand,
-        bounds,
-      });
-    } else if (lineMode === "range" || (subMeta?.scoringMode === null && categoryTypeRaw === "range")) {
-      if (proposedScore === 0 || proposedScore === undefined || Number.isNaN(proposedScore)) {
-        proposedScore = round2((bounds.minScore + bounds.maxScore) / 2);
-      }
-    } else if (
-      lineMode === "manual" ||
-      lineMode === "expert" ||
-      (subMeta?.scoringMode === null && (categoryTypeRaw === "manual" || categoryTypeRaw === "expert"))
-    ) {
-      if (proposedScore === 0 || proposedScore === undefined || Number.isNaN(proposedScore)) {
-        proposedScore = round2(bounds.minScore);
-      }
-    }
-
-    if (proposedScore < bounds.minScore || proposedScore > bounds.maxScore) {
-      throw new ServiceError(
-        400,
-        `proposed_score must be between ${bounds.minScore} and ${bounds.maxScore} for this category`,
-        "VALIDATION_ERROR",
-      );
-    }
 
     const categoryName = await this.repository.resolveCategoryName(body.category_id);
     if (!categoryName) {
       throw new ServiceError(400, "Unknown category");
+    }
+
+    if (categoryName === "olympiads" && subcategoryId) {
+      const subSlug = await this.repository.findSubcategorySlugById(subcategoryId);
+      if (subSlug === "olympiad_participation") {
+        const p = metadata.place;
+        const placeOk =
+          p === 1 ||
+          p === 2 ||
+          p === 3 ||
+          p === "1" ||
+          p === "2" ||
+          p === "3";
+        if (!placeOk) {
+          throw new ServiceError(
+            400,
+            "Olympiad items require metadata.place of 1, 2, or 3",
+            "VALIDATION_ERROR",
+          );
+        }
+      }
     }
 
     try {
@@ -129,7 +88,7 @@ export class SubmissionItemsService {
         description: body.description,
         proofFileUrl: body.proof_file_url,
         externalLink: body.external_link,
-        proposedScore,
+        proposedScore: null,
         metadata,
       });
     } catch (err) {

@@ -293,19 +293,23 @@ export class UpmsService {
     description: string;
     proofFileUrl: string;
     externalLink?: string | null;
-    metadata?: Record<string, string>;
+    metadata?: Record<string, string | number | boolean>;
   }): Promise<{ itemId: string }> {
     const body: Record<string, unknown> = {
       telegram_id: input.telegramId,
       submission_id: input.submissionId,
       category_id: input.categoryId,
-      subcategory: input.subcategory,
       title: input.title,
       description: input.description,
       proof_file_url: input.proofFileUrl,
       external_link: input.externalLink ?? null,
-      metadata: input.metadata ?? {},
     };
+    if (input.subcategory !== null && input.subcategory !== undefined && input.subcategory !== "") {
+      body.subcategory = input.subcategory;
+    }
+    if (input.metadata !== undefined && Object.keys(input.metadata).length > 0) {
+      body.metadata = input.metadata;
+    }
     return this.requestJson<{ itemId: string }>("/api/bot/submissions/items", {
       method: "POST",
       body: JSON.stringify(body),

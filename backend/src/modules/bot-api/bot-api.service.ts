@@ -280,7 +280,10 @@ export class BotApiService {
   async getCategoriesCatalog(): Promise<
     Array<{
       id: string;
+      code: string;
+      title: string;
       name: string;
+      description: string | null;
       type: string;
       minScore: number;
       maxScore: number;
@@ -290,6 +293,7 @@ export class BotApiService {
         minScore: number;
         maxScore: number;
         scoringMode: string;
+        defaultPoints: number | null;
       }>;
     }>
   > {
@@ -297,7 +301,10 @@ export class BotApiService {
     try {
       result = await this.app.db.query<{
         id: string;
+        code: string | null;
+        title: string | null;
         name: string;
+        description: string | null;
         type: string;
         min_score: string;
         max_score: string;
@@ -307,11 +314,15 @@ export class BotApiService {
         sub_min: string | null;
         sub_max: string | null;
         scoring_mode: string | null;
+        sub_default: string | null;
       }>(
         `
         SELECT
           c.id,
+          COALESCE(NULLIF(BTRIM(c.code), ''), c.name) AS code,
+          COALESCE(NULLIF(BTRIM(c.title), ''), c.name) AS title,
           c.name,
+          c.description,
           c.type::text AS type,
           c.min_score,
           c.max_score,
@@ -320,7 +331,8 @@ export class BotApiService {
           cs.sort_order,
           cs.min_points::text AS sub_min,
           cs.max_points::text AS sub_max,
-          cs.scoring_mode::text AS scoring_mode
+          cs.scoring_mode::text AS scoring_mode,
+          cs.default_points::text AS sub_default
         FROM categories c
         LEFT JOIN category_subcategories cs ON cs.category_id = c.id
           AND cs.slug IS DISTINCT FROM 'general'
@@ -340,7 +352,10 @@ export class BotApiService {
       string,
       {
         id: string;
+        code: string;
+        title: string;
         name: string;
+        description: string | null;
         type: string;
         minScore: number;
         maxScore: number;
@@ -350,6 +365,7 @@ export class BotApiService {
           minScore: number;
           maxScore: number;
           scoringMode: string;
+          defaultPoints: number | null;
         }>;
       }
     >();
@@ -359,7 +375,10 @@ export class BotApiService {
       if (!entry) {
         entry = {
           id: row.id,
+          code: row.code ?? row.name,
+          title: row.title ?? row.name,
           name: row.name,
+          description: row.description,
           type: row.type,
           minScore: Number(row.min_score),
           maxScore: Number(row.max_score),
@@ -370,12 +389,15 @@ export class BotApiService {
       if (row.slug && row.label) {
         const subMin = row.sub_min !== null && row.sub_min !== "" ? Number(row.sub_min) : entry.minScore;
         const subMax = row.sub_max !== null && row.sub_max !== "" ? Number(row.sub_max) : entry.maxScore;
+        const subDefault =
+          row.sub_default !== null && row.sub_default !== "" ? Number(row.sub_default) : null;
         entry.subcategories.push({
           slug: row.slug,
           label: row.label,
           minScore: subMin,
           maxScore: subMax,
           scoringMode: row.scoring_mode ?? row.type,
+          defaultPoints: Number.isFinite(subDefault) ? subDefault : null,
         });
       }
     }
@@ -489,7 +511,7 @@ export class BotApiService {
     description: string;
     proofFileUrl: string;
     externalLink?: string | null;
-    metadata?: Record<string, unknown>;
+    metadata?: Record<string, string | number | boolean>;
   }): Promise<{ itemId: string }> {
     this.validateProofStorageUrl(input.proofFileUrl);
 
@@ -501,13 +523,12 @@ export class BotApiService {
     try {
       const item = await this.submissionItems.addItem(toAuthUser(user), input.submissionId, {
         category_id: input.categoryId,
-        subcategory: slug,
+        ...(slug ? { subcategory: slug } : {}),
         title: input.title,
         description: input.description,
         proof_file_url: input.proofFileUrl,
         external_link: ext,
-        proposed_score: 0,
-        metadata: normalizeMetadata(input.metadata) as Record<string, string | number | boolean>,
+        metadata: normalizeMetadata(input.metadata ?? {}) as Record<string, string | number | boolean>,
       });
 
       this.app.log.info(
@@ -546,19 +567,13 @@ export class BotApiService {
     }
   }
 
-  private async resolveBotSubcategorySlug(categoryId: string, subcategory: string | null): Promise<string> {
-    const subCount = await this.app.db.query<{ c: string }>(
-      `
-      SELECT COUNT(*)::text AS c
-      FROM category_subcategories
-      WHERE category_id = $1
-      `,
-      [categoryId],
-    );
-
-    const hasSubs = Number(subCount.rows[0]?.c ?? "0") > 0;
+  private async resolveBotSubcategorySlug(
+    categoryId: string,
+    subcategory: string | null,
+  ): Promise<string | null> {
+    const hasSubs = await this.submissionItems.categoryHasSubcategories(categoryId);
     if (!hasSubs) {
-      return "general";
+      return null;
     }
 
     const slug = subcategory?.trim() ?? "";
@@ -581,7 +596,7 @@ export class BotApiService {
   async createStudentSubmissionFromBot(input: {
     telegramId: string;
     categoryId: string;
-    subcategory: string;
+    subcategory?: string | null;
     title: string;
     description: string;
     proofFileUrl: string;
@@ -591,7 +606,7 @@ export class BotApiService {
 
     const user = await this.findOrCreateUserByTelegramId(input.telegramId);
     const auth = toAuthUser(user);
-    const slug = await this.resolveBotSubcategorySlug(input.categoryId, input.subcategory);
+    const slug = await this.resolveBotSubcategorySlug(input.categoryId, input.subcategory ?? null);
 
     try {
       const created = await this.submissions.createSubmission(auth, {
@@ -601,11 +616,10 @@ export class BotApiService {
 
       await this.submissionItems.addItem(auth, created.id, {
         category_id: input.categoryId,
-        subcategory: slug,
+        ...(slug ? { subcategory: slug } : {}),
         title: input.title,
         description: input.description,
         proof_file_url: input.proofFileUrl,
-        proposed_score: 0,
         metadata: normalizeMetadata(input.metadata) as Record<string, string | number | boolean>,
       });
 
@@ -929,8 +943,7 @@ export class BotApiService {
         title: `Achievement: ${input.category}`,
         description: input.details,
         proof_file_url: input.proofFileUrl,
-        proposed_score: 0,
-        metadata: categoryRow.name === "internal_competitions" ? { place: "1" } : {},
+        metadata: {},
       });
 
       await this.submissions.submitSubmission(auth, created.id);

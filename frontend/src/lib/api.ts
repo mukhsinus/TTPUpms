@@ -64,7 +64,7 @@ export interface ReviewSubmissionItemResponse {
   categoryType?: string;
   title: string;
   description: string | null;
-  proposedScore: number;
+  proposedScore: number | null;
   reviewerScore: number | null;
   approvedScore: number | null;
   reviewerComment: string | null;

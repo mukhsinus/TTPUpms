@@ -3,8 +3,8 @@ import {
   addAnotherItemKeyboard,
   cancelOnlyKeyboard,
   categoryPickerKeyboard,
-  internalCompetitionPlaceKeyboard,
   mainMenuKeyboard,
+  olympiadPlacementKeyboard,
   previewSubmitKeyboard,
   skipOptionalLinkKeyboard,
   subcategoryPickerKeyboard,
@@ -32,7 +32,7 @@ function formatSubmissionSuccessSummary(item: {
     "",
     `Title: ${item.title}`,
     `Category: ${item.category}`,
-    `Subcategory: ${item.subcategory}`,
+    `Subcategory: ${item.subcategory?.trim() ? item.subcategory : "—"}`,
     `Description: ${item.description}`,
   ];
   if (item.link) {
@@ -46,6 +46,10 @@ function formatSubmissionSuccessSummary(item: {
 
 function st(ctx: BotContext): SubmitFlowState {
   return ctx.wizard.state as SubmitFlowState;
+}
+
+function categoryHasSubcategories(entry: { subcategories: { length: number } }): boolean {
+  return entry.subcategories.length > 0;
 }
 
 function resetFlowState(s: SubmitFlowState): void {
@@ -147,48 +151,52 @@ async function presentCategoryStep(ctx: BotContext, upms: UpmsService): Promise<
 
 function formatItemBlock(s: SubmitFlowState, externalLink: string | null): string {
   const fileNote = s.proofFileUrl ? "Proof file attached" : "—";
-  const lines = [
+  const place = s.itemMetadata?.place;
+  const placeLine =
+    place === 1 || place === "1"
+      ? "Placement: 1st place"
+      : place === 2 || place === "2"
+        ? "Placement: 2nd place"
+        : place === 3 || place === "3"
+          ? "Placement: 3rd place"
+          : null;
+  const body = [
     `Title: ${s.title ?? "—"}`,
     `Category: ${s.categoryName ?? "—"}`,
     `Subcategory: ${s.subcategoryLabel ?? "—"}`,
   ];
-  if (s.categoryName === "internal_competitions" && s.itemMetadata?.place) {
-    lines.push(`Place: ${s.itemMetadata.place}`);
+  if (placeLine) {
+    body.push(placeLine);
   }
-  lines.push(
+  body.push(
     `Description: ${s.description ?? "—"}`,
     `File: ${fileNote}`,
     externalLink ? `Link: ${externalLink}` : "Link: —",
   );
-  return lines.join("\n");
+  return body.join("\n");
 }
 
 /** Persist current item; updates previewBlocks. Draft row is created on first save using the user-entered title. */
 async function persistItemAndRecordPreview(ctx: BotContext, upms: UpmsService, externalLink: string | null): Promise<void> {
   const tgId = ctx.session.authenticatedTelegramId!;
   const s = st(ctx);
-  const subSlug = s.subcategorySlug ?? "general";
+  const subSlug = s.subcategorySlug;
 
   if (!s.submissionId) {
     const draft = await upms.createDraftSubmission(tgId, s.title!);
     s.submissionId = draft.submissionId;
   }
 
-  const metadata =
-    s.categoryName === "internal_competitions" && s.itemMetadata && Object.keys(s.itemMetadata).length > 0
-      ? { ...s.itemMetadata }
-      : undefined;
-
   await upms.addSubmissionItem({
     telegramId: tgId,
     submissionId: s.submissionId!,
     categoryId: s.categoryId!,
-    subcategory: subSlug,
+    subcategory: subSlug ?? null,
     title: s.title!,
     description: s.description!,
     proofFileUrl: s.proofFileUrl!,
     externalLink,
-    metadata,
+    metadata: s.itemMetadata,
   });
 
   s.previewBlocks = s.previewBlocks ?? [];
@@ -278,25 +286,71 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       s.categoryId = selected.id;
       s.categoryName = selected.name;
 
-      if (selected.subcategories.length === 0) {
-        await ctx.reply(
-          "This category has no subcategories configured in UPMS yet. Pick another category or contact an administrator.",
-          mainMenuKeyboard(),
-        );
-        await leaveWithMenu(ctx);
-        return;
+      if (!categoryHasSubcategories(selected)) {
+        delete s.subcategorySlug;
+        delete s.subcategoryLabel;
+        delete s.itemMetadata;
+        if (selected.code === "volunteering") {
+          await ctx.reply(selected.description ?? "", cancelOnlyKeyboard());
+          await ctx.reply("Enter a short title for your achievement:", cancelOnlyKeyboard());
+        } else {
+          const text = `${selected.description ?? ""}\n\nEnter a short title for this achievement:`;
+          await ctx.reply(text, cancelOnlyKeyboard());
+        }
+        return ctx.wizard.selectStep(3);
       }
 
-      await ctx.reply("Select a subcategory:", subcategoryPickerKeyboard(selected.subcategories));
+      if (selected.code === "olympiads" && categoryHasSubcategories(selected) && selected.subcategories.length === 1) {
+        const only = selected.subcategories[0]!;
+        s.subcategorySlug = only.slug;
+        s.subcategoryLabel = only.label;
+        delete s.itemMetadata;
+        const text = `${selected.description ?? ""}\n\nSelect your placement:`;
+        await ctx.reply(text, olympiadPlacementKeyboard());
+        return ctx.wizard.next();
+      }
+
+      const text = `${selected.description ?? ""}\n\nSelect a subcategory:`;
+      await ctx.reply(
+        text,
+        subcategoryPickerKeyboard(selected.subcategories, { categoryCode: selected.code }),
+      );
       return ctx.wizard.next();
     },
-    // 2 — subcategory
+    // 2 — subcategory (or olympiad placement)
     async (ctx) => {
       if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "wizard_cancel") {
         await ctx.answerCbQuery();
         await ctx.reply("Cancelled.", mainMenuKeyboard());
         await leaveWithMenu(ctx);
         return;
+      }
+
+      const s = st(ctx);
+      const categories = s.categories ?? [];
+      const cat = categories.find((c) => c.id === s.categoryId);
+
+      if (cat?.code === "olympiads" && s.subcategorySlug === "olympiad_participation") {
+        if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data.startsWith("place_")) {
+          await ctx.answerCbQuery();
+          const placeNum = Number(ctx.callbackQuery.data.replace("place_", ""));
+          if (![1, 2, 3].includes(placeNum)) {
+            await ctx.reply("Invalid placement.");
+            return;
+          }
+          s.itemMetadata = { place: placeNum };
+          await ctx.reply("Enter a short title for this achievement:", cancelOnlyKeyboard());
+          return ctx.wizard.next();
+        }
+
+        if (
+          !ctx.callbackQuery ||
+          !("data" in ctx.callbackQuery) ||
+          !ctx.callbackQuery.data.startsWith("sub_")
+        ) {
+          await ctx.reply("Select your placement using the buttons below.", olympiadPlacementKeyboard());
+          return;
+        }
       }
 
       if (!ctx.callbackQuery || !("data" in ctx.callbackQuery)) {
@@ -312,9 +366,6 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       }
 
       const slug = data.replace("sub_", "");
-      const s = st(ctx);
-      const categories = s.categories ?? [];
-      const cat = categories.find((c) => c.id === s.categoryId);
       const sub = cat?.subcategories.find((x) => x.slug === slug);
       if (!sub) {
         await ctx.answerCbQuery();
@@ -325,13 +376,14 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       await ctx.answerCbQuery();
       s.subcategorySlug = sub.slug;
       s.subcategoryLabel = sub.label;
-      delete s.itemMetadata;
 
-      if (s.categoryName === "internal_competitions") {
-        await ctx.reply("Select your placement (1st–3rd):", internalCompetitionPlaceKeyboard());
-      } else {
-        await ctx.reply("Enter a short title for this achievement:", cancelOnlyKeyboard());
+      if (cat?.code === "olympiads" && slug === "olympiad_participation") {
+        delete s.itemMetadata;
+        await ctx.reply("Select your placement:", olympiadPlacementKeyboard());
+        return;
       }
+
+      await ctx.reply("Enter a short title for this achievement:", cancelOnlyKeyboard());
       return ctx.wizard.next();
     },
     // 3 — title
@@ -340,31 +392,6 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
         await ctx.answerCbQuery();
         await ctx.reply("Cancelled.", mainMenuKeyboard());
         await leaveWithMenu(ctx);
-        return;
-      }
-
-      const s3 = st(ctx);
-
-      if (ctx.callbackQuery && "data" in ctx.callbackQuery && s3.categoryName === "internal_competitions") {
-        const d = ctx.callbackQuery.data;
-        if (d.startsWith("place_")) {
-          await ctx.answerCbQuery();
-          const p = d.replace("place_", "").trim();
-          if (p !== "1" && p !== "2" && p !== "3") {
-            await ctx.reply("Please use the placement buttons.");
-            return;
-          }
-          s3.itemMetadata = { place: p };
-          await ctx.reply("Enter a short title for this achievement:", cancelOnlyKeyboard());
-          return;
-        }
-      }
-
-      if (s3.categoryName === "internal_competitions" && !s3.itemMetadata?.place) {
-        if (ctx.callbackQuery && "data" in ctx.callbackQuery) {
-          await ctx.answerCbQuery();
-        }
-        await ctx.reply("Select your placement (1st–3rd) before the title.", internalCompetitionPlaceKeyboard());
         return;
       }
 

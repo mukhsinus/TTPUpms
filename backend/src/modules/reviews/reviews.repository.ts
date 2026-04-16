@@ -31,7 +31,7 @@ interface SubmissionItemRow {
   subcategory: string | null;
   title: string;
   description: string | null;
-  proposed_score: string;
+  proposed_score: string | null;
   approved_score: string | null;
   reviewer_comment: string | null;
   status: string;
@@ -71,13 +71,13 @@ export interface ReviewSubmissionItemEntity {
   category: string;
   subcategory: string | null;
   /** FK to category_subcategories (drives scoring_rules lookup for fixed categories). */
-  subcategoryId: string;
+  subcategoryId: string | null;
   metadata: Record<string, unknown>;
   /** categories.type — fixed | range | expert | manual (legacy). */
   categoryType: string;
   title: string;
   description: string | null;
-  proposedScore: number;
+  proposedScore: number | null;
   reviewerScore: number | null;
   approvedScore: number | null;
   reviewerComment: string | null;
@@ -148,12 +148,15 @@ function mapItem(row: SubmissionItemRow): ReviewSubmissionItemEntity {
     userId: row.user_id,
     category: row.category,
     subcategory: row.subcategory,
-    subcategoryId: row.subcategory_id ?? "",
+    subcategoryId: row.subcategory_id ?? null,
     metadata: normalizeMetadata(row.metadata),
     categoryType: row.category_type ?? "range",
     title: row.title,
     description: row.description,
-    proposedScore: Number(row.proposed_score),
+    proposedScore:
+      row.proposed_score === null || row.proposed_score === undefined || row.proposed_score === ""
+        ? null
+        : Number(row.proposed_score),
     reviewerScore: approved,
     approvedScore: approved,
     reviewerComment: row.reviewer_comment,

@@ -35,15 +35,30 @@ export function categoryPickerKeyboard(categories: CategoryCatalogEntry[]) {
   return Markup.inlineKeyboard(rows);
 }
 
+function standardizedTestsSubButtonLabel(slug: string, fallback: string): string {
+  if (slug === "high") return "SAT 1400+";
+  if (slug === "mid") return "SAT 1300–1400";
+  if (slug === "low") return "SAT 1200–1300";
+  return fallback;
+}
+
 /** Callback sub_<slug> — category is already chosen in session */
-export function subcategoryPickerKeyboard(subcategories: CategoryCatalogEntry["subcategories"]) {
+export function subcategoryPickerKeyboard(
+  subcategories: CategoryCatalogEntry["subcategories"],
+  options?: { categoryCode?: string },
+) {
   const rows: ReturnType<typeof Markup.button.callback>[][] = [];
+  const code = options?.categoryCode;
   for (let i = 0; i < subcategories.length; i += 2) {
-    const row = [Markup.button.callback(subcategories[i].label, `sub_${subcategories[i].slug}`)];
+    const a = subcategories[i];
+    const labelA =
+      code === "standardized_tests" ? standardizedTestsSubButtonLabel(a.slug, a.label) : a.label;
+    const row = [Markup.button.callback(labelA, `sub_${a.slug}`)];
     if (subcategories[i + 1]) {
-      row.push(
-        Markup.button.callback(subcategories[i + 1].label, `sub_${subcategories[i + 1].slug}`),
-      );
+      const b = subcategories[i + 1];
+      const labelB =
+        code === "standardized_tests" ? standardizedTestsSubButtonLabel(b.slug, b.label) : b.label;
+      row.push(Markup.button.callback(labelB, `sub_${b.slug}`));
     }
     rows.push(row);
   }
@@ -51,7 +66,8 @@ export function subcategoryPickerKeyboard(subcategories: CategoryCatalogEntry["s
   return Markup.inlineKeyboard(rows);
 }
 
-export function internalCompetitionPlaceKeyboard() {
+/** Callbacks place_1 | place_2 | place_3 */
+export function olympiadPlacementKeyboard() {
   return Markup.inlineKeyboard([
     [
       Markup.button.callback("1st place", "place_1"),

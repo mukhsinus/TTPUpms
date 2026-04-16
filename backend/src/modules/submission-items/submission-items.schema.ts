@@ -18,19 +18,8 @@ export const addSubmissionItemBodySchema = z
     description: z.string().trim().max(5000).optional(),
     proof_file_url: z.string().url().optional(),
     external_link: z.string().url().optional(),
-    /** For range/expert categories; for fixed categories use 0 or any placeholder (server replaces from rules). */
-    proposed_score: z.number().min(0).max(100000).default(0),
-    /** Dynamic inputs (place, ielts_band, duration_band, cert_track, …) matched against scoring_rules. */
+    /** Optional non-scoring metadata; scores are assigned by admins/reviewers only. */
     metadata: metadataSchema,
-  })
-  .superRefine((val, ctx) => {
-    if (!val.subcategory_id && (val.subcategory === undefined || val.subcategory === "")) {
-      ctx.addIssue({
-        code: "custom",
-        message: "Provide subcategory_id or non-empty subcategory slug",
-        path: ["subcategory_id"],
-      });
-    }
   });
 
 export type AddSubmissionItemBody = z.infer<typeof addSubmissionItemBodySchema>;

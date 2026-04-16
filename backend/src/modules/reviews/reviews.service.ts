@@ -81,7 +81,9 @@ export class ReviewsService {
     let finalScore = body.score;
 
     if (scoringKind === "fixed") {
-      const rules = await this.scoringRules.findRulesBySubcategoryId(item.subcategoryId);
+      const rules = item.subcategoryId
+        ? await this.scoringRules.findRulesBySubcategoryId(item.subcategoryId)
+        : [];
       const resolved = resolveFixedPointsFromRules(item.metadata, rules);
       if (resolved !== null) {
         if (finalScore !== undefined && finalScore !== resolved) {
@@ -93,9 +95,15 @@ export class ReviewsService {
         }
         finalScore = resolved;
       } else if (finalScore !== undefined && Number.isFinite(finalScore)) {
-        // No metadata rule match: reviewer may set score explicitly (e.g. bot line without metadata).
-      } else {
+        // No metadata rule match: reviewer sets score explicitly.
+      } else if (item.proposedScore !== null && Number.isFinite(item.proposedScore)) {
         finalScore = item.proposedScore;
+      } else {
+        throw new ServiceError(
+          400,
+          "score is required when no automatic rule applies for this item.",
+          "VALIDATION_ERROR",
+        );
       }
     } else {
       if (finalScore === undefined || !Number.isFinite(finalScore)) {
@@ -206,7 +214,12 @@ export class ReviewsService {
       );
     }
 
-    if (scoringKind !== "fixed" && score > item.proposedScore) {
+    if (
+      scoringKind !== "fixed" &&
+      item.proposedScore !== null &&
+      Number.isFinite(item.proposedScore) &&
+      score > item.proposedScore
+    ) {
       throw new ServiceError(
         400,
         `Score cannot exceed the proposed maximum (${item.proposedScore})`,

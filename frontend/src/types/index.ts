@@ -50,7 +50,7 @@ export interface SubmissionItem {
   /** categories.type from API (fixed | range | expert | manual). */
   categoryType?: string;
   description: string | null;
-  proposedScore: number;
+  proposedScore: number | null;
   /** Workflow status (submission-items API). */
   status?: SubmissionItemStatus;
   approvedScore?: number | null;

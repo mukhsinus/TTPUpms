@@ -27,7 +27,7 @@ interface SubmissionItemRow {
   description: string | null;
   proof_file_url: string | null;
   external_link: string | null;
-  proposed_score: string;
+  proposed_score: string | null;
   approved_score: string | null;
   status: "pending" | "approved" | "rejected";
   reviewer_comment: string | null;
@@ -44,14 +44,14 @@ export interface SubmissionItemEntity {
   subcategory: string | null;
   /** Human label from `category_subcategories` when joined; otherwise null. */
   subcategoryLabel: string | null;
-  subcategoryId: string;
+  subcategoryId: string | null;
   metadata: Record<string, unknown>;
   categoryType: string;
   title: string;
   description: string | null;
   proofFileUrl: string | null;
   externalLink: string | null;
-  proposedScore: number;
+  proposedScore: number | null;
   approvedScore: number | null;
   status: "pending" | "approved" | "rejected";
   reviewerComment: string | null;
@@ -74,14 +74,17 @@ function mapItem(row: SubmissionItemRow): SubmissionItemEntity {
     category: row.category,
     subcategory: row.subcategory,
     subcategoryLabel: row.subcategory_label ?? null,
-    subcategoryId: row.subcategory_id ?? "",
+    subcategoryId: row.subcategory_id ?? null,
     metadata: normalizeMetadata(row.metadata),
     categoryType: row.category_type ?? "range",
     title: row.title,
     description: row.description,
     proofFileUrl: row.proof_file_url,
     externalLink: row.external_link,
-    proposedScore: Number(row.proposed_score),
+    proposedScore:
+      row.proposed_score === null || row.proposed_score === undefined || row.proposed_score === ""
+        ? null
+        : Number(row.proposed_score),
     approvedScore: row.approved_score === null ? null : Number(row.approved_score),
     status: row.status,
     reviewerComment: row.reviewer_comment,
@@ -252,6 +255,37 @@ export class SubmissionItemsRepository {
     return result.rows[0]?.id ?? null;
   }
 
+  async findSubcategorySlugById(subcategoryId: string): Promise<string | null> {
+    const result = await this.app.db.query<{ slug: string }>(
+      `
+      SELECT slug
+      FROM category_subcategories
+      WHERE id = $1
+      LIMIT 1
+      `,
+      [subcategoryId],
+    );
+
+    return result.rows[0]?.slug ?? null;
+  }
+
+  async countSubcategories(categoryId: string): Promise<number> {
+    const result = await this.app.db.query<{ n: string }>(
+      `
+      SELECT COUNT(*)::text AS n
+      FROM category_subcategories
+      WHERE category_id = $1
+      `,
+      [categoryId],
+    );
+
+    return Number(result.rows[0]?.n ?? "0");
+  }
+
+  async categoryHasSubcategories(categoryId: string): Promise<boolean> {
+    return (await this.countSubcategories(categoryId)) > 0;
+  }
+
   async findFirstSubcategoryIdForCategory(categoryId: string): Promise<string | null> {
     const result = await this.app.db.query<{ id: string }>(
       `
@@ -284,12 +318,12 @@ export class SubmissionItemsRepository {
   async createItem(input: {
     submissionId: string;
     categoryId: string;
-    subcategoryId: string;
+    subcategoryId: string | null;
     title: string;
     description?: string;
     proofFileUrl?: string;
     externalLink?: string;
-    proposedScore: number;
+    proposedScore: number | null;
     metadata: Record<string, unknown>;
   }): Promise<SubmissionItemEntity> {
     const result = await this.app.db.query<SubmissionItemRow>(

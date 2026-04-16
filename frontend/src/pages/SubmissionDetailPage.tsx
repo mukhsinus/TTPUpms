@@ -112,7 +112,7 @@ export function SubmissionDetailPage(): ReactElement {
     const next: Record<string, { score: string; comment: string }> = {};
     for (const item of items) {
       next[item.id] = {
-        score: String(item.approvedScore ?? item.reviewerScore ?? item.proposedScore),
+        score: String(item.approvedScore ?? item.reviewerScore ?? item.proposedScore ?? ""),
         comment: item.reviewerComment ?? "",
       };
     }
@@ -325,7 +325,7 @@ export function SubmissionDetailPage(): ReactElement {
                   </p>
                   <p>{item.description?.trim() ? item.description : "—"}</p>
                   <p className="muted">
-                    <strong>Proposed score:</strong> {item.proposedScore}
+                    <strong>Proposed score:</strong> {item.proposedScore ?? "—"}
                   </p>
                   <p className="muted">
                     <strong>Status:</strong> {displayItemStatus(item)}

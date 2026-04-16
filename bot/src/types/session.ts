@@ -3,7 +3,10 @@ import type { Context, Scenes } from "telegraf";
 /** Category row from GET /api/bot/categories */
 export interface CategoryCatalogEntry {
   id: string;
+  code: string;
+  title: string;
   name: string;
+  description: string | null;
   type: string;
   minScore: number;
   maxScore: number;
@@ -13,6 +16,7 @@ export interface CategoryCatalogEntry {
     minScore: number;
     maxScore: number;
     scoringMode: string;
+    defaultPoints?: number | null;
   }>;
 }
 
@@ -28,8 +32,8 @@ export interface SubmitFlowState extends Scenes.WizardSessionData {
   categoryName?: string;
   subcategorySlug?: string;
   subcategoryLabel?: string;
-  /** Rubric keys for fixed rules (e.g. internal competitions `place`). */
-  itemMetadata?: Record<string, string>;
+  /** e.g. olympiads: { place: 1 | 2 | 3 } */
+  itemMetadata?: Record<string, string | number | boolean>;
   title?: string;
   description?: string;
   proofFileUrl?: string;

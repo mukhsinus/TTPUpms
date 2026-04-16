@@ -8,7 +8,6 @@ import { mapPgErrorToClient } from "../../utils/pg-http-map";
 import { failure, success } from "../../utils/http-response";
 import { AuditLogRepository } from "../audit/audit-log.repository";
 import { NotificationService } from "../notifications/notification.service";
-import { ScoringRulesRepository } from "../scoring/scoring-rules.repository";
 import { SubmissionItemsRepository } from "../submission-items/submission-items.repository";
 import { SubmissionItemsService } from "../submission-items/submission-items.service";
 import { SubmissionsRepository } from "../submissions/submissions.repository";
@@ -56,11 +55,18 @@ const metadataRecordSchema = z.record(z.string(), z.union([z.string(), z.number(
 const createStudentSubmissionSchema = z.object({
   telegram_id: z.string().regex(/^\d+$/, "telegram_id must be numeric"),
   category_id: z.string().uuid(),
-  subcategory: z.string().min(1).max(200),
+  subcategory: z
+    .union([z.string().max(200), z.null()])
+    .optional()
+    .transform((s) => {
+      if (s === null || s === undefined) return undefined;
+      const t = s.trim();
+      return t.length > 0 ? t : undefined;
+    }),
   title: z.string().min(1).max(200),
   description: z.string().min(1).max(5000),
   proof_file_url: z.string().url(),
-  metadata: metadataRecordSchema,
+  metadata: metadataRecordSchema.optional(),
 });
 
 const createDraftSubmissionSchema = z.object({
@@ -72,12 +78,19 @@ const addBotSubmissionItemSchema = z.object({
   telegram_id: z.string().regex(/^\d+$/, "telegram_id must be numeric"),
   submission_id: z.string().uuid(),
   category_id: z.string().uuid(),
-  subcategory: z.string().min(1).max(200).nullable().optional(),
+  subcategory: z
+    .union([z.string().max(200), z.null()])
+    .optional()
+    .transform((s) => {
+      if (s === null || s === undefined) return undefined;
+      const t = s.trim();
+      return t.length > 0 ? t : undefined;
+    }),
   title: z.string().min(1).max(200),
   description: z.string().min(1).max(5000),
   proof_file_url: z.string().url(),
   external_link: z.union([z.string().url(), z.literal("")]).optional().nullable(),
-  metadata: metadataRecordSchema,
+  metadata: metadataRecordSchema.optional(),
 });
 
 const submitDraftParamsSchema = z.object({
@@ -219,12 +232,7 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
     usersRepository,
   );
   const submissionItemsRepository = new SubmissionItemsRepository(app);
-  const scoringRules = new ScoringRulesRepository(app);
-  const submissionItemsService = new SubmissionItemsService(
-    submissionItemsRepository,
-    scoringRules,
-    usersRepository,
-  );
+  const submissionItemsService = new SubmissionItemsService(submissionItemsRepository, usersRepository);
   const service = new BotApiService(app, audit, submissionsService, submissionItemsService, antiFraud, usersRepository);
 
   app.addHook("onSend", idempotencyOnSend(app));
