@@ -12,6 +12,7 @@ import {
 import type { UpmsService } from "../services/upms.service";
 import type { BotContext, SubmitFlowState } from "../types/session";
 import { userFacingUpmsMessage } from "../utils/upms-user-facing";
+import { botFlowStep } from "../utils/structured-log";
 
 const TEN_MB = 10 * 1024 * 1024;
 
@@ -145,6 +146,7 @@ async function presentCategoryStep(ctx: BotContext, upms: UpmsService): Promise<
   }
 
   s.categories = categories;
+  botFlowStep(ctx.from?.id, "category_prompt", { categoryCount: categories.length });
   await ctx.reply("Select a category:", categoryPickerKeyboard(categories));
   return true;
 }
@@ -286,10 +288,16 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       s.categoryId = selected.id;
       s.categoryName = selected.name;
 
+      botFlowStep(ctx.from?.id, "category_selected", {
+        categoryCode: selected.code ?? selected.name,
+        hasSubcategories: categoryHasSubcategories(selected),
+      });
+
       if (!categoryHasSubcategories(selected)) {
         delete s.subcategorySlug;
         delete s.subcategoryLabel;
         delete s.itemMetadata;
+        botFlowStep(ctx.from?.id, "subcategory_skipped", { categoryCode: selected.code ?? selected.name });
         if (selected.code === "volunteering") {
           await ctx.reply(selected.description ?? "", cancelOnlyKeyboard());
           await ctx.reply("Enter a short title for your achievement:", cancelOnlyKeyboard());
@@ -305,6 +313,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
         s.subcategorySlug = only.slug;
         s.subcategoryLabel = only.label;
         delete s.itemMetadata;
+        botFlowStep(ctx.from?.id, "placement_prompt", { categoryCode: "olympiads", subcategorySlug: only.slug });
         const text = `${selected.description ?? ""}\n\nSelect your placement:`;
         await ctx.reply(text, olympiadPlacementKeyboard());
         return ctx.wizard.next();
@@ -339,6 +348,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
             return;
           }
           s.itemMetadata = { place: placeNum };
+          botFlowStep(ctx.from?.id, "placement_selected", { place: placeNum });
           await ctx.reply("Enter a short title for this achievement:", cancelOnlyKeyboard());
           return ctx.wizard.next();
         }
@@ -377,8 +387,11 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       s.subcategorySlug = sub.slug;
       s.subcategoryLabel = sub.label;
 
+      botFlowStep(ctx.from?.id, "subcategory_selected", { categoryCode: cat?.code ?? cat?.name, subcategorySlug: slug });
+
       if (cat?.code === "olympiads" && slug === "olympiad_participation") {
         delete s.itemMetadata;
+        botFlowStep(ctx.from?.id, "placement_prompt", { categoryCode: "olympiads", subcategorySlug: slug });
         await ctx.reply("Select your placement:", olympiadPlacementKeyboard());
         return;
       }
@@ -401,6 +414,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       }
 
       st(ctx).title = ctx.message.text.trim();
+      botFlowStep(ctx.from?.id, "title_entered", { titleLen: st(ctx).title!.length });
       await ctx.reply("Describe the achievement (details, dates, role):", cancelOnlyKeyboard());
       return ctx.wizard.next();
     },
@@ -419,6 +433,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       }
 
       st(ctx).description = ctx.message.text.trim();
+      botFlowStep(ctx.from?.id, "description_entered", { descriptionLen: st(ctx).description!.length });
       await ctx.reply("Upload proof (PDF, JPG, or PNG, max 10 MB).", cancelOnlyKeyboard());
       return ctx.wizard.next();
     },
@@ -493,6 +508,8 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
 
       st(ctx).proofFileUrl = upload.proofFileUrl;
 
+      botFlowStep(ctx.from?.id, "file_uploaded", { mimeType });
+
       await ctx.reply(
         "Optional: send a related link (https://…), or tap Skip.",
         skipOptionalLinkKeyboard(),
@@ -525,6 +542,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       }
 
       const s = st(ctx);
+      botFlowStep(ctx.from?.id, "link_or_skip", { hasLink: Boolean(externalLink) });
       try {
         await persistItemAndRecordPreview(ctx, upms, externalLink);
       } catch (e) {

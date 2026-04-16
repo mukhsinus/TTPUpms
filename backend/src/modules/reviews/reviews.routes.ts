@@ -14,7 +14,7 @@ export async function reviewsRoutes(app: FastifyInstance): Promise<void> {
   const notifications = new NotificationService(app);
   const scoringRules = new ScoringRulesRepository(app);
   const audit = new AuditLogRepository(app);
-  const service = new ReviewsService(repository, notifications, audit, scoringRules);
+  const service = new ReviewsService(repository, notifications, audit, scoringRules, app.log);
   const controller = new ReviewsController(service);
   const reviewerGuard = allowRoles(["reviewer", "admin"]);
   const onSendIdempotency = idempotencyOnSend(app);

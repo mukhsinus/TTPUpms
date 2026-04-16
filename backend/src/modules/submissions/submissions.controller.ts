@@ -25,6 +25,12 @@ export class SubmissionsController {
         body,
       );
 
+      request.log.info({
+        event: "submission_created",
+        submissionId: data.id,
+        userId: data.userId,
+      });
+
       reply.status(201).send(success(data));
     } catch (error) {
       this.handleError(reply, error);

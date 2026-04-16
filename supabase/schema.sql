@@ -1,5 +1,9 @@
 -- University Points Management System (UPMS)
 -- Supabase-ready schema with UUID keys, constraints, indexes, and RLS.
+--
+-- Canonical migration history lives in `supabase/migrations/*.sql`.
+-- This file is refreshed for human-readable baseline + idempotent sync
+-- fragments merged from migrations through 20260425100000+.
 
 create extension if not exists pgcrypto;
 create extension if not exists citext;
@@ -142,7 +146,7 @@ create table if not exists public.submission_items (
   title text not null,
   description text,
   proof_file_url text,
-  proposed_score numeric(10,2) not null default 0 check (proposed_score >= 0),
+  proposed_score numeric(10,2) check (proposed_score is null or proposed_score >= 0),
   reviewer_comment text,
   reviewed_by uuid references public.users(id) on delete set null,
   reviewed_at timestamptz,
@@ -237,6 +241,10 @@ create table if not exists public.categories (
   created_at timestamptz not null default now()
 );
 
+alter table public.categories
+  add column if not exists code text,
+  add column if not exists title text;
+
 create table if not exists public.category_subcategories (
   id uuid primary key default gen_random_uuid(),
   category_id uuid not null references public.categories(id) on delete cascade,
@@ -246,6 +254,38 @@ create table if not exists public.category_subcategories (
   created_at timestamptz not null default now(),
   unique (category_id, slug)
 );
+
+alter table public.category_subcategories
+  add column if not exists code text,
+  add column if not exists min_points numeric(10, 2),
+  add column if not exists max_points numeric(10, 2),
+  add column if not exists default_points numeric(10, 2),
+  add column if not exists scoring_mode public.category_scoring_type;
+
+-- scoring_rules (DB-driven points; see migrations/20260415200000_*)
+create table if not exists public.scoring_rules (
+  id uuid primary key default gen_random_uuid(),
+  subcategory_id uuid not null references public.category_subcategories(id) on delete cascade,
+  condition_key text not null,
+  condition_value text not null,
+  points numeric(10, 2) not null check (points >= 0),
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now(),
+  unique (subcategory_id, condition_key, condition_value)
+);
+
+alter table public.scoring_rules
+  add column if not exists rule_type public.category_scoring_type,
+  add column if not exists min_score numeric(10, 2),
+  add column if not exists max_score numeric(10, 2),
+  add column if not exists meta jsonb not null default '{}'::jsonb;
+
+create index if not exists idx_scoring_rules_subcategory_id
+  on public.scoring_rules(subcategory_id);
+
+create unique index if not exists uq_categories_code
+  on public.categories (code)
+  where code is not null and btrim(code) <> '';
 
 create table if not exists public.category_scoring_rules (
   id uuid primary key default gen_random_uuid(),
@@ -290,12 +330,21 @@ alter table public.submission_items
   add column if not exists category_id uuid references public.categories(id) on delete restrict,
   add column if not exists subcategory_id uuid references public.category_subcategories(id) on delete restrict;
 
+alter table public.submission_items
+  alter column subcategory_id drop not null;
+
+alter table public.submission_items
+  alter column proposed_score drop not null;
+
+alter table public.submission_items
+  alter column proposed_score drop default;
+
 create or replace function public.submission_items_default_approved_from_proposed()
 returns trigger
 language plpgsql
 as $$
 begin
-  if new.approved_score is null then
+  if new.approved_score is null and new.proposed_score is not null then
     new.approved_score := new.proposed_score;
   end if;
   return new;
@@ -498,6 +547,7 @@ alter table public.audit_logs enable row level security;
 alter table public.categories enable row level security;
 alter table public.category_subcategories enable row level security;
 alter table public.category_scoring_rules enable row level security;
+alter table public.scoring_rules enable row level security;
 
 -- USERS
 drop policy if exists users_select_self_or_admin on public.users;
@@ -780,5 +830,26 @@ with check (public.current_app_role() = 'admin');
 
 drop policy if exists category_scoring_rules_delete_admin on public.category_scoring_rules;
 create policy category_scoring_rules_delete_admin on public.category_scoring_rules
+for delete
+using (public.current_app_role() = 'admin');
+
+drop policy if exists scoring_rules_select_authenticated on public.scoring_rules;
+create policy scoring_rules_select_authenticated on public.scoring_rules
+for select
+using (auth.uid() is not null);
+
+drop policy if exists scoring_rules_write_admin on public.scoring_rules;
+create policy scoring_rules_write_admin on public.scoring_rules
+for insert
+with check (public.current_app_role() = 'admin');
+
+drop policy if exists scoring_rules_update_admin on public.scoring_rules;
+create policy scoring_rules_update_admin on public.scoring_rules
+for update
+using (public.current_app_role() = 'admin')
+with check (public.current_app_role() = 'admin');
+
+drop policy if exists scoring_rules_delete_admin on public.scoring_rules;
+create policy scoring_rules_delete_admin on public.scoring_rules
 for delete
 using (public.current_app_role() = 'admin');

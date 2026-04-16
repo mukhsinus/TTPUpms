@@ -1,3 +1,4 @@
+import type { FastifyBaseLogger } from "fastify";
 import type {
   ReviewsRepository,
   ReviewSubmissionEntity,
@@ -21,6 +22,7 @@ export class ReviewsService {
     private readonly notifications: NotificationService,
     private readonly audit: AuditLogRepository,
     private readonly scoringRules: ScoringRulesRepository,
+    private readonly log: FastifyBaseLogger,
   ) {}
 
   async getReviewableSubmissions(user: AuthUser): Promise<ReviewSubmissionEntity[]> {
@@ -79,6 +81,7 @@ export class ReviewsService {
     const scoringKind: "fixed" | "range" | "expert" =
       item.categoryType === "manual" ? "expert" : (item.categoryType as "fixed" | "range" | "expert");
     let finalScore = body.score;
+    let scoringSource: "rules" | "proposed" | "reviewer" | null = null;
 
     if (scoringKind === "fixed") {
       const rules = item.subcategoryId
@@ -94,10 +97,12 @@ export class ReviewsService {
           );
         }
         finalScore = resolved;
+        scoringSource = "rules";
       } else if (finalScore !== undefined && Number.isFinite(finalScore)) {
-        // No metadata rule match: reviewer sets score explicitly.
+        scoringSource = "reviewer";
       } else if (item.proposedScore !== null && Number.isFinite(item.proposedScore)) {
         finalScore = item.proposedScore;
+        scoringSource = "proposed";
       } else {
         throw new ServiceError(
           400,
@@ -113,6 +118,7 @@ export class ReviewsService {
           "VALIDATION_ERROR",
         );
       }
+      scoringSource = "reviewer";
     }
 
     await this.assertValidItemScore(item, finalScore, scoringKind);
@@ -120,6 +126,15 @@ export class ReviewsService {
     if (submission.status === "submitted") {
       assertValidTransition("submitted", "review");
     }
+
+    this.log.info({
+      event: "scoring_applied",
+      submissionId,
+      itemId,
+      score: finalScore,
+      scoringKind,
+      source: scoringSource,
+    });
 
     return this.repository.reviewSubmissionItemLocked({
       submissionId,
