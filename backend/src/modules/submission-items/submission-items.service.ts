@@ -88,9 +88,7 @@ export class SubmissionItemsService {
     try {
       return await this.repository.createItem({
         submissionId: submission.id,
-        userId: submission.userId,
         categoryId: body.category_id,
-        categoryName,
         subcategoryId,
         title: body.title,
         description: body.description,

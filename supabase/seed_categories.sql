@@ -155,8 +155,10 @@ where c.name = v.cat
   );
 
 -- Category-level default scoring band (one row per category where useful)
-insert into public.category_scoring_rules (category_id, subcategory_id, min_score, max_score, notes)
-select c.id, null, c.min_score, c.max_score, 'Default band for category'
+insert into public.category_scoring_rules (category_id, subcategory_id, min_score, max_score, notes, type, requires_review)
+select c.id, null, c.min_score, c.max_score, 'Default band for category',
+  case when c.type::text = 'expert' then 'manual'::public.category_scoring_type else c.type end,
+  c.requires_review
 from public.categories c
 where c.name in (
   'internal_competitions',
@@ -175,8 +177,10 @@ and not exists (
 );
 
 -- Subcategory-specific illustrative scoring bands (adjust to your policy)
-insert into public.category_scoring_rules (category_id, subcategory_id, min_score, max_score, notes)
-select c.id, s.id, v.min_s, v.max_s, v.notes
+insert into public.category_scoring_rules (category_id, subcategory_id, min_score, max_score, notes, type, requires_review)
+select c.id, s.id, v.min_s, v.max_s, v.notes,
+  case when c.type::text = 'expert' then 'manual'::public.category_scoring_type else c.type end,
+  c.requires_review
 from public.categories c
 join public.category_subcategories s on s.category_id = c.id
 cross join (values
@@ -192,8 +196,10 @@ and not exists (
     and r.max_score = v.max_s
 );
 
-insert into public.category_scoring_rules (category_id, subcategory_id, min_score, max_score, notes)
-select c.id, s.id, v.min_s, v.max_s, v.notes
+insert into public.category_scoring_rules (category_id, subcategory_id, min_score, max_score, notes, type, requires_review)
+select c.id, s.id, v.min_s, v.max_s, v.notes,
+  case when c.type::text = 'expert' then 'manual'::public.category_scoring_type else c.type end,
+  c.requires_review
 from public.categories c
 join public.category_subcategories s on s.category_id = c.id
 cross join (values
@@ -209,8 +215,10 @@ and not exists (
     and r.notes = v.notes
 );
 
-insert into public.category_scoring_rules (category_id, subcategory_id, min_score, max_score, notes)
-select c.id, s.id, v.min_s, v.max_s, v.notes
+insert into public.category_scoring_rules (category_id, subcategory_id, min_score, max_score, notes, type, requires_review)
+select c.id, s.id, v.min_s, v.max_s, v.notes,
+  case when c.type::text = 'expert' then 'manual'::public.category_scoring_type else c.type end,
+  c.requires_review
 from public.categories c
 join public.category_subcategories s on s.category_id = c.id
 cross join (values
@@ -227,8 +235,10 @@ and not exists (
     and r.notes = v.notes
 );
 
-insert into public.category_scoring_rules (category_id, subcategory_id, min_score, max_score, notes)
-select c.id, s.id, v.min_s, v.max_s, v.notes
+insert into public.category_scoring_rules (category_id, subcategory_id, min_score, max_score, notes, type, requires_review)
+select c.id, s.id, v.min_s, v.max_s, v.notes,
+  case when c.type::text = 'expert' then 'manual'::public.category_scoring_type else c.type end,
+  c.requires_review
 from public.categories c
 join public.category_subcategories s on s.category_id = c.id
 cross join (values
@@ -244,8 +254,10 @@ and not exists (
     and r.notes = v.notes
 );
 
-insert into public.category_scoring_rules (category_id, subcategory_id, min_score, max_score, notes)
-select c.id, s.id, v.min_s, v.max_s, v.notes
+insert into public.category_scoring_rules (category_id, subcategory_id, min_score, max_score, notes, type, requires_review)
+select c.id, s.id, v.min_s, v.max_s, v.notes,
+  case when c.type::text = 'expert' then 'manual'::public.category_scoring_type else c.type end,
+  c.requires_review
 from public.categories c
 join public.category_subcategories s on s.category_id = c.id
 cross join (values
@@ -260,8 +272,10 @@ and not exists (
     and r.notes = v.notes
 );
 
-insert into public.category_scoring_rules (category_id, subcategory_id, min_score, max_score, notes)
-select c.id, s.id, v.min_s, v.max_s, v.notes
+insert into public.category_scoring_rules (category_id, subcategory_id, min_score, max_score, notes, type, requires_review)
+select c.id, s.id, v.min_s, v.max_s, v.notes,
+  case when c.type::text = 'expert' then 'manual'::public.category_scoring_type else c.type end,
+  c.requires_review
 from public.categories c
 join public.category_subcategories s on s.category_id = c.id
 cross join (values
@@ -276,8 +290,10 @@ and not exists (
     and r.notes = v.notes
 );
 
-insert into public.category_scoring_rules (category_id, subcategory_id, min_score, max_score, notes)
-select c.id, s.id, v.min_s, v.max_s, v.notes
+insert into public.category_scoring_rules (category_id, subcategory_id, min_score, max_score, notes, type, requires_review)
+select c.id, s.id, v.min_s, v.max_s, v.notes,
+  case when c.type::text = 'expert' then 'manual'::public.category_scoring_type else c.type end,
+  c.requires_review
 from public.categories c
 join public.category_subcategories s on s.category_id = c.id
 cross join (values

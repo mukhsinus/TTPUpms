@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { ServiceError } from "../../utils/service-error";
 import { normalizeMetadata } from "../scoring/scoring-metadata";
 
-type SubmissionStatus = "draft" | "submitted" | "under_review" | "approved" | "rejected" | "needs_revision";
+type SubmissionStatus = "draft" | "submitted" | "review" | "approved" | "rejected" | "needs_revision";
 type ItemDecision = "approved" | "rejected" | null;
 type ItemWorkflowStatus = "pending" | "approved" | "rejected";
 
@@ -12,7 +12,7 @@ interface SubmissionRow {
   status: SubmissionStatus;
   title: string;
   description: string | null;
-  total_points: string;
+  total_score: string;
   submitted_at: string | null;
   reviewed_at: string | null;
   created_at: string;
@@ -28,10 +28,8 @@ interface SubmissionItemRow {
   title: string;
   description: string | null;
   proposed_score: string;
-  reviewer_score: string | null;
   approved_score: string | null;
   reviewer_comment: string | null;
-  review_decision: ItemDecision;
   status: string;
   reviewed_by: string | null;
   reviewed_at: string | null;
@@ -92,7 +90,7 @@ function mapSubmission(row: SubmissionRow): ReviewSubmissionEntity {
     status: row.status,
     title: row.title,
     description: row.description,
-    totalPoints: Number(row.total_points),
+    totalPoints: Number(row.total_score),
     submittedAt: row.submitted_at,
     reviewedAt: row.reviewed_at,
     createdAt: row.created_at,
@@ -101,25 +99,21 @@ function mapSubmission(row: SubmissionRow): ReviewSubmissionEntity {
 }
 
 const submissionSelectColumns = `
-  id, user_id, status, title, description, total_points, submitted_at, reviewed_at, created_at, updated_at
+  id, user_id, status, title, description, total_score, submitted_at, reviewed_at, created_at, updated_at
 `;
 
 function mapItem(row: SubmissionItemRow): ReviewSubmissionItemEntity {
+  const workflowStatus = row.status as ItemWorkflowStatus;
   const approved =
     row.approved_score !== null && row.approved_score !== undefined
       ? Number(row.approved_score)
-      : row.reviewer_score === null
-        ? null
-        : Number(row.reviewer_score);
-
-  const workflowStatus: ItemWorkflowStatus =
-    row.status === "approved" || row.status === "rejected" || row.status === "pending"
-      ? row.status
-      : row.review_decision === "approved"
-        ? "approved"
-        : row.review_decision === "rejected"
-          ? "rejected"
-          : "pending";
+      : null;
+  const decision: ItemDecision =
+    workflowStatus === "approved"
+      ? "approved"
+      : workflowStatus === "rejected"
+        ? "rejected"
+        : null;
 
   return {
     id: row.id,
@@ -133,10 +127,10 @@ function mapItem(row: SubmissionItemRow): ReviewSubmissionItemEntity {
     title: row.title,
     description: row.description,
     proposedScore: Number(row.proposed_score),
-    reviewerScore: row.reviewer_score === null ? null : Number(row.reviewer_score),
+    reviewerScore: approved,
     approvedScore: approved,
     reviewerComment: row.reviewer_comment,
-    reviewDecision: row.review_decision,
+    reviewDecision: decision,
     status: workflowStatus,
     reviewedBy: row.reviewed_by,
     reviewedAt: row.reviewed_at,
@@ -148,16 +142,14 @@ function mapItem(row: SubmissionItemRow): ReviewSubmissionItemEntity {
 const submissionItemJoinedSelectColumns = `
   si.id,
   si.submission_id,
-  si.user_id,
-  si.category,
-  si.subcategory,
+  (SELECT s.user_id FROM submissions s WHERE s.id = si.submission_id LIMIT 1) AS user_id,
+  c.name AS category,
+  cs.slug AS subcategory,
   si.title,
   si.description,
   si.proposed_score,
-  si.reviewer_score,
   si.approved_score,
   si.reviewer_comment,
-  si.review_decision,
   si.status::text AS status,
   si.reviewed_by,
   si.reviewed_at,
@@ -171,16 +163,14 @@ const submissionItemJoinedSelectColumns = `
 const submissionItemReturningColumns = `
   submission_items.id,
   submission_items.submission_id,
-  submission_items.user_id,
-  submission_items.category,
-  submission_items.subcategory,
+  (SELECT s.user_id FROM submissions s WHERE s.id = submission_items.submission_id LIMIT 1) AS user_id,
+  (SELECT c.name FROM categories c WHERE c.id = submission_items.category_id LIMIT 1) AS category,
+  (SELECT cs.slug FROM category_subcategories cs WHERE cs.id = submission_items.subcategory_id LIMIT 1) AS subcategory,
   submission_items.title,
   submission_items.description,
   submission_items.proposed_score,
-  submission_items.reviewer_score,
   submission_items.approved_score,
   submission_items.reviewer_comment,
-  submission_items.review_decision,
   submission_items.status::text AS status,
   submission_items.reviewed_by,
   submission_items.reviewed_at,
@@ -200,7 +190,7 @@ export class ReviewsRepository {
       `
       SELECT ${submissionSelectColumns}
       FROM submissions
-      WHERE status IN ('submitted', 'under_review')
+      WHERE status IN ('submitted', 'review')
       ORDER BY created_at DESC
       `,
     );
@@ -257,6 +247,7 @@ export class ReviewsRepository {
       SELECT ${submissionItemJoinedSelectColumns}
       FROM submission_items si
       LEFT JOIN categories c ON c.id = si.category_id
+      LEFT JOIN category_subcategories cs ON cs.id = si.subcategory_id
       WHERE si.submission_id = $1
       ORDER BY si.created_at ASC
       `,
@@ -283,11 +274,10 @@ export class ReviewsRepository {
     const result = await this.app.db.query<{ min_score: string | null; max_score: string | null }>(
       `
       SELECT
-        COALESCE(c_by_id.min_score, c_by_name.min_score) AS min_score,
-        COALESCE(c_by_id.max_score, c_by_name.max_score) AS max_score
+        COALESCE(c.min_score, 0)::text AS min_score,
+        COALESCE(c.max_points, c.max_score, 0)::text AS max_score
       FROM submission_items si
-      LEFT JOIN categories c_by_id ON c_by_id.id = si.category_id
-      LEFT JOIN categories c_by_name ON si.category_id IS NULL AND c_by_name.name = si.category
+      LEFT JOIN categories c ON c.id = si.category_id
       WHERE si.id = $1
       `,
       [itemId],
@@ -310,6 +300,7 @@ export class ReviewsRepository {
       SELECT ${submissionItemJoinedSelectColumns}
       FROM submission_items si
       LEFT JOIN categories c ON c.id = si.category_id
+      LEFT JOIN category_subcategories cs ON cs.id = si.subcategory_id
       WHERE si.id = $1
       `,
       [itemId],
@@ -333,9 +324,9 @@ export class ReviewsRepository {
       `
       UPDATE submission_items
       SET
-        reviewer_score = $2,
+        approved_score = $2,
         reviewer_comment = $3,
-        review_decision = $4,
+        status = $4::public.submission_item_status,
         reviewed_by = $5,
         reviewed_at = NOW(),
         updated_at = NOW()
@@ -349,7 +340,7 @@ export class ReviewsRepository {
   }
 
   /**
-   * Atomically moves submitted → under_review (if still submitted) and records the item review.
+   * Atomically moves submitted → review (if still submitted) and records the item review.
    */
   async reviewItemPromotingFromSubmitted(input: {
     submissionId: string;
@@ -378,7 +369,7 @@ export class ReviewsRepository {
         throw new ServiceError(404, "Submission not found");
       }
 
-      if (rowStatus !== "submitted" && rowStatus !== "under_review") {
+      if (rowStatus !== "submitted" && rowStatus !== "review") {
         throw new ServiceError(
           409,
           `Submission in status "${rowStatus}" cannot be reviewed`,
@@ -392,7 +383,7 @@ export class ReviewsRepository {
           SET status = $2, updated_at = NOW()
           WHERE id = $1
           `,
-          [input.submissionId, "under_review"],
+          [input.submissionId, "review"],
         );
       }
 
@@ -400,9 +391,9 @@ export class ReviewsRepository {
         `
         UPDATE submission_items
         SET
-          reviewer_score = $2,
+          approved_score = $2,
           reviewer_comment = $3,
-          review_decision = $4,
+          status = $4::public.submission_item_status,
           reviewed_by = $5,
           reviewed_at = NOW(),
           updated_at = NOW()
@@ -438,7 +429,7 @@ export class ReviewsRepository {
       SELECT COUNT(*)::text AS count
       FROM submission_items
       WHERE submission_id = $1
-        AND review_decision IS NULL
+        AND status = 'pending'
       `,
       [submissionId],
     );
@@ -455,13 +446,13 @@ export class ReviewsRepository {
   }): Promise<void> {
     await this.app.db.query(
       `
-      INSERT INTO reviews (submission_id, reviewer_id, score, decision, feedback, reviewed_at)
+      INSERT INTO reviews (submission_id, reviewer_id, score, decision, comment, reviewed_at)
       VALUES ($1, $2, $3, $4, $5, NOW())
-      ON CONFLICT (submission_id, reviewer_id)
+      ON CONFLICT (submission_id, reviewer_id) WHERE submission_item_id IS NULL
       DO UPDATE
         SET score = EXCLUDED.score,
             decision = EXCLUDED.decision,
-            feedback = EXCLUDED.feedback,
+            comment = EXCLUDED.comment,
             reviewed_at = NOW(),
             updated_at = NOW()
       `,
@@ -491,13 +482,13 @@ export class ReviewsRepository {
   }
 
   /**
-   * Explicit submitted → under_review transition (does not set reviewed_at).
+   * Explicit submitted → review transition (does not set reviewed_at).
    */
   async startSubmissionReview(submissionId: string): Promise<ReviewSubmissionEntity> {
     const result = await this.app.db.query<SubmissionRow>(
       `
       UPDATE submissions
-      SET status = 'under_review', updated_at = NOW()
+      SET status = 'review', updated_at = NOW()
       WHERE id = $1 AND status = 'submitted'
       RETURNING ${submissionSelectColumns}
       `,

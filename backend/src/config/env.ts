@@ -60,6 +60,8 @@ const envSchema = z.object({
   SUPABASE_DB_URL: z.string().min(1).optional(),
   SUPABASE_PROJECT_URL: z.string().url("SUPABASE_PROJECT_URL must be a valid URL"),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1, "SUPABASE_SERVICE_ROLE_KEY is required"),
+  /** Comma-separated emails that must always resolve to `admin` in `public.users` on sign-in. */
+  ADMIN_EMAILS: z.string().optional().default(""),
 });
 
 const parsed = envSchema.safeParse(envInput);

@@ -13,7 +13,7 @@ export interface Category {
 export type SubmissionStatus =
   | "draft"
   | "submitted"
-  | "under_review"
+  | "review"
   | "approved"
   | "rejected"
   | "needs_revision";

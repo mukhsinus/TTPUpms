@@ -1,5 +1,9 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { parseAdminEmailSet, syncPublicUserRoleFromAuth } from "../auth/public-user-sync";
+import { env } from "../config/env";
 import { failure } from "../utils/http-response";
+
+const ADMIN_EMAIL_SET = parseAdminEmailSet(env.ADMIN_EMAILS);
 
 type Role = "student" | "reviewer" | "admin";
 
@@ -63,33 +67,26 @@ export async function authMiddleware(request: FastifyRequest, reply: FastifyRepl
 
   let role: Role;
   try {
-    const dbRes = await request.server.db.query<{ role: string }>(
-      `
-      SELECT role::text AS role
-      FROM public.users
-      WHERE id = $1
-      LIMIT 1
-      `,
-      [data.user.id],
-    );
-    const dbRole = dbRes.rows[0]?.role ? toRole(dbRes.rows[0].role) : null;
+    const { roleText } = await syncPublicUserRoleFromAuth(request.server.db, data.user, ADMIN_EMAIL_SET);
+    const dbRole = toRole(roleText);
     if (!dbRole) {
-      reply
-        .status(403)
-        .send(failure("User profile is missing in the database. Contact an administrator.", "PROFILE_INCOMPLETE", {}));
-      return;
+      request.log.warn(
+        { userId: data.user.id, roleText },
+        "public.users.role invalid after sync; falling back to student",
+      );
+      role = "student";
+    } else {
+      role = dbRole;
     }
 
-    if (jwtRoleParsed !== null && jwtRoleParsed !== dbRole) {
+    if (jwtRoleParsed !== null && jwtRoleParsed !== role) {
       request.log.warn(
-        { userId: data.user.id, jwtRole: jwtRoleParsed, dbRole },
+        { userId: data.user.id, jwtRole: jwtRoleParsed, dbRole: role },
         "JWT app_metadata.role does not match public.users.role; using database role only",
       );
     }
-
-    role = dbRole;
   } catch (err) {
-    request.log.error({ err, userId: data.user.id }, "Failed to load public.users.role");
+    request.log.error({ err, userId: data.user.id }, "Failed to sync public.users profile/role");
     reply.status(503).send(failure("Unable to verify user role.", "ROLE_LOOKUP_FAILED", {}));
     return;
   }

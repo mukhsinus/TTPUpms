@@ -4,7 +4,7 @@ import { normalizeMetadata } from "../scoring/scoring-metadata";
 interface SubmissionOwnerRow {
   id: string;
   user_id: string;
-  status: "draft" | "submitted" | "under_review" | "approved" | "rejected" | "needs_revision";
+  status: "draft" | "submitted" | "review" | "approved" | "rejected" | "needs_revision";
 }
 
 interface CategoryBoundsRow {
@@ -87,16 +87,31 @@ function mapItem(row: SubmissionItemRow): SubmissionItemEntity {
 }
 
 const itemSelectColumns = `
-  si.id, si.submission_id, si.user_id, si.category_id, si.category, si.subcategory, si.subcategory_id, si.metadata,
-  si.title, si.description,
-  si.proof_file_url, si.external_link, si.proposed_score, si.approved_score, si.status, si.reviewer_comment,
-  si.created_at, si.updated_at,
+  si.id,
+  si.submission_id,
+  (SELECT s.user_id FROM submissions s WHERE s.id = si.submission_id LIMIT 1) AS user_id,
+  si.category_id,
+  c.name AS category,
+  cs.slug AS subcategory,
+  si.subcategory_id,
+  si.metadata,
+  si.title,
+  si.description,
+  si.proof_file_url,
+  si.external_link,
+  si.proposed_score,
+  si.approved_score,
+  si.status,
+  si.reviewer_comment,
+  si.created_at,
+  si.updated_at,
   c.type::text AS category_type
 `;
 
 const itemFromJoin = `
   FROM submission_items si
   LEFT JOIN categories c ON c.id = si.category_id
+  LEFT JOIN category_subcategories cs ON cs.id = si.subcategory_id
 `;
 
 export class SubmissionItemsRepository {
@@ -140,7 +155,9 @@ export class SubmissionItemsRepository {
   async findCategoryBounds(categoryId: string): Promise<{ minScore: number; maxScore: number } | null> {
     const result = await this.app.db.query<CategoryBoundsRow>(
       `
-      SELECT min_score, max_score
+      SELECT
+        COALESCE(min_score, 0)::text AS min_score,
+        COALESCE(max_points, max_score, 0)::text AS max_score
       FROM categories
       WHERE id = $1
       `,
@@ -225,9 +242,7 @@ export class SubmissionItemsRepository {
 
   async createItem(input: {
     submissionId: string;
-    userId: string;
     categoryId: string;
-    categoryName: string;
     subcategoryId: string;
     title: string;
     description?: string;
@@ -240,9 +255,7 @@ export class SubmissionItemsRepository {
       `
       INSERT INTO submission_items (
         submission_id,
-        user_id,
         category_id,
-        category,
         subcategory_id,
         title,
         description,
@@ -252,14 +265,14 @@ export class SubmissionItemsRepository {
         metadata,
         status
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, 'pending')
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, 'pending')
       RETURNING
         submission_items.id,
         submission_items.submission_id,
-        submission_items.user_id,
+        (SELECT s.user_id FROM submissions s WHERE s.id = submission_items.submission_id LIMIT 1) AS user_id,
         submission_items.category_id,
-        submission_items.category,
-        submission_items.subcategory,
+        (SELECT c.name FROM categories c WHERE c.id = submission_items.category_id LIMIT 1) AS category,
+        (SELECT cs.slug FROM category_subcategories cs WHERE cs.id = submission_items.subcategory_id LIMIT 1) AS subcategory,
         submission_items.subcategory_id,
         submission_items.metadata,
         submission_items.title,
@@ -276,9 +289,7 @@ export class SubmissionItemsRepository {
       `,
       [
         input.submissionId,
-        input.userId,
         input.categoryId,
-        input.categoryName,
         input.subcategoryId,
         input.title,
         input.description ?? null,

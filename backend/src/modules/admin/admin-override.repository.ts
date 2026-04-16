@@ -4,7 +4,7 @@ import type { SubmissionStatus } from "../submissions/submissions.schema";
 interface SubmissionRow {
   id: string;
   user_id: string;
-  total_points: string;
+  total_score: string;
   status: SubmissionStatus;
 }
 
@@ -19,7 +19,7 @@ function mapSubmission(row: SubmissionRow): AdminSubmissionEntity {
   return {
     id: row.id,
     userId: row.user_id,
-    totalPoints: Number(row.total_points),
+    totalPoints: Number(row.total_score),
     status: row.status,
   };
 }
@@ -30,7 +30,7 @@ export class AdminOverrideRepository {
   async findSubmissionById(submissionId: string): Promise<AdminSubmissionEntity | null> {
     const result = await this.app.db.query<SubmissionRow>(
       `
-      SELECT id, user_id, total_points, status
+      SELECT id, user_id, total_score, status
       FROM submissions
       WHERE id = $1
       `,
@@ -48,9 +48,9 @@ export class AdminOverrideRepository {
     const result = await this.app.db.query<SubmissionRow>(
       `
       UPDATE submissions
-      SET total_points = $2, updated_at = NOW()
+      SET total_score = $2, updated_at = NOW()
       WHERE id = $1
-      RETURNING id, user_id, total_points, status
+      RETURNING id, user_id, total_score, status
       `,
       [submissionId, totalScore],
     );
@@ -73,7 +73,7 @@ export class AdminOverrideRepository {
         END,
         updated_at = NOW()
       WHERE id = $1
-      RETURNING id, user_id, total_points, status
+      RETURNING id, user_id, total_score, status
       `,
       [submissionId, status],
     );

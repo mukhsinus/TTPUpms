@@ -120,7 +120,7 @@ export class ReviewsService {
 
     let reviewed: ReviewSubmissionItemEntity;
     if (submission.status === "submitted") {
-      assertValidTransition("submitted", "under_review");
+      assertValidTransition("submitted", "review");
       reviewed = await this.repository.reviewItemPromotingFromSubmitted({
         submissionId,
         itemId,
@@ -149,7 +149,7 @@ export class ReviewsService {
     if (!submission) {
       throw new ServiceError(404, "Submission not found");
     }
-    assertValidTransition(submission.status, "under_review");
+    assertValidTransition(submission.status, "review");
     return this.repository.startSubmissionReview(submissionId);
   }
 
@@ -160,10 +160,10 @@ export class ReviewsService {
   ): Promise<ReviewSubmissionEntity> {
     const submission = await this.assertReviewerAccess(user, submissionId);
 
-    if (submission.status !== "under_review") {
+    if (submission.status !== "review") {
       throw new ServiceError(
         409,
-        "Submission review can only be completed while status is under_review",
+        'Submission review can only be completed while status is "review"',
       );
     }
 

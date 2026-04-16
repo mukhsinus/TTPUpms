@@ -29,20 +29,19 @@ function round2(value: number): number {
 interface SubmissionItemScoreRow {
   id: string;
   category: string;
-  reviewer_score: string | null;
   approved_score: string | null;
-  review_decision: "approved" | "rejected" | null;
+  status: "pending" | "approved" | "rejected";
 }
 
 interface CategoryCapRow {
   name: string;
-  max_score: string;
+  max_points: string;
 }
 
 /**
- * Computes submission `total_points` as the sum of each approved item's `approved_score`
- * (falls back to `reviewer_score` when needed), applies per-category caps from
- * `categories.max_score`, deduplicates by item id, and persists `submissions.total_points`.
+ * Computes submission `total_score` as the sum of each approved item's `approved_score`,
+ * applies per-category caps from `categories.max_points`, deduplicates by item id,
+ * and persists `submissions.total_score` (also maintained by DB triggers).
  */
 export class ScoringService {
   constructor(private readonly app: FastifyInstance) {}
@@ -69,16 +68,14 @@ export class ScoringService {
       }
       seenItemIds.add(item.id);
 
-      if (item.review_decision !== "approved") {
+      if (item.status !== "approved") {
         continue;
       }
 
       const approvedPoints =
         item.approved_score !== null && item.approved_score !== undefined
           ? Number(item.approved_score)
-          : item.reviewer_score === null
-            ? null
-            : Number(item.reviewer_score);
+          : null;
 
       if (approvedPoints === null || Number.isNaN(approvedPoints) || approvedPoints < 0) {
         throw new ScoringServiceError(
@@ -114,7 +111,7 @@ export class ScoringService {
 
     await this.updateSubmissionTotalScore(submissionId, totalScore);
 
-    const countedItems = items.filter((i) => i.review_decision === "approved").length;
+    const countedItems = items.filter((i) => i.status === "approved").length;
 
     return {
       submissionId,
@@ -127,14 +124,14 @@ export class ScoringService {
   private async loadCategoryCaps(): Promise<Map<string, number>> {
     const result = await this.app.db.query<CategoryCapRow>(
       `
-      SELECT name, max_score
+      SELECT name, max_points
       FROM categories
       `,
     );
 
     const map = new Map<string, number>();
     for (const row of result.rows) {
-      map.set(row.name, Number(row.max_score));
+      map.set(row.name, Number(row.max_points));
     }
     return map;
   }
@@ -155,9 +152,14 @@ export class ScoringService {
   private async findSubmissionItems(submissionId: string): Promise<SubmissionItemScoreRow[]> {
     const result = await this.app.db.query<SubmissionItemScoreRow>(
       `
-      SELECT id, category, reviewer_score, approved_score, review_decision
-      FROM submission_items
-      WHERE submission_id = $1
+      SELECT
+        si.id,
+        c.name AS category,
+        si.approved_score,
+        si.status::text AS status
+      FROM submission_items si
+      LEFT JOIN public.categories c ON c.id = si.category_id
+      WHERE si.submission_id = $1
       ORDER BY created_at ASC
       `,
       [submissionId],
@@ -170,7 +172,7 @@ export class ScoringService {
     await this.app.db.query(
       `
       UPDATE submissions
-      SET total_points = $2, updated_at = NOW()
+      SET total_score = $2, updated_at = NOW()
       WHERE id = $1
       `,
       [submissionId, totalScore],

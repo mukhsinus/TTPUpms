@@ -4,7 +4,7 @@ import type { SubmissionStatus } from "../../types";
 const labels: Record<SubmissionStatus, string> = {
   draft: "Draft",
   submitted: "Submitted",
-  under_review: "Under review",
+  review: "Under review",
   approved: "Approved",
   rejected: "Rejected",
   needs_revision: "Needs revision",

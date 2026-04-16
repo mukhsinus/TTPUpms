@@ -11,7 +11,7 @@ interface RequireRoleProps {
 
 /**
  * Renders children only when the logged-in user has one of the allowed roles.
- * Assumes a parent route already enforced authentication.
+ * Uses `api.getSessionUser().role`, which prefers the server role from `/api/auth/me` over JWT claims.
  */
 export function RequireRole({ roles, children, redirectTo = "/dashboard" }: RequireRoleProps): ReactElement {
   const user = api.getSessionUser();

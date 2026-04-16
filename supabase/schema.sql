@@ -17,7 +17,7 @@ begin
     create type public.submission_status as enum (
       'draft',
       'submitted',
-      'under_review',
+      'review',
       'approved',
       'rejected',
       'needs_revision'
@@ -76,6 +76,7 @@ create table if not exists public.users (
   full_name text,
   telegram_id bigint unique,
   telegram_username text,
+  faculty text,
   role public.user_role not null default 'student',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -125,7 +126,8 @@ create table if not exists public.submissions (
   user_id uuid not null references public.users(id) on delete cascade,
   title text not null,
   description text,
-  total_points numeric(10,2) not null default 0 check (total_points >= 0),
+  total_score numeric(10,2) not null default 0 check (total_score >= 0),
+  period text,
   status public.submission_status not null default 'draft',
   submitted_at timestamptz,
   reviewed_at timestamptz,
@@ -136,76 +138,74 @@ create table if not exists public.submissions (
 create table if not exists public.submission_items (
   id uuid primary key default gen_random_uuid(),
   submission_id uuid not null references public.submissions(id) on delete cascade,
-  user_id uuid not null references public.users(id) on delete cascade,
-  category text not null,
-  subcategory text,
   activity_date date,
   title text not null,
   description text,
   proof_file_url text,
   proposed_score numeric(10,2) not null default 0 check (proposed_score >= 0),
-  reviewer_score numeric(10,2) check (reviewer_score is null or reviewer_score >= 0),
   reviewer_comment text,
-  review_decision public.item_review_decision,
   reviewed_by uuid references public.users(id) on delete set null,
   reviewed_at timestamptz,
-  points numeric(10,2) not null default 0 check (points >= 0),
+  external_link text,
+  approved_score numeric(10,2) check (approved_score is null or approved_score >= 0),
+  status public.submission_item_status not null default 'pending',
+  metadata jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
-alter table public.submission_items
-  add column if not exists subcategory text,
-  add column if not exists proof_file_url text,
-  add column if not exists proposed_score numeric(10,2) not null default 0,
-  add column if not exists reviewer_score numeric(10,2),
-  add column if not exists reviewer_comment text,
-  add column if not exists review_decision public.item_review_decision,
-  add column if not exists reviewed_by uuid references public.users(id) on delete set null,
-  add column if not exists reviewed_at timestamptz;
-
 create table if not exists public.files (
   id uuid primary key default gen_random_uuid(),
-  submission_id uuid not null references public.submissions(id) on delete cascade,
+  submission_id uuid references public.submissions(id) on delete cascade,
   submission_item_id uuid references public.submission_items(id) on delete set null,
   user_id uuid not null references public.users(id) on delete cascade,
   bucket text not null default 'submission-files',
   storage_path text not null,
   original_filename text not null,
   mime_type text,
+  file_url text,
+  file_type text generated always as (mime_type) stored,
   size_bytes bigint check (size_bytes is null or size_bytes >= 0),
+  size bigint generated always as (size_bytes) stored,
   checksum_sha256 text,
+  file_hash text generated always as (checksum_sha256) stored,
   created_at timestamptz not null default now(),
+  uploaded_at timestamptz generated always as (created_at) stored,
   updated_at timestamptz not null default now(),
   unique (bucket, storage_path)
 );
 
 create table if not exists public.reviews (
   id uuid primary key default gen_random_uuid(),
-  submission_id uuid not null references public.submissions(id) on delete cascade,
-  user_id uuid not null references public.users(id) on delete cascade,
+  submission_id uuid references public.submissions(id) on delete cascade,
+  submission_item_id uuid references public.submission_items(id) on delete cascade,
+  user_id uuid references public.users(id) on delete cascade,
   reviewer_id uuid not null references public.users(id) on delete restrict,
   score numeric(10,2) check (score is null or score >= 0),
   decision public.review_decision,
-  feedback text,
+  comment text,
   reviewed_at timestamptz,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  unique (submission_id, reviewer_id)
+  updated_at timestamptz not null default now()
 );
 
 create table if not exists public.audit_logs (
   id uuid primary key default gen_random_uuid(),
   user_id uuid references public.users(id) on delete set null,
   entity_table text not null,
+  entity_type text generated always as (entity_table) stored,
   entity_id uuid not null,
   action text not null,
+  performed_by uuid generated always as (user_id) stored,
   target_user_id uuid references public.users(id) on delete set null,
   old_values jsonb,
   new_values jsonb,
+  old_value jsonb generated always as (old_values) stored,
+  new_value jsonb generated always as (new_values) stored,
   request_ip inet,
   user_agent text,
   created_at timestamptz not null default now(),
+  "timestamp" timestamptz generated always as (created_at) stored,
   updated_at timestamptz not null default now()
 );
 
@@ -228,14 +228,13 @@ create table if not exists public.idempotency_keys (
 create table if not exists public.categories (
   id uuid primary key default gen_random_uuid(),
   name text not null unique,
-  type public.category_scoring_type not null,
-  min_score numeric(10, 2) not null default 0,
-  max_score numeric(10, 2) not null,
+  type public.category_scoring_type,
+  min_score numeric(10, 2),
+  max_score numeric(10, 2),
+  max_points numeric(10, 2) not null default 0,
   description text,
-  requires_review boolean not null default true,
-  created_at timestamptz not null default now(),
-  check (min_score <= max_score),
-  check (min_score >= 0)
+  requires_review boolean,
+  created_at timestamptz not null default now()
 );
 
 create table if not exists public.category_subcategories (
@@ -252,8 +251,10 @@ create table if not exists public.category_scoring_rules (
   id uuid primary key default gen_random_uuid(),
   category_id uuid not null references public.categories(id) on delete cascade,
   subcategory_id uuid references public.category_subcategories(id) on delete cascade,
+  type public.category_scoring_type not null,
   min_score numeric(10, 2) not null,
   max_score numeric(10, 2) not null,
+  requires_review boolean not null default true,
   notes text,
   created_at timestamptz not null default now(),
   check (min_score <= max_score),
@@ -284,74 +285,49 @@ create trigger trg_category_scoring_rules_validate_subcategory
 before insert or update of category_id, subcategory_id on public.category_scoring_rules
 for each row execute function public.enforce_scoring_rule_subcategory_category();
 
--- submission_items: category FK and review-derived fields (runs after categories exist)
+-- submission_items: category FKs (after categories / subcategories exist)
 alter table public.submission_items
-  add column if not exists category_id uuid references public.categories(id) on delete set null,
-  add column if not exists external_link text,
-  add column if not exists approved_score numeric(10, 2) check (approved_score is null or approved_score >= 0),
-  add column if not exists status public.submission_item_status not null default 'pending';
+  add column if not exists category_id uuid references public.categories(id) on delete restrict,
+  add column if not exists subcategory_id uuid references public.category_subcategories(id) on delete restrict;
 
-create or replace function public.submission_items_sync_status_and_approved_score()
+create or replace function public.submission_items_default_approved_from_proposed()
 returns trigger
 language plpgsql
 as $$
 begin
-  if tg_op = 'UPDATE' then
-    if new.reviewer_score is distinct from old.reviewer_score then
-      new.approved_score := new.reviewer_score;
-    end if;
-    if new.review_decision is distinct from old.review_decision then
-      if new.review_decision = 'approved' then
-        new.status := 'approved'::public.submission_item_status;
-      elsif new.review_decision = 'rejected' then
-        new.status := 'rejected'::public.submission_item_status;
-      else
-        new.status := 'pending'::public.submission_item_status;
-      end if;
-    end if;
+  if new.approved_score is null then
+    new.approved_score := new.proposed_score;
   end if;
   return new;
 end;
 $$;
 
-drop trigger if exists trg_submission_items_sync_review_derived on public.submission_items;
-create trigger trg_submission_items_sync_review_derived
-before update on public.submission_items
-for each row execute function public.submission_items_sync_status_and_approved_score();
+drop trigger if exists trg_submission_items_default_approved on public.submission_items;
+create trigger trg_submission_items_default_approved
+before insert on public.submission_items
+for each row execute function public.submission_items_default_approved_from_proposed();
 
 -- -----------------------------
 -- Data integrity helpers
 -- -----------------------------
-create or replace function public.sync_submission_item_user_id()
+create or replace function public.sync_file_user_id_v2()
 returns trigger
 language plpgsql
 as $$
 begin
-  select s.user_id into new.user_id
-  from public.submissions s
-  where s.id = new.submission_id;
-
-  if new.user_id is null then
-    raise exception 'submission_id % does not exist', new.submission_id;
+  if new.submission_item_id is not null then
+    select s.user_id into new.user_id
+    from public.submission_items si
+    join public.submissions s on s.id = si.submission_id
+    where si.id = new.submission_item_id;
+  elsif new.submission_id is not null then
+    select s.user_id into new.user_id
+    from public.submissions s
+    where s.id = new.submission_id;
   end if;
-
-  return new;
-end;
-$$;
-
-create or replace function public.sync_file_user_id()
-returns trigger
-language plpgsql
-as $$
-begin
-  select s.user_id into new.user_id
-  from public.submissions s
-  where s.id = new.submission_id;
-
   if new.user_id is null then
-    raise exception 'submission_id % does not exist', new.submission_id;
+    raise exception 'files row must reference submission_id or submission_item_id';
   end if;
-
   return new;
 end;
 $$;
@@ -369,6 +345,25 @@ begin
     raise exception 'submission_id % does not exist', new.submission_id;
   end if;
 
+  return new;
+end;
+$$;
+
+create or replace function public.enforce_reviews_submission_item_matches_submission()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.submission_item_id is not null then
+    if not exists (
+      select 1
+      from public.submission_items si
+      where si.id = new.submission_item_id
+        and si.submission_id = new.submission_id
+    ) then
+      raise exception 'reviews.submission_item_id must reference an item on reviews.submission_id';
+    end if;
+  end if;
   return new;
 end;
 $$;
@@ -411,20 +406,20 @@ create trigger trg_idempotency_keys_set_updated_at
 before update on public.idempotency_keys
 for each row execute function public.set_updated_at();
 
-drop trigger if exists trg_submission_items_sync_user_id on public.submission_items;
-create trigger trg_submission_items_sync_user_id
-before insert or update of submission_id on public.submission_items
-for each row execute function public.sync_submission_item_user_id();
-
 drop trigger if exists trg_files_sync_user_id on public.files;
 create trigger trg_files_sync_user_id
-before insert or update of submission_id on public.files
-for each row execute function public.sync_file_user_id();
+before insert or update of submission_id, submission_item_id on public.files
+for each row execute function public.sync_file_user_id_v2();
 
 drop trigger if exists trg_reviews_sync_user_id on public.reviews;
 create trigger trg_reviews_sync_user_id
 before insert or update of submission_id on public.reviews
 for each row execute function public.sync_review_user_id();
+
+drop trigger if exists trg_reviews_validate_submission_item on public.reviews;
+create trigger trg_reviews_validate_submission_item
+before insert or update of submission_id, submission_item_id on public.reviews
+for each row execute function public.enforce_reviews_submission_item_matches_submission();
 
 -- -----------------------------
 -- Indexes
@@ -441,15 +436,16 @@ create index if not exists idx_submissions_duplicate_check
   on public.submissions(user_id, lower(title), coalesce(description, ''));
 
 create index if not exists idx_submission_items_submission_id on public.submission_items(submission_id);
-create index if not exists idx_submission_items_submission_review_decision
-  on public.submission_items(submission_id, review_decision);
-create index if not exists idx_submission_items_user_id on public.submission_items(user_id);
-create index if not exists idx_submission_items_user_created_at
-  on public.submission_items(user_id, created_at desc);
-create index if not exists idx_submission_items_review_decision
-  on public.submission_items(review_decision);
 create index if not exists idx_submission_items_category_id on public.submission_items(category_id);
 create index if not exists idx_submission_items_status on public.submission_items(submission_id, status);
+
+create unique index if not exists uq_submission_items_submission_category_subcat_id_title
+  on public.submission_items (
+    submission_id,
+    category_id,
+    subcategory_id,
+    lower(btrim(title))
+  );
 
 create index if not exists idx_files_submission_id on public.files(submission_id);
 create index if not exists idx_files_submission_item_id on public.files(submission_item_id);
@@ -461,9 +457,18 @@ create index if not exists idx_files_user_submission_item_checksum
 create index if not exists idx_files_user_submission_item_filename
   on public.files(user_id, submission_id, submission_item_id, original_filename);
 
+create unique index if not exists uq_files_file_hash_not_null
+  on public.files (file_hash)
+  where file_hash is not null;
+
 create index if not exists idx_reviews_submission_id on public.reviews(submission_id);
+create index if not exists idx_reviews_submission_item_id on public.reviews(submission_item_id);
 create index if not exists idx_reviews_reviewer_id on public.reviews(reviewer_id);
 create index if not exists idx_reviews_user_id on public.reviews(user_id);
+
+create unique index if not exists uq_reviews_submission_item_reviewer
+  on public.reviews (submission_item_id, reviewer_id)
+  where submission_item_id is not null;
 
 create index if not exists idx_audit_logs_user_id_created_at
   on public.audit_logs(user_id, created_at desc);
@@ -566,7 +571,10 @@ drop policy if exists submission_items_select_owner_reviewer_admin on public.sub
 create policy submission_items_select_owner_reviewer_admin on public.submission_items
 for select
 using (
-  user_id = auth.uid()
+  exists (
+    select 1 from public.submissions s
+    where s.id = submission_items.submission_id and s.user_id = auth.uid()
+  )
   or public.current_app_role() = 'admin'
   or (
     public.current_app_role() = 'reviewer'
@@ -583,23 +591,41 @@ drop policy if exists submission_items_insert_owner_or_admin on public.submissio
 create policy submission_items_insert_owner_or_admin on public.submission_items
 for insert
 with check (
-  user_id = auth.uid() or public.current_app_role() = 'admin'
+  exists (
+    select 1 from public.submissions s
+    where s.id = submission_items.submission_id and s.user_id = auth.uid()
+  )
+  or public.current_app_role() = 'admin'
 );
 
 drop policy if exists submission_items_update_owner_or_admin on public.submission_items;
 create policy submission_items_update_owner_or_admin on public.submission_items
 for update
 using (
-  user_id = auth.uid() or public.current_app_role() = 'admin'
+  exists (
+    select 1 from public.submissions s
+    where s.id = submission_items.submission_id and s.user_id = auth.uid()
+  )
+  or public.current_app_role() = 'admin'
 )
 with check (
-  user_id = auth.uid() or public.current_app_role() = 'admin'
+  exists (
+    select 1 from public.submissions s
+    where s.id = submission_items.submission_id and s.user_id = auth.uid()
+  )
+  or public.current_app_role() = 'admin'
 );
 
 drop policy if exists submission_items_delete_owner_or_admin on public.submission_items;
 create policy submission_items_delete_owner_or_admin on public.submission_items
 for delete
-using (user_id = auth.uid() or public.current_app_role() = 'admin');
+using (
+  exists (
+    select 1 from public.submissions s
+    where s.id = submission_items.submission_id and s.user_id = auth.uid()
+  )
+  or public.current_app_role() = 'admin'
+);
 
 -- FILES
 drop policy if exists files_select_owner_reviewer_admin on public.files;

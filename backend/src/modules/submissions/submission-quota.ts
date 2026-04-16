@@ -2,7 +2,7 @@
 export const ACTIVE_SUBMISSION_STATUSES = [
   "draft",
   "submitted",
-  "under_review",
+  "review",
   "needs_revision",
 ] as const;
 

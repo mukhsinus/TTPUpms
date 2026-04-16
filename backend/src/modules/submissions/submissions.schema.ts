@@ -3,7 +3,7 @@ import { z } from "zod";
 export const submissionStatusSchema = z.enum([
   "draft",
   "submitted",
-  "under_review",
+  "review",
   "approved",
   "rejected",
   "needs_revision",

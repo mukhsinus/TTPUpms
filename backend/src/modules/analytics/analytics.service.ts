@@ -51,13 +51,13 @@ export class AnalyticsService {
         u.full_name,
         to_jsonb(u)->>'telegram_username' AS telegram_username,
         u.telegram_id::text AS telegram_id,
-        COALESCE(SUM(s.total_points), 0)::text AS approved_points,
+        COALESCE(SUM(s.total_score), 0)::text AS approved_points,
         COUNT(*)::text AS approved_submissions
       FROM submissions s
       INNER JOIN users u ON u.id = s.user_id
       WHERE s.status = 'approved'
       GROUP BY s.user_id, u.full_name, to_jsonb(u)->>'telegram_username', u.telegram_id
-      ORDER BY COALESCE(SUM(s.total_points), 0) DESC
+      ORDER BY COALESCE(SUM(s.total_score), 0) DESC
       LIMIT $1
       `,
       [limit],
@@ -77,16 +77,17 @@ export class AnalyticsService {
     const result = await this.app.db.query<ScoreByCategoryRow>(
       `
       SELECT
-        si.category,
-        COALESCE(SUM(COALESCE(si.approved_score, si.reviewer_score)), 0)::text AS approved_points,
+        c.name AS category,
+        COALESCE(SUM(si.approved_score), 0)::text AS approved_points,
         COUNT(*)::text AS approved_items
       FROM submission_items si
       INNER JOIN submissions s ON s.id = si.submission_id
-      WHERE si.review_decision = 'approved'
+      INNER JOIN public.categories c ON c.id = si.category_id
+      WHERE si.status = 'approved'
         AND ($1::timestamptz IS NULL OR s.created_at >= $1::timestamptz)
         AND ($2::timestamptz IS NULL OR s.created_at <= $2::timestamptz)
-      GROUP BY si.category
-      ORDER BY COALESCE(SUM(COALESCE(si.approved_score, si.reviewer_score)), 0) DESC
+      GROUP BY c.name
+      ORDER BY COALESCE(SUM(si.approved_score), 0) DESC
       `,
       [from ?? null, to ?? null],
     );

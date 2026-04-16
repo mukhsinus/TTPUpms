@@ -5,6 +5,8 @@ import { normalizeRole, type AppRole } from "./rbac";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? import.meta.env.VITE_API_BASE_URL ?? "";
 const AUTH_TOKEN_KEY = "upms_admin_token";
+/** Server `public.users.role` after login — source of truth (JWT app_metadata is ignored for RBAC UI). */
+const AUTH_ROLE_KEY = "upms_session_role";
 
 /** Treat JWT as expired this many ms before `exp` to avoid edge 401s from clock skew. */
 const JWT_EXPIRY_SKEW_MS = 60_000;
@@ -32,6 +34,12 @@ export interface SessionUser {
   email: string | null;
   role: AppRole;
   fullName: string | null;
+}
+
+interface AuthMePayload {
+  userId: string;
+  email: string | null;
+  role: string;
 }
 
 /** Response from POST /api/files/upload (and POST /files/upload). */
@@ -103,6 +111,35 @@ function setAuthToken(token: string): void {
   localStorage.setItem(AUTH_TOKEN_KEY, token);
 }
 
+function setSessionRoleFromServer(role: string): void {
+  try {
+    localStorage.setItem(AUTH_ROLE_KEY, normalizeRole(role));
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearSessionRole(): void {
+  try {
+    localStorage.removeItem(AUTH_ROLE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+function getStoredServerRole(): AppRole | null {
+  try {
+    const raw = localStorage.getItem(AUTH_ROLE_KEY);
+    return raw ? normalizeRole(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function shouldHydrateSessionRole(): boolean {
+  return sessionIsValid() && getStoredServerRole() === null;
+}
+
 function getTokenExpiryMs(token: string): number | null {
   const payload = decodeJwtPayload(token);
   if (!payload || typeof payload.exp !== "number") return null;
@@ -130,6 +167,7 @@ function invalidateSessionAndRedirect(): void {
   sessionRedirectInProgress = true;
   try {
     localStorage.removeItem(AUTH_TOKEN_KEY);
+    localStorage.removeItem(AUTH_ROLE_KEY);
   } catch {
     /* ignore */
   }
@@ -200,7 +238,7 @@ async function requestResult<T>(
       return { data: null, error: "Unauthorized. Please login again.", statusCode: 401 };
     }
     if (response.status === 403) {
-      return { data: null, error: "Forbidden. You do not have access to this action.", statusCode: 403 };
+      return { data: null, error: message, statusCode: 403 };
     }
     return { data: null, error: message, statusCode: response.status };
   }
@@ -237,6 +275,7 @@ export const api = {
   logout(): void {
     sessionRedirectInProgress = false;
     localStorage.removeItem(AUTH_TOKEN_KEY);
+    clearSessionRole();
   },
 
   getSessionUser(): SessionUser | null {
@@ -246,15 +285,15 @@ export const api = {
     const payload = decodeJwtPayload(token);
     if (!payload) return null;
 
-    const appMetadata = (payload.app_metadata as Record<string, unknown> | undefined) ?? {};
     const userMetadata = (payload.user_metadata as Record<string, unknown> | undefined) ?? {};
-
+    const appMetadata = (payload.app_metadata as Record<string, unknown> | undefined) ?? {};
     const rawRole = typeof appMetadata.role === "string" ? appMetadata.role : "student";
+    const serverRole = getStoredServerRole();
 
     return {
       userId: typeof payload.sub === "string" ? payload.sub : null,
       email: typeof payload.email === "string" ? payload.email : null,
-      role: normalizeRole(rawRole),
+      role: serverRole ?? normalizeRole(rawRole),
       fullName:
         typeof userMetadata.full_name === "string"
           ? userMetadata.full_name
@@ -264,19 +303,43 @@ export const api = {
     };
   },
 
+  /** Fetches `public.users.role` from the API and stores it for `getSessionUser` / RequireRole. */
+  async syncSessionRoleFromServer(): Promise<void> {
+    if (!sessionIsValid()) {
+      return;
+    }
+    const result = await requestResult<AuthMePayload>(
+      "/api/auth/me",
+      { method: "GET" },
+      undefined,
+      { skipUnauthorizedRedirect: true },
+    );
+    if (result.data?.role) {
+      setSessionRoleFromServer(result.data.role);
+    }
+  },
+
+  needsSessionRoleHydration(): boolean {
+    return shouldHydrateSessionRole();
+  },
+
   async loginWithCredentials(email: string, password: string): Promise<void> {
     const token = await signInWithSupabasePassword(email, password);
-    const result = await requestResult<Submission[]>(
-      "/api/submissions",
+    const me = await requestResult<AuthMePayload>(
+      "/api/auth/me",
       { method: "GET" },
       token,
       { skipUnauthorizedRedirect: true },
     );
-    if (result.error) {
-      throw new ApiError(result.error, result.statusCode);
+    if (me.error) {
+      throw new ApiError(me.error, me.statusCode);
+    }
+    if (!me.data?.role) {
+      throw new ApiError("Invalid auth profile response", 500);
     }
 
     setAuthToken(token);
+    setSessionRoleFromServer(me.data.role);
   },
 
   async getDashboardStats(): Promise<{
@@ -286,7 +349,7 @@ export const api = {
     rejected: number;
   }> {
     const submissions = await request<Submission[]>("/api/submissions");
-    const pending = submissions.filter((item) => item.status === "submitted" || item.status === "under_review").length;
+    const pending = submissions.filter((item) => item.status === "submitted" || item.status === "review").length;
     const approved = submissions.filter((item) => item.status === "approved").length;
     const rejected = submissions.filter((item) => item.status === "rejected").length;
 
@@ -363,7 +426,7 @@ export const api = {
     });
   },
 
-  /** POST /api/reviews/submissions/:id/start-review — submitted → under_review. */
+  /** POST /api/reviews/submissions/:id/start-review — submitted → review. */
   startSubmissionReview(submissionId: string): Promise<Submission> {
     return request<Submission>(`/api/reviews/submissions/${submissionId}/start-review`, {
       method: "POST",
@@ -371,7 +434,7 @@ export const api = {
     });
   },
 
-  /** POST /api/reviews/submissions/:id/finalize — alias of /complete; under_review → outcome. */
+  /** POST /api/reviews/submissions/:id/finalize — alias of /complete; review → outcome. */
   finalizeSubmissionReview(input: {
     submissionId: string;
     decision: "approved" | "rejected" | "needs_revision";

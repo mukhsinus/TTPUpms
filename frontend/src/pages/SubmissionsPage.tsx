@@ -114,7 +114,7 @@ export function SubmissionsPage(): ReactElement {
           <select className="ui-input" value={status} onChange={(event) => setStatus(event.target.value)}>
             <option value="">All statuses</option>
             <option value="submitted">Submitted</option>
-            <option value="under_review">Under Review</option>
+            <option value="review">Under Review</option>
             <option value="approved">Approved</option>
             <option value="rejected">Rejected</option>
             <option value="needs_revision">Needs Revision</option>

@@ -345,9 +345,7 @@ export class BotApiService {
         `
         INSERT INTO submission_items (
           submission_id,
-          user_id,
           category_id,
-          category,
           subcategory_id,
           title,
           description,
@@ -357,14 +355,12 @@ export class BotApiService {
           metadata,
           status
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, 'pending')
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, 'pending')
         RETURNING id
         `,
         [
           input.submissionId,
-          user.id,
           input.categoryId,
-          categoryRow.name,
           subcategoryId,
           input.title,
           input.description,
@@ -580,23 +576,21 @@ export class BotApiService {
         `
         INSERT INTO submission_items (
           submission_id,
-          user_id,
           category_id,
-          category,
           subcategory_id,
           title,
           description,
           proof_file_url,
+          external_link,
           proposed_score,
-          metadata
+          metadata,
+          status
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
+        VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, $8::jsonb, 'pending')
         `,
         [
           submissionId,
-          user.id,
           input.categoryId,
-          categoryRow.name,
           subcategoryId,
           input.title,
           input.description,
@@ -840,23 +834,21 @@ export class BotApiService {
         `
         INSERT INTO submission_items (
           submission_id,
-          user_id,
           category_id,
-          category,
           subcategory_id,
           title,
           description,
           proof_file_url,
+          external_link,
           proposed_score,
-          metadata
+          metadata,
+          status
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
+        VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, $8::jsonb, 'pending')
         `,
         [
           submissionId,
-          user.id,
           categoryRow.id,
-          categoryRow.name,
           defaultSubId,
           `Achievement: ${input.category}`,
           input.details,
@@ -888,7 +880,7 @@ export class BotApiService {
     const user = await this.findOrCreateUserByTelegramId(telegramId);
     const result = await this.app.db.query<SubmissionRow>(
       `
-      SELECT id, title, status, total_points::text AS "totalPoints", created_at AS "createdAt"
+      SELECT id, title, status, total_score::text AS "totalPoints", created_at AS "createdAt"
       FROM submissions
       WHERE user_id = $1
       ORDER BY created_at DESC
@@ -904,7 +896,7 @@ export class BotApiService {
     const user = await this.findOrCreateUserByTelegramId(telegramId);
     const result = await this.app.db.query<{ total: string }>(
       `
-      SELECT COALESCE(SUM(total_points), 0)::text AS total
+      SELECT COALESCE(SUM(total_score), 0)::text AS total
       FROM submissions
       WHERE user_id = $1
         AND status = 'approved'

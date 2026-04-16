@@ -444,7 +444,7 @@ export function SubmissionDetailPage(): ReactElement {
                 </Button>
               </div>
             ) : null}
-            {submission.status === "under_review" ? (
+            {submission.status === "review" ? (
               <div className="workflow-block workflow-finalize">
                 <p className="muted workflow-hint">All items must be reviewed before you can finalize.</p>
                 <label className="item-review-field">
@@ -478,7 +478,7 @@ export function SubmissionDetailPage(): ReactElement {
                 </Button>
               </div>
             ) : null}
-            {submission.status !== "submitted" && submission.status !== "under_review" ? (
+            {submission.status !== "submitted" && submission.status !== "review" ? (
               <p className="muted workflow-hint">No workflow actions for this status.</p>
             ) : null}
           </Card>

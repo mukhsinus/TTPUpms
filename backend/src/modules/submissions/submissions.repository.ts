@@ -6,7 +6,7 @@ interface SubmissionRow {
   user_id: string;
   title: string;
   description: string | null;
-  total_points: string;
+  total_score: string;
   status: SubmissionStatus;
   submitted_at: string | null;
   reviewed_at: string | null;
@@ -33,7 +33,7 @@ function mapSubmission(row: SubmissionRow): SubmissionEntity {
     userId: row.user_id,
     title: row.title,
     description: row.description,
-    totalPoints: Number(row.total_points),
+    totalPoints: Number(row.total_score),
     status: row.status,
     submittedAt: row.submitted_at,
     reviewedAt: row.reviewed_at,
@@ -69,7 +69,7 @@ export class SubmissionsRepository {
       `
       INSERT INTO submissions (user_id, title, description, status)
       VALUES ($1, $2, $3, 'draft')
-      RETURNING id, user_id, title, description, total_points, status, submitted_at, reviewed_at, created_at, updated_at
+      RETURNING id, user_id, title, description, total_score, status, submitted_at, reviewed_at, created_at, updated_at
       `,
       [input.userId, input.title, input.description ?? null],
     );
@@ -80,7 +80,7 @@ export class SubmissionsRepository {
   async findById(id: string): Promise<SubmissionEntity | null> {
     const result = await this.app.db.query<SubmissionRow>(
       `
-      SELECT id, user_id, title, description, total_points, status, submitted_at, reviewed_at, created_at, updated_at
+      SELECT id, user_id, title, description, total_score, status, submitted_at, reviewed_at, created_at, updated_at
       FROM submissions
       WHERE id = $1
       `,
@@ -97,7 +97,7 @@ export class SubmissionsRepository {
   async findByUserId(userId: string): Promise<SubmissionEntity[]> {
     const result = await this.app.db.query<SubmissionRow>(
       `
-      SELECT id, user_id, title, description, total_points, status, submitted_at, reviewed_at, created_at, updated_at
+      SELECT id, user_id, title, description, total_score, status, submitted_at, reviewed_at, created_at, updated_at
       FROM submissions
       WHERE user_id = $1
       ORDER BY created_at DESC
@@ -111,7 +111,7 @@ export class SubmissionsRepository {
   async findAll(): Promise<SubmissionEntity[]> {
     const result = await this.app.db.query<SubmissionRow>(
       `
-      SELECT id, user_id, title, description, total_points, status, submitted_at, reviewed_at, created_at, updated_at
+      SELECT id, user_id, title, description, total_score, status, submitted_at, reviewed_at, created_at, updated_at
       FROM submissions
       ORDER BY created_at DESC
       `,
@@ -123,7 +123,7 @@ export class SubmissionsRepository {
   async findAssignedToReviewer(reviewerId: string): Promise<SubmissionEntity[]> {
     const result = await this.app.db.query<SubmissionRow>(
       `
-      SELECT s.id, s.user_id, s.title, s.description, s.total_points, s.status, s.submitted_at, s.reviewed_at, s.created_at, s.updated_at
+      SELECT s.id, s.user_id, s.title, s.description, s.total_score, s.status, s.submitted_at, s.reviewed_at, s.created_at, s.updated_at
       FROM submissions s
       INNER JOIN reviews r ON r.submission_id = s.id
       WHERE r.reviewer_id = $1
@@ -138,7 +138,7 @@ export class SubmissionsRepository {
   async findReviewerAssignedById(id: string, reviewerId: string): Promise<SubmissionEntity | null> {
     const result = await this.app.db.query<SubmissionRow>(
       `
-      SELECT s.id, s.user_id, s.title, s.description, s.total_points, s.status, s.submitted_at, s.reviewed_at, s.created_at, s.updated_at
+      SELECT s.id, s.user_id, s.title, s.description, s.total_score, s.status, s.submitted_at, s.reviewed_at, s.created_at, s.updated_at
       FROM submissions s
       INNER JOIN reviews r ON r.submission_id = s.id
       WHERE s.id = $1 AND r.reviewer_id = $2
@@ -166,7 +166,7 @@ export class SubmissionsRepository {
         submitted_at = CASE WHEN $3::boolean THEN NOW() ELSE submitted_at END,
         updated_at = NOW()
       WHERE id = $1
-      RETURNING id, user_id, title, description, total_points, status, submitted_at, reviewed_at, created_at, updated_at
+      RETURNING id, user_id, title, description, total_score, status, submitted_at, reviewed_at, created_at, updated_at
       `,
       [input.id, input.status, input.submittedAt ?? false],
     );

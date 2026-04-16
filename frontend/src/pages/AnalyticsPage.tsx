@@ -44,7 +44,7 @@ function submissionStatusLabel(status: string): string {
   const map: Record<string, string> = {
     draft: "Draft",
     submitted: "Submitted",
-    under_review: "Under review",
+    review: "Under review",
     approved: "Approved",
     rejected: "Rejected",
     needs_revision: "Needs revision",

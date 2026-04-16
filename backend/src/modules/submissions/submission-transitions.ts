@@ -9,8 +9,8 @@ import type { SubmissionStatus } from "./submissions.schema";
  * - needs_revision → submitted (resubmit after requested changes)
  *
  * Review-driven (reviews module / first item review):
- * - submitted → under_review (automatic when review starts)
- * - under_review → approved | rejected | needs_revision (complete review)
+ * - submitted → review (automatic when review starts)
+ * - review → approved | rejected | needs_revision (complete review)
  *
  * Terminal: approved, rejected (needs_revision is not terminal; student may resubmit)
  */
@@ -18,8 +18,8 @@ import type { SubmissionStatus } from "./submissions.schema";
 /** Allowed next statuses from each state (reviewer transitions use the same graph). */
 const ALLOWED_NEXT: Record<SubmissionStatus, readonly SubmissionStatus[]> = {
   draft: ["submitted"],
-  submitted: ["under_review"],
-  under_review: ["approved", "rejected", "needs_revision"],
+  submitted: ["review"],
+  review: ["approved", "rejected", "needs_revision"],
   approved: [],
   rejected: [],
   needs_revision: ["submitted"],
@@ -29,7 +29,7 @@ const ALLOWED_NEXT: Record<SubmissionStatus, readonly SubmissionStatus[]> = {
 export const STUDENT_EDITABLE_STATUSES = new Set<SubmissionStatus>(["draft", "needs_revision"]);
 
 /** Statuses where reviewers may run the review workflow (item review + completion). */
-export const REVIEW_ACTIVE_STATUSES = new Set<SubmissionStatus>(["submitted", "under_review"]);
+export const REVIEW_ACTIVE_STATUSES = new Set<SubmissionStatus>(["submitted", "review"]);
 
 export function assertValidTransition(from: SubmissionStatus, to: SubmissionStatus): void {
   const allowed = ALLOWED_NEXT[from];
