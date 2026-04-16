@@ -1,16 +1,17 @@
 import { Scenes } from "telegraf";
 import {
   addAnotherItemKeyboard,
-  cancelOnlyKeyboard,
   categoryPickerKeyboard,
   mainMenuKeyboard,
   olympiadPlacementKeyboard,
   previewSubmitKeyboard,
   skipOptionalLinkKeyboard,
+  submitFlowNavKeyboard,
   subcategoryPickerKeyboard,
 } from "../keyboards";
 import type { UpmsService } from "../services/upms.service";
-import type { BotContext, CategoryCatalogEntry, SubmitFlowState } from "../types/session";
+import type { BotContext, CategoryCatalogEntry, PendingSubmissionItem, SubmitFlowState } from "../types/session";
+import { withProcessingReply } from "../utils/bot-loading";
 import { userFacingUpmsMessage } from "../utils/upms-user-facing";
 import { botFlowStep } from "../utils/structured-log";
 
@@ -50,6 +51,12 @@ const MSG_LINK_STEP =
 const MSG_SUBCATEGORY_PROMPT =
   "🎯 Choose the specific type\n\nPlease choose a specific type of achievement for this category:";
 
+const CHANGE_CATEGORY_TEXT = "change category";
+
+function isChangeCategoryText(text: string | undefined): boolean {
+  return (text ?? "").trim().toLowerCase() === CHANGE_CATEGORY_TEXT;
+}
+
 /** Backend submission validation requires `metadata.place` for this subcategory slug. */
 const SUB_SLUG_REQUIRING_PLACE_METADATA = "olympiad_participation";
 
@@ -75,24 +82,6 @@ function buildCategoryIntroMessage(
       `• Internship at Google`;
   }
   return msg;
-}
-
-function friendlyPersistenceError(e: unknown): string {
-  const raw = userFacingUpmsMessage(e, "Unknown error");
-  const lower = raw.toLowerCase();
-  if (
-    lower.includes("no subcategories configured") ||
-    lower.includes("subcategory is required") ||
-    lower.includes("unknown subcategory")
-  ) {
-    return (
-      "We couldn’t save this line.\n\n" +
-      "• If the category asks for a type below the description, pick it from the buttons first.\n" +
-      "• Otherwise go back, choose the category again, and follow each step.\n\n" +
-      "If it keeps failing, wait a moment and try again or contact support."
-    );
-  }
-  return raw;
 }
 
 function prettifySnake(s: string): string {
@@ -147,7 +136,7 @@ function catalogUsesPlaceMetadataSubcategory(category: CategoryCatalogEntry): bo
 }
 
 function resetFlowState(s: SubmitFlowState): void {
-  delete s.submissionId;
+  delete s.pendingItems;
   delete s.identityStudentFullName;
   delete s.identityFaculty;
   delete s.identityStudentId;
@@ -228,7 +217,7 @@ async function presentCategoryStep(ctx: BotContext, upms: UpmsService): Promise<
 
   let categories;
   try {
-    categories = await upms.getCategoriesCatalog();
+    categories = await withProcessingReply(ctx, () => upms.getCategoriesCatalog());
   } catch (e) {
     console.error("Submit flow: categories fetch failed:", e);
     await ctx.reply(userFacingUpmsMessage(e, "Could not load categories."), mainMenuKeyboard());
@@ -274,31 +263,34 @@ function formatItemBlock(s: SubmitFlowState, externalLink: string | null): strin
   return body.join("\n");
 }
 
-/** Persist current item; updates previewBlocks. Draft row is created on first save using the user-entered title. */
-async function persistItemAndRecordPreview(ctx: BotContext, upms: UpmsService, externalLink: string | null): Promise<void> {
-  const tgId = ctx.session.authenticatedTelegramId!;
+/** Queue current line in session only (DB write happens on final atomic submit). */
+function persistItemAndRecordPreview(ctx: BotContext, externalLink: string | null): void {
   const s = st(ctx);
   const subSlug = s.subcategorySlug;
-
-  if (!s.submissionId) {
-    const draft = await upms.createDraftSubmission(tgId, s.title!);
-    s.submissionId = draft.submissionId;
-  }
-
-  await upms.addSubmissionItem({
-    telegramId: tgId,
-    submissionId: s.submissionId!,
+  const row: PendingSubmissionItem = {
     categoryId: s.categoryId!,
-    subcategory: subSlug ?? null,
+    subcategorySlug: subSlug ?? null,
     title: s.title!,
     description: s.description!,
     proofFileUrl: s.proofFileUrl!,
     externalLink,
-    metadata: s.itemMetadata,
-  });
-
+    metadata:
+      s.itemMetadata && Object.keys(s.itemMetadata).length > 0 ? { ...s.itemMetadata } : undefined,
+  };
+  s.pendingItems = s.pendingItems ?? [];
+  s.pendingItems.push(row);
   s.previewBlocks = s.previewBlocks ?? [];
   s.previewBlocks.push(formatItemBlock(s, externalLink));
+}
+
+async function goToCategoryPickerFromSubmitFlow(ctx: BotContext, upms: UpmsService): Promise<void> {
+  clearCurrentItem(st(ctx));
+  const ok = await presentCategoryStep(ctx, upms);
+  if (!ok) {
+    await leaveWithMenu(ctx);
+  } else {
+    await ctx.wizard.selectStep(1);
+  }
 }
 
 export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardScene<BotContext> {
@@ -357,6 +349,17 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
         return;
       }
 
+      if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "flow_change_category") {
+        await ctx.answerCbQuery();
+        await goToCategoryPickerFromSubmitFlow(ctx, upms);
+        return;
+      }
+
+      if (ctx.message && "text" in ctx.message && isChangeCategoryText(ctx.message.text)) {
+        await goToCategoryPickerFromSubmitFlow(ctx, upms);
+        return;
+      }
+
       if (!ctx.callbackQuery || !("data" in ctx.callbackQuery)) {
         await ctx.reply("👆 Please tap one of the category buttons below.");
         return;
@@ -395,11 +398,11 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
         delete s.subcategoryLabel;
         delete s.itemMetadata;
         botFlowStep(ctx.from?.id, "subcategory_skipped", { categoryCode: selected.code ?? selected.name });
-        await ctx.reply(buildCategoryIntroMessage(selected, { includeTitlePrompt: true }), cancelOnlyKeyboard());
+        await ctx.reply(buildCategoryIntroMessage(selected, { includeTitlePrompt: true }), submitFlowNavKeyboard());
         return ctx.wizard.selectStep(3);
       }
 
-      await ctx.reply(buildCategoryIntroMessage(selected, { includeTitlePrompt: false }), cancelOnlyKeyboard());
+      await ctx.reply(buildCategoryIntroMessage(selected, { includeTitlePrompt: false }), submitFlowNavKeyboard());
 
       if (catalogUsesPlaceMetadataSubcategory(selected)) {
         const only = selected.subcategories[0]!;
@@ -429,6 +432,17 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
         return;
       }
 
+      if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "flow_change_category") {
+        await ctx.answerCbQuery();
+        await goToCategoryPickerFromSubmitFlow(ctx, upms);
+        return;
+      }
+
+      if (ctx.message && "text" in ctx.message && isChangeCategoryText(ctx.message.text)) {
+        await goToCategoryPickerFromSubmitFlow(ctx, upms);
+        return;
+      }
+
       const s = st(ctx);
       const categories = s.categories ?? [];
       const cat = categories.find((c) => c.id === s.categoryId);
@@ -443,7 +457,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
           }
           s.itemMetadata = { place: placeNum };
           botFlowStep(ctx.from?.id, "placement_selected", { place: placeNum });
-          await ctx.reply(buildCategoryIntroMessage(cat, { includeTitlePrompt: true }), cancelOnlyKeyboard());
+          await ctx.reply(buildCategoryIntroMessage(cat, { includeTitlePrompt: true }), submitFlowNavKeyboard());
           return ctx.wizard.next();
         }
 
@@ -495,7 +509,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
         await leaveWithMenu(ctx);
         return;
       }
-      await ctx.reply(buildCategoryIntroMessage(cat, { includeTitlePrompt: true }), cancelOnlyKeyboard());
+      await ctx.reply(buildCategoryIntroMessage(cat, { includeTitlePrompt: true }), submitFlowNavKeyboard());
       return ctx.wizard.next();
     },
     // 3 — title
@@ -507,6 +521,17 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
         return;
       }
 
+      if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "flow_change_category") {
+        await ctx.answerCbQuery();
+        await goToCategoryPickerFromSubmitFlow(ctx, upms);
+        return;
+      }
+
+      if (ctx.message && "text" in ctx.message && isChangeCategoryText(ctx.message.text)) {
+        await goToCategoryPickerFromSubmitFlow(ctx, upms);
+        return;
+      }
+
       if (!ctx.message || !("text" in ctx.message) || !ctx.message.text.trim()) {
         await ctx.reply("Please send a short title (one line). See the examples above.");
         return;
@@ -514,7 +539,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
 
       st(ctx).title = ctx.message.text.trim();
       botFlowStep(ctx.from?.id, "title_entered", { titleLen: st(ctx).title!.length });
-      await ctx.reply(MSG_DESCRIPTION_STEP, cancelOnlyKeyboard());
+      await ctx.reply(MSG_DESCRIPTION_STEP, submitFlowNavKeyboard());
       return ctx.wizard.next();
     },
     // 4 — description
@@ -526,6 +551,17 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
         return;
       }
 
+      if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "flow_change_category") {
+        await ctx.answerCbQuery();
+        await goToCategoryPickerFromSubmitFlow(ctx, upms);
+        return;
+      }
+
+      if (ctx.message && "text" in ctx.message && isChangeCategoryText(ctx.message.text)) {
+        await goToCategoryPickerFromSubmitFlow(ctx, upms);
+        return;
+      }
+
       if (!ctx.message || !("text" in ctx.message) || !ctx.message.text.trim()) {
         await ctx.reply("Please add a short description (what, when, details).");
         return;
@@ -533,7 +569,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
 
       st(ctx).description = ctx.message.text.trim();
       botFlowStep(ctx.from?.id, "description_entered", { descriptionLen: st(ctx).description!.length });
-      await ctx.reply(MSG_PROOF_STEP, cancelOnlyKeyboard());
+      await ctx.reply(MSG_PROOF_STEP, submitFlowNavKeyboard());
       return ctx.wizard.next();
     },
     // 5 — file
@@ -542,6 +578,17 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
         await ctx.answerCbQuery();
         await ctx.reply("Cancelled.", mainMenuKeyboard());
         await leaveWithMenu(ctx);
+        return;
+      }
+
+      if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "flow_change_category") {
+        await ctx.answerCbQuery();
+        await goToCategoryPickerFromSubmitFlow(ctx, upms);
+        return;
+      }
+
+      if (ctx.message && "text" in ctx.message && isChangeCategoryText(ctx.message.text)) {
+        await goToCategoryPickerFromSubmitFlow(ctx, upms);
         return;
       }
 
@@ -593,15 +640,17 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       const bytes = Buffer.from(await downloadResponse.arrayBuffer());
       let upload;
       try {
-        upload = await upms.uploadProofFile({
-          telegramId: tgId,
-          filename,
-          mimeType: mimeType as "application/pdf" | "image/jpeg" | "image/png",
-          bytes,
-        });
+        upload = await withProcessingReply(ctx, () =>
+          upms.uploadProofFile({
+            telegramId: tgId,
+            filename,
+            mimeType: mimeType as "application/pdf" | "image/jpeg" | "image/png",
+            bytes,
+          }),
+        );
       } catch (e) {
         console.error("Submit flow: proof upload failed:", e);
-        await ctx.reply(userFacingUpmsMessage(e, "Could not upload proof to UPMS."), cancelOnlyKeyboard());
+        await ctx.reply(userFacingUpmsMessage(e, "Could not upload proof to UPMS."), submitFlowNavKeyboard());
         return;
       }
 
@@ -618,6 +667,17 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
         await ctx.answerCbQuery();
         await ctx.reply("Cancelled.", mainMenuKeyboard());
         await leaveWithMenu(ctx);
+        return;
+      }
+
+      if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "flow_change_category") {
+        await ctx.answerCbQuery();
+        await goToCategoryPickerFromSubmitFlow(ctx, upms);
+        return;
+      }
+
+      if (ctx.message && "text" in ctx.message && isChangeCategoryText(ctx.message.text)) {
+        await goToCategoryPickerFromSubmitFlow(ctx, upms);
         return;
       }
 
@@ -639,15 +699,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
 
       const s = st(ctx);
       botFlowStep(ctx.from?.id, "link_or_skip", { hasLink: Boolean(externalLink) });
-      try {
-        await persistItemAndRecordPreview(ctx, upms, externalLink);
-      } catch (e) {
-        await ctx.reply(
-          `❌ Could not save this line.\n\n${friendlyPersistenceError(e)}\n\nYou can fix the issue and try again.`,
-          cancelOnlyKeyboard(),
-        );
-        return;
-      }
+      persistItemAndRecordPreview(ctx, externalLink);
 
       clearCurrentItem(s);
       await ctx.reply(
@@ -664,6 +716,12 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       }
 
       const data = ctx.callbackQuery.data;
+
+      if (data === "flow_change_category") {
+        await ctx.answerCbQuery();
+        await goToCategoryPickerFromSubmitFlow(ctx, upms);
+        return;
+      }
 
       if (data === "wizard_cancel") {
         await ctx.answerCbQuery();
@@ -726,6 +784,12 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
         return;
       }
 
+      if (ctx.callbackQuery.data === "flow_change_category") {
+        await ctx.answerCbQuery();
+        await goToCategoryPickerFromSubmitFlow(ctx, upms);
+        return;
+      }
+
       if (ctx.callbackQuery.data !== "confirm_submit") {
         await ctx.answerCbQuery();
         return;
@@ -733,7 +797,8 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
 
       const tgId = ctx.session.authenticatedTelegramId;
       const s = st(ctx);
-      if (!tgId || !s.submissionId || !s.previewBlocks?.length) {
+      const pending = s.pendingItems ?? [];
+      if (!tgId || pending.length === 0 || !s.previewBlocks?.length) {
         await ctx.answerCbQuery();
         await ctx.reply("Incomplete session. Start again from the menu.", mainMenuKeyboard());
         await leaveWithMenu(ctx);
@@ -743,7 +808,20 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       await ctx.answerCbQuery("Submitting…");
 
       try {
-        const submitted = await upms.submitDraft(tgId, s.submissionId);
+        const submitted = await withProcessingReply(ctx, () =>
+          upms.completeBotSubmission({
+            telegramId: tgId,
+            items: pending.map((it) => ({
+              categoryId: it.categoryId,
+              subcategorySlug: it.subcategorySlug,
+              title: it.title,
+              description: it.description,
+              proofFileUrl: it.proofFileUrl,
+              externalLink: it.externalLink,
+              metadata: it.metadata,
+            })),
+          }),
+        );
         const first = submitted.items[0];
         await ctx.reply(
           first
@@ -756,6 +834,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
         await ctx.reply(userFacingUpmsMessage(e, "Submission failed."), mainMenuKeyboard());
       }
 
+      resetFlowState(st(ctx));
       await leaveWithMenu(ctx);
     },
   );

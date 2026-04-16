@@ -10,6 +10,7 @@ import { AuditLogRepository } from "../audit/audit-log.repository";
 import { NotificationService } from "../notifications/notification.service";
 import { SubmissionItemsRepository } from "../submission-items/submission-items.repository";
 import { SubmissionItemsService } from "../submission-items/submission-items.service";
+import { ScoringRulesRepository } from "../scoring/scoring-rules.repository";
 import { SubmissionsRepository } from "../submissions/submissions.repository";
 import { SubmissionsService } from "../submissions/submissions.service";
 import { UsersRepository } from "../users/users.repository";
@@ -89,8 +90,30 @@ const addBotSubmissionItemSchema = z.object({
   title: z.string().min(1).max(200),
   description: z.string().min(1).max(5000),
   proof_file_url: z.string().url(),
-  external_link: z.union([z.string().url(), z.literal("")]).optional().nullable(),
+  external_link: z.union([z.string().max(2048), z.literal(""), z.null()]).optional().nullable(),
   metadata: metadataRecordSchema.optional(),
+});
+
+const botCompleteSubmissionItemSchema = z.object({
+  category_id: z.string().uuid(),
+  subcategory: z
+    .union([z.string().max(200), z.null()])
+    .optional()
+    .transform((s) => {
+      if (s === null || s === undefined) return null;
+      const t = s.trim();
+      return t.length > 0 ? t : null;
+    }),
+  title: z.string().trim().min(1).max(200),
+  description: z.string().trim().min(1).max(5000),
+  proof_file_url: z.string().url(),
+  external_link: z.union([z.string().max(2048), z.literal(""), z.null()]).optional().nullable(),
+  metadata: metadataRecordSchema.optional(),
+});
+
+const botCompleteSubmissionSchema = z.object({
+  telegram_id: z.string().regex(/^\d+$/, "telegram_id must be numeric"),
+  items: z.array(botCompleteSubmissionItemSchema).min(1).max(25),
 });
 
 const submitDraftParamsSchema = z.object({
@@ -233,7 +256,19 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
   );
   const submissionItemsRepository = new SubmissionItemsRepository(app);
   const submissionItemsService = new SubmissionItemsService(submissionItemsRepository, usersRepository);
-  const service = new BotApiService(app, audit, submissionsService, submissionItemsService, antiFraud, usersRepository);
+  const scoringRulesRepository = new ScoringRulesRepository(app);
+  const service = new BotApiService(
+    app,
+    audit,
+    submissionsService,
+    submissionItemsService,
+    antiFraud,
+    usersRepository,
+    submissionsRepository,
+    submissionItemsRepository,
+    scoringRulesRepository,
+    notifications,
+  );
 
   app.addHook("onSend", idempotencyOnSend(app));
 
@@ -343,10 +378,6 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       try {
         const body = addBotSubmissionItemSchema.parse(request.body);
-        const ext =
-          body.external_link === "" || body.external_link === undefined || body.external_link === null
-            ? null
-            : body.external_link;
         const data = await service.addSubmissionItemFromBot({
           telegramId: body.telegram_id,
           submissionId: body.submission_id,
@@ -355,8 +386,33 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
           title: body.title,
           description: body.description,
           proofFileUrl: body.proof_file_url,
-          externalLink: ext,
+          externalLink: body.external_link,
           metadata: body.metadata,
+        });
+        reply.status(201).send(success(data));
+      } catch (error) {
+        handleRouteError(app, reply, error);
+      }
+    },
+  );
+
+  /** Atomically create submission + all lines + submit (Telegram bot — no mid-flow DB rows). */
+  app.post(
+    "/submissions/complete",
+    { preHandler: botWriteIdempotency(app, "bot_submissions_complete") },
+    async (request, reply) => {
+      try {
+        const body = botCompleteSubmissionSchema.parse(request.body);
+        const data = await service.completeSubmissionFromBot(body.telegram_id, {
+          items: body.items.map((it) => ({
+            categoryId: it.category_id,
+            subcategory: it.subcategory,
+            title: it.title,
+            description: it.description,
+            proofFileUrl: it.proof_file_url,
+            externalLink: it.external_link,
+            metadata: it.metadata,
+          })),
         });
         reply.status(201).send(success(data));
       } catch (error) {

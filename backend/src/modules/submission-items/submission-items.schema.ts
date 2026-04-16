@@ -17,7 +17,12 @@ export const addSubmissionItemBodySchema = z
     title: z.string().trim().min(1).max(200),
     description: z.string().trim().max(5000).optional(),
     proof_file_url: z.string().url().optional(),
-    external_link: z.string().url().optional(),
+    /** Validated in service (http/https only); empty string omitted. */
+    external_link: z
+      .preprocess(
+        (v) => (v === "" || v === null || v === undefined ? undefined : String(v).trim()),
+        z.string().max(2048).optional(),
+      ),
     /** Optional non-scoring metadata; scores are assigned by admins/reviewers only. */
     metadata: metadataSchema,
   });

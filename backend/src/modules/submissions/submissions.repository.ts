@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import type { PoolClient } from "pg";
 import type { SubmissionStatus } from "./submissions.schema";
 
 interface SubmissionRow {
@@ -82,6 +83,8 @@ function mapSubmission(row: SubmissionRow): SubmissionEntity {
   return base;
 }
 
+type DbExecutor = FastifyInstance["db"] | PoolClient;
+
 export class SubmissionsRepository {
   constructor(private readonly app: FastifyInstance) {}
 
@@ -100,12 +103,16 @@ export class SubmissionsRepository {
     return Number(result.rows[0]?.c ?? "0");
   }
 
-  async create(input: {
-    userId: string;
-    title: string;
-    description?: string;
-  }): Promise<SubmissionEntity> {
-    const result = await this.app.db.query<SubmissionRow>(
+  async create(
+    input: {
+      userId: string;
+      title: string;
+      description?: string;
+    },
+    client?: PoolClient,
+  ): Promise<SubmissionEntity> {
+    const db: DbExecutor = client ?? this.app.db;
+    const result = await db.query<SubmissionRow>(
       `
       INSERT INTO submissions (user_id, title, description, status)
       VALUES ($1, $2, $3, 'draft')
@@ -210,12 +217,16 @@ export class SubmissionsRepository {
     return mapSubmission(result.rows[0]);
   }
 
-  async updateStatus(input: {
-    id: string;
-    status: SubmissionStatus;
-    submittedAt?: boolean;
-  }): Promise<SubmissionEntity> {
-    const result = await this.app.db.query<SubmissionRow>(
+  async updateStatus(
+    input: {
+      id: string;
+      status: SubmissionStatus;
+      submittedAt?: boolean;
+    },
+    client?: PoolClient,
+  ): Promise<SubmissionEntity> {
+    const db: DbExecutor = client ?? this.app.db;
+    const result = await db.query<SubmissionRow>(
       `
       UPDATE submissions
       SET

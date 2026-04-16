@@ -4,6 +4,7 @@ import type {
   SubmissionOwnerEntity,
 } from "./submission-items.repository";
 import type { AddSubmissionItemBody } from "./submission-items.schema";
+import { normalizeExternalLinkForPersistence } from "./external-link-normalize";
 import { normalizeMetadata } from "../scoring/scoring-metadata";
 import { isPgUniqueViolation } from "../../utils/pg-errors";
 import { ServiceError } from "../../utils/service-error";
@@ -79,6 +80,9 @@ export class SubmissionItemsService {
       }
     }
 
+    const externalLink = normalizeExternalLinkForPersistence(body.external_link);
+    const proposedScore: number | null = null;
+
     try {
       return await this.repository.createItem({
         submissionId: submission.id,
@@ -87,8 +91,8 @@ export class SubmissionItemsService {
         title: body.title,
         description: body.description,
         proofFileUrl: body.proof_file_url,
-        externalLink: body.external_link,
-        proposedScore: null,
+        externalLink,
+        proposedScore,
         metadata,
       });
     } catch (err) {

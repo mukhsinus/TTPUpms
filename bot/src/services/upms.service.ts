@@ -383,6 +383,36 @@ export class UpmsService {
     });
   }
 
+  /** Single transaction: create submission, all lines, submit (Telegram bot — no draft/items during FSM). */
+  async completeBotSubmission(input: {
+    telegramId: string;
+    items: Array<{
+      categoryId: string;
+      subcategorySlug: string | null;
+      title: string;
+      description: string;
+      proofFileUrl: string;
+      externalLink: string | null;
+      metadata?: Record<string, string | number | boolean>;
+    }>;
+  }): Promise<SubmitDraftSuccess> {
+    return this.requestJson<SubmitDraftSuccess>("/api/bot/submissions/complete", {
+      method: "POST",
+      body: JSON.stringify({
+        telegram_id: input.telegramId,
+        items: input.items.map((it) => ({
+          category_id: it.categoryId,
+          subcategory: it.subcategorySlug,
+          title: it.title,
+          description: it.description,
+          proof_file_url: it.proofFileUrl,
+          external_link: it.externalLink,
+          metadata: it.metadata,
+        })),
+      }),
+    });
+  }
+
   /** @deprecated Legacy single-shot create; prefer draft + items + submit. */
   async createStudentSubmission(input: {
     telegramId: string;

@@ -27,9 +27,20 @@ export interface CategoryCatalogEntry {
   }>;
 }
 
+/** One queued line; persisted only after POST /api/bot/submissions/complete. */
+export interface PendingSubmissionItem {
+  categoryId: string;
+  subcategorySlug: string | null;
+  title: string;
+  description: string;
+  proofFileUrl: string;
+  externalLink: string | null;
+  metadata?: Record<string, string | number | boolean>;
+}
+
 export interface SubmitFlowState extends Scenes.WizardSessionData {
-  /** Draft submission id (POST /api/bot/submissions/draft). */
-  submissionId?: string;
+  /** Lines saved in-session until final atomic submit. */
+  pendingItems?: PendingSubmissionItem[];
   /** Copied from profile for previews (not stored on submissions). */
   identityStudentFullName?: string;
   identityFaculty?: string;

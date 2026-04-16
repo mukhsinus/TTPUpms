@@ -32,8 +32,12 @@ function metaValueToComparableString(raw: unknown): string | null {
 /**
  * First matching rule wins (lowest sort_order first). Logic is generic; rules live in `scoring_rules`.
  */
-function round2(value: number): number {
+export function roundScore2(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+function round2(value: number): number {
+  return roundScore2(value);
 }
 
 export interface CategoryScoringBand {

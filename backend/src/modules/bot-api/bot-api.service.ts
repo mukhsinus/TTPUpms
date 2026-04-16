@@ -4,9 +4,19 @@ import { env } from "../../config/env";
 import type { AuthUser } from "../../types/auth-user";
 import { ServiceError } from "../../utils/service-error";
 import type { AuditLogRepository } from "../audit/audit-log.repository";
-import { normalizeMetadata } from "../scoring/scoring-metadata";
-import type { SubmissionItemEntity } from "../submission-items/submission-items.repository";
+import type { NotificationService } from "../notifications/notification.service";
+import { normalizeExternalLinkForPersistence } from "../submission-items/external-link-normalize";
+import type { SubmissionItemEntity, SubmissionItemsRepository } from "../submission-items/submission-items.repository";
 import type { SubmissionItemsService } from "../submission-items/submission-items.service";
+import {
+  normalizeMetadata,
+  resolveFixedPointsFromRules,
+  resolveFixedProposedScore,
+  roundScore2,
+} from "../scoring/scoring-metadata";
+import type { ScoringRulesRepository } from "../scoring/scoring-rules.repository";
+import type { SubmissionsRepository } from "../submissions/submissions.repository";
+import { MAX_ACTIVE_SUBMISSIONS_PER_USER } from "../submissions/submission-quota";
 import type { SubmissionsService } from "../submissions/submissions.service";
 import type { UsersRepository } from "../users/users.repository";
 import { AntiFraudError, type AntiFraudService } from "../validation/anti-fraud.service";
@@ -61,6 +71,16 @@ export interface BotSubmitDraftItemSummary {
 export interface BotSubmitDraftResult {
   submissionId: string;
   items: BotSubmitDraftItemSummary[];
+}
+
+export interface BotCompleteSubmissionItemInput {
+  categoryId: string;
+  subcategory: string | null;
+  title: string;
+  description: string;
+  proofFileUrl: string;
+  externalLink?: string | null;
+  metadata?: Record<string, string | number | boolean>;
 }
 
 export interface BotUser {
@@ -170,6 +190,10 @@ export class BotApiService {
     private readonly submissionItems: SubmissionItemsService,
     private readonly antiFraud: AntiFraudService,
     private readonly usersRepository: UsersRepository,
+    private readonly submissionsRepository: SubmissionsRepository,
+    private readonly submissionItemsRepository: SubmissionItemsRepository,
+    private readonly scoringRulesRepository: ScoringRulesRepository,
+    private readonly notifications: NotificationService,
   ) {}
 
   private async hasTelegramUsernameColumn(): Promise<boolean> {
@@ -591,8 +615,12 @@ export class BotApiService {
 
     const user = await this.findOrCreateUserByTelegramId(input.telegramId);
     const slug = await this.resolveBotSubcategorySlug(input.categoryId, input.subcategory);
-    const ext =
-      input.externalLink && input.externalLink.trim() !== "" ? input.externalLink.trim() : undefined;
+    let ext: string | null;
+    try {
+      ext = normalizeExternalLinkForPersistence(input.externalLink);
+    } catch (e) {
+      throw toBotApiError(e);
+    }
 
     try {
       const item = await this.submissionItems.addItem(toAuthUser(user), input.submissionId, {
@@ -601,7 +629,7 @@ export class BotApiService {
         title: input.title,
         description: input.description,
         proof_file_url: input.proofFileUrl,
-        external_link: ext,
+        external_link: ext ?? undefined,
         metadata: normalizeMetadata(input.metadata ?? {}) as Record<string, string | number | boolean>,
       });
 
@@ -639,6 +667,242 @@ export class BotApiService {
     } catch (error) {
       throw toBotApiError(error);
     }
+  }
+
+  /**
+   * Single transaction: create submission, insert all lines with optional proposed scores, submit.
+   * Used by Telegram bot — no draft rows until the user confirms.
+   */
+  async completeSubmissionFromBot(
+    telegramId: string,
+    input: { items: BotCompleteSubmissionItemInput[] },
+  ): Promise<BotSubmitDraftResult> {
+    if (input.items.length === 0) {
+      throw new BotApiHttpError(400, "At least one submission line is required.", "VALIDATION_ERROR");
+    }
+
+    const user = await this.findOrCreateUserByTelegramId(telegramId);
+    if (user.role !== "student") {
+      throw new BotApiHttpError(403, "Only students can submit achievements via the bot.", "FORBIDDEN");
+    }
+
+    const auth = toAuthUser(user);
+    await this.usersRepository.assertStudentProfileCompleteForSubmission(user.id);
+
+    const active = await this.submissionsRepository.countActiveSubmissionsForUser(user.id);
+    if (active >= MAX_ACTIVE_SUBMISSIONS_PER_USER) {
+      throw new BotApiHttpError(
+        409,
+        `You can have at most ${MAX_ACTIVE_SUBMISSIONS_PER_USER} active submissions (draft, submitted, in review, or awaiting revision).`,
+        "QUOTA_EXCEEDED",
+      );
+    }
+
+    await this.antiFraud.assertNoDuplicateSubmission({
+      userId: user.id,
+      title: input.items[0]!.title.trim(),
+      description: undefined,
+    });
+
+    type PreparedRow = {
+      categoryId: string;
+      subcategoryId: string | null;
+      title: string;
+      description: string;
+      proofFileUrl: string;
+      externalLink: string | null;
+      metadata: Record<string, unknown>;
+      proposedScore: number | null;
+    };
+
+    const prepared: PreparedRow[] = [];
+
+    for (const it of input.items) {
+      this.validateProofStorageUrl(it.proofFileUrl);
+      const slug = await this.resolveBotSubcategorySlug(it.categoryId, it.subcategory);
+      let subcategoryId: string | null = null;
+      if (slug) {
+        subcategoryId = await this.submissionItemsRepository.findSubcategoryIdBySlug(it.categoryId, slug);
+        if (!subcategoryId) {
+          throw new BotApiHttpError(400, "Unknown subcategory slug for this category.", "VALIDATION_ERROR");
+        }
+      } else {
+        const hasSubs = await this.submissionItemsRepository.categoryHasSubcategories(it.categoryId);
+        if (hasSubs) {
+          throw new BotApiHttpError(400, "Subcategory is required for this category.", "VALIDATION_ERROR");
+        }
+      }
+
+      const metadata = normalizeMetadata(it.metadata ?? {}) as Record<string, unknown>;
+      const categoryName = await this.submissionItemsRepository.resolveCategoryName(it.categoryId);
+      if (!categoryName) {
+        throw new BotApiHttpError(400, "Unknown category.", "VALIDATION_ERROR");
+      }
+      if (categoryName === "olympiads" && subcategoryId) {
+        const subSlug = await this.submissionItemsRepository.findSubcategorySlugById(subcategoryId);
+        if (subSlug === "olympiad_participation") {
+          const p = metadata.place;
+          const placeOk =
+            p === 1 ||
+            p === 2 ||
+            p === 3 ||
+            p === "1" ||
+            p === "2" ||
+            p === "3";
+          if (!placeOk) {
+            throw new BotApiHttpError(
+              400,
+              "Olympiad items require metadata.place of 1, 2, or 3",
+              "VALIDATION_ERROR",
+            );
+          }
+        }
+      }
+
+      let externalLink: string | null;
+      try {
+        externalLink = normalizeExternalLinkForPersistence(it.externalLink);
+      } catch (e) {
+        throw toBotApiError(e);
+      }
+
+      const proposedScore = await this.computeProposedScoreAtInsert({
+        categoryId: it.categoryId,
+        subcategoryId,
+        metadata,
+      });
+
+      prepared.push({
+        categoryId: it.categoryId,
+        subcategoryId,
+        title: it.title.trim(),
+        description: it.description.trim(),
+        proofFileUrl: it.proofFileUrl,
+        externalLink,
+        metadata,
+        proposedScore,
+      });
+    }
+
+    const submissionTitle = prepared[0]!.title.slice(0, 200);
+
+    const client = await this.app.db.connect();
+    try {
+      await client.query("BEGIN");
+
+      const created = await this.submissionsRepository.create(
+        {
+          userId: user.id,
+          title: submissionTitle,
+          description: undefined,
+        },
+        client,
+      );
+
+      for (const row of prepared) {
+        await this.submissionItemsRepository.createItem(
+          {
+            submissionId: created.id,
+            categoryId: row.categoryId,
+            subcategoryId: row.subcategoryId,
+            title: row.title,
+            description: row.description,
+            proofFileUrl: row.proofFileUrl,
+            externalLink: row.externalLink,
+            proposedScore: row.proposedScore,
+            metadata: row.metadata,
+          },
+          client,
+        );
+      }
+
+      await this.submissionsRepository.updateStatus(
+        {
+          id: created.id,
+          status: "submitted",
+          submittedAt: true,
+        },
+        client,
+      );
+
+      await client.query("COMMIT");
+
+      await this.audit.insert({
+        actorUserId: user.id,
+        targetUserId: user.id,
+        entityTable: "submissions",
+        entityId: created.id,
+        action: "submission_submitted",
+        newValues: { status: "submitted", lines: prepared.length },
+      });
+
+      this.notifications.notifySubmissionSubmitted({
+        userId: user.id,
+        submissionId: created.id,
+        title: submissionTitle,
+      });
+
+      const items = await this.submissionItems.listItems(auth, created.id);
+      this.app.log.info(
+        { telegram_id: telegramId, user_id: user.id, submission_id: created.id, lines: prepared.length },
+        "Bot atomic submission complete",
+      );
+
+      return {
+        submissionId: created.id,
+        items: items.map((i) => this.mapItemToBotSubmitSummary(i)),
+      };
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // ignore
+      }
+      throw toBotApiError(error);
+    } finally {
+      client.release();
+    }
+  }
+
+  private async computeProposedScoreAtInsert(input: {
+    categoryId: string;
+    subcategoryId: string | null;
+    metadata: Record<string, unknown>;
+  }): Promise<number | null> {
+    const typeRaw = await this.submissionItemsRepository.findCategoryScoringType(input.categoryId);
+    const type = (typeRaw ?? "").toLowerCase();
+    if (type === "manual" || type === "expert" || type === "range") {
+      return null;
+    }
+    if (type !== "fixed") {
+      return null;
+    }
+
+    const bounds = await this.submissionItemsRepository.findCategoryBounds(input.categoryId);
+    if (!bounds || !input.subcategoryId) {
+      return null;
+    }
+
+    const rules = await this.scoringRulesRepository.findRulesBySubcategoryId(input.subcategoryId);
+    if (rules.length > 0) {
+      const matched = resolveFixedPointsFromRules(input.metadata, rules);
+      if (matched !== null) {
+        return roundScore2(matched);
+      }
+      return null;
+    }
+
+    const categoryScoring = await this.scoringRulesRepository.findCategoryScoringBand(
+      input.categoryId,
+      input.subcategoryId,
+    );
+    const fallback = resolveFixedProposedScore({
+      metadata: input.metadata,
+      scoringRules: [],
+      categoryScoring,
+      bounds,
+    });
+    return roundScore2(fallback);
   }
 
   private async resolveBotSubcategorySlug(

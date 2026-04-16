@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import type { PoolClient } from "pg";
 import { normalizeMetadata } from "../scoring/scoring-metadata";
 
 interface SubmissionOwnerRow {
@@ -121,6 +122,8 @@ const itemFromJoin = `
   LEFT JOIN categories c ON c.id = si.category_id
   LEFT JOIN category_subcategories cs ON cs.id = si.subcategory_id
 `;
+
+type DbExecutor = FastifyInstance["db"] | PoolClient;
 
 export class SubmissionItemsRepository {
   constructor(private readonly app: FastifyInstance) {}
@@ -317,18 +320,46 @@ export class SubmissionItemsRepository {
     return Boolean(result.rows[0]?.ok);
   }
 
-  async createItem(input: {
-    submissionId: string;
-    categoryId: string;
-    subcategoryId: string | null;
-    title: string;
-    description?: string;
-    proofFileUrl?: string;
-    externalLink?: string;
-    proposedScore: number | null;
-    metadata: Record<string, unknown>;
-  }): Promise<SubmissionItemEntity> {
-    const result = await this.app.db.query<SubmissionItemRow>(
+  async createItem(
+    input: {
+      submissionId: string;
+      categoryId: string;
+      subcategoryId: string | null;
+      title: string;
+      description?: string;
+      proofFileUrl?: string;
+      externalLink?: string | null;
+      proposedScore: number | null;
+      metadata: Record<string, unknown>;
+    },
+    client?: PoolClient,
+  ): Promise<SubmissionItemEntity> {
+    const db: DbExecutor = client ?? this.app.db;
+    const externalLink =
+      input.externalLink === undefined || input.externalLink === null || input.externalLink === ""
+        ? null
+        : input.externalLink;
+
+    const proposedScoreSql: number | null =
+      input.proposedScore === undefined || input.proposedScore === null
+        ? null
+        : Number.isFinite(Number(input.proposedScore))
+          ? Number(input.proposedScore)
+          : null;
+
+    const insertPayload = {
+      submission_id: input.submissionId,
+      category_id: input.categoryId,
+      subcategory_id: input.subcategoryId,
+      title: input.title,
+      description: input.description ?? null,
+      proof_file_url: input.proofFileUrl ?? null,
+      external_link: externalLink,
+      proposed_score: proposedScoreSql,
+    };
+    console.log("INSERT submission_item:", insertPayload);
+
+    const result = await db.query<SubmissionItemRow>(
       `
       INSERT INTO submission_items (
         submission_id,
@@ -371,8 +402,8 @@ export class SubmissionItemsRepository {
         input.title,
         input.description ?? null,
         input.proofFileUrl ?? null,
-        input.externalLink ?? null,
-        input.proposedScore,
+        externalLink,
+        proposedScoreSql,
         JSON.stringify(input.metadata ?? {}),
       ],
     );

@@ -3,6 +3,11 @@ import type { CategoryCatalogEntry } from "./types/session";
 
 const CANCEL_ROW = [Markup.button.callback("Cancel", "wizard_cancel")];
 
+const SUBMIT_FLOW_NAV_ROW = [
+  Markup.button.callback("🔄 Change category", "flow_change_category"),
+  Markup.button.callback("Cancel", "wizard_cancel"),
+];
+
 export const mainMenuKeyboard = () =>
   Markup.inlineKeyboard([
     [Markup.button.callback("Submit Achievement", "menu_submit")],
@@ -35,7 +40,7 @@ export function categoryPickerKeyboard(categories: CategoryCatalogEntry[]) {
     }
     rows.push(row);
   }
-  rows.push(CANCEL_ROW);
+  rows.push(SUBMIT_FLOW_NAV_ROW);
   return Markup.inlineKeyboard(rows);
 }
 
@@ -57,7 +62,7 @@ export function subcategoryPickerKeyboard(subcategories: CategoryCatalogEntry["s
     }
     rows.push(row);
   }
-  rows.push(CANCEL_ROW);
+  rows.push(SUBMIT_FLOW_NAV_ROW);
   return Markup.inlineKeyboard(rows);
 }
 
@@ -69,26 +74,29 @@ export function olympiadPlacementKeyboard() {
       Markup.button.callback("2nd place", "place_2"),
       Markup.button.callback("3rd place", "place_3"),
     ],
-    CANCEL_ROW,
+    SUBMIT_FLOW_NAV_ROW,
   ]);
 }
 
 export const cancelOnlyKeyboard = () => Markup.inlineKeyboard([CANCEL_ROW]);
 
+export const submitFlowNavKeyboard = () => Markup.inlineKeyboard([SUBMIT_FLOW_NAV_ROW]);
+
 export const skipOptionalLinkKeyboard = () =>
   Markup.inlineKeyboard([
     [Markup.button.callback("Skip", "skip_external_link")],
-    CANCEL_ROW,
+    SUBMIT_FLOW_NAV_ROW,
   ]);
 
 export const addAnotherItemKeyboard = () =>
   Markup.inlineKeyboard([
     [Markup.button.callback("Add another item", "flow_add_more")],
     [Markup.button.callback("Preview and submit", "flow_preview")],
-    CANCEL_ROW,
+    SUBMIT_FLOW_NAV_ROW,
   ]);
 
 export const previewSubmitKeyboard = () =>
   Markup.inlineKeyboard([
     [Markup.button.callback("Submit", "confirm_submit"), Markup.button.callback("Cancel", "wizard_cancel")],
+    [Markup.button.callback("🔄 Change category", "flow_change_category")],
   ]);
