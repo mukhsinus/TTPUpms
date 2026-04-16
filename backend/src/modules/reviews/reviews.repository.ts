@@ -18,6 +18,9 @@ interface SubmissionRow {
   reviewed_at: string | null;
   created_at: string;
   updated_at: string;
+  owner_student_full_name?: string | null;
+  owner_faculty?: string | null;
+  owner_student_id?: string | null;
 }
 
 interface SubmissionItemRow {
@@ -56,6 +59,9 @@ export interface ReviewSubmissionEntity {
   reviewedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  ownerStudentFullName?: string | null;
+  ownerFaculty?: string | null;
+  ownerStudentId?: string | null;
 }
 
 export interface ReviewSubmissionItemEntity {
@@ -85,7 +91,7 @@ export interface ReviewSubmissionItemEntity {
 }
 
 function mapSubmission(row: SubmissionRow): ReviewSubmissionEntity {
-  return {
+  const base: ReviewSubmissionEntity = {
     id: row.id,
     userId: row.user_id,
     status: row.status,
@@ -97,14 +103,30 @@ function mapSubmission(row: SubmissionRow): ReviewSubmissionEntity {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+
+  if (
+    row.owner_student_full_name !== undefined ||
+    row.owner_faculty !== undefined ||
+    row.owner_student_id !== undefined
+  ) {
+    base.ownerStudentFullName = row.owner_student_full_name ?? null;
+    base.ownerFaculty = row.owner_faculty ?? null;
+    base.ownerStudentId = row.owner_student_id ?? null;
+  }
+
+  return base;
 }
 
-const submissionSelectColumns = `
+/** Columns from `submissions` only (RETURNING / FOR UPDATE). */
+const submissionSelectColumnsReturning = `
   id, user_id, status, title, description, total_score, submitted_at, reviewed_at, created_at, updated_at
 `;
 
-const submissionSelectColumnsFromS = `
-  s.id, s.user_id, s.status, s.title, s.description, s.total_score, s.submitted_at, s.reviewed_at, s.created_at, s.updated_at
+const submissionSelectListWithOwner = `
+  s.id, s.user_id, s.status, s.title, s.description, s.total_score, s.submitted_at, s.reviewed_at, s.created_at, s.updated_at,
+  u.student_full_name AS owner_student_full_name,
+  u.faculty AS owner_faculty,
+  u.student_id AS owner_student_id
 `;
 
 function mapItem(row: SubmissionItemRow): ReviewSubmissionItemEntity {
@@ -193,10 +215,11 @@ export class ReviewsRepository {
   async findSubmissionsAwaitingReview(): Promise<ReviewSubmissionEntity[]> {
     const result = await this.app.db.query<SubmissionRow>(
       `
-      SELECT ${submissionSelectColumns}
-      FROM submissions
-      WHERE status IN ('submitted', 'review')
-      ORDER BY created_at DESC
+      SELECT ${submissionSelectListWithOwner}
+      FROM submissions s
+      LEFT JOIN users u ON u.id = s.user_id
+      WHERE s.status IN ('submitted', 'review')
+      ORDER BY s.created_at DESC
       `,
     );
 
@@ -207,8 +230,9 @@ export class ReviewsRepository {
   async findSubmissionsAwaitingReviewForReviewer(reviewerId: string): Promise<ReviewSubmissionEntity[]> {
     const result = await this.app.db.query<SubmissionRow>(
       `
-      SELECT ${submissionSelectColumnsFromS}
+      SELECT ${submissionSelectListWithOwner}
       FROM submissions s
+      LEFT JOIN users u ON u.id = s.user_id
       WHERE s.status IN ('submitted', 'review')
         AND EXISTS (
           SELECT 1
@@ -227,9 +251,10 @@ export class ReviewsRepository {
   async findAllSubmissions(): Promise<ReviewSubmissionEntity[]> {
     const result = await this.app.db.query<SubmissionRow>(
       `
-      SELECT ${submissionSelectColumns}
-      FROM submissions
-      ORDER BY created_at DESC
+      SELECT ${submissionSelectListWithOwner}
+      FROM submissions s
+      LEFT JOIN users u ON u.id = s.user_id
+      ORDER BY s.created_at DESC
       `,
     );
 
@@ -239,9 +264,10 @@ export class ReviewsRepository {
   async findSubmissionById(submissionId: string): Promise<ReviewSubmissionEntity | null> {
     const result = await this.app.db.query<SubmissionRow>(
       `
-      SELECT ${submissionSelectColumns}
-      FROM submissions
-      WHERE id = $1
+      SELECT ${submissionSelectListWithOwner}
+      FROM submissions s
+      LEFT JOIN users u ON u.id = s.user_id
+      WHERE s.id = $1
       `,
       [submissionId],
     );
@@ -463,7 +489,7 @@ export class ReviewsRepository {
 
       const subRes = await client.query<SubmissionRow>(
         `
-        SELECT ${submissionSelectColumns}
+        SELECT ${submissionSelectColumnsReturning}
         FROM submissions
         WHERE id = $1
         FOR UPDATE
@@ -538,7 +564,7 @@ export class ReviewsRepository {
           reviewed_at = NOW(),
           updated_at = NOW()
         WHERE id = $1
-        RETURNING ${submissionSelectColumns}
+        RETURNING ${submissionSelectColumnsReturning}
         `,
         [input.submissionId, input.decision],
       );
@@ -570,7 +596,7 @@ export class ReviewsRepository {
       UPDATE submissions
       SET status = 'review', updated_at = NOW()
       WHERE id = $1 AND status = 'submitted'
-      RETURNING ${submissionSelectColumns}
+      RETURNING ${submissionSelectColumnsReturning}
       `,
       [submissionId],
     );

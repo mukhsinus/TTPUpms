@@ -31,6 +31,10 @@ export interface Submission {
   submittedAt?: string | null;
   /** Set when the submission review is finalized (or terminal outcome recorded). */
   reviewedAt?: string | null;
+  /** Present when API loads submission with JOIN to owner `users` row. */
+  ownerStudentFullName?: string | null;
+  ownerFaculty?: string | null;
+  ownerStudentId?: string | null;
 }
 
 export type SubmissionItemStatus = "pending" | "approved" | "rejected";

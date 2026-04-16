@@ -37,7 +37,8 @@ export class AntiFraudService {
       WHERE user_id = $1
         AND lower(title) = lower($2)
         AND coalesce(description, '') = coalesce($3, '')
-        AND status IN ('draft', 'submitted', 'review', 'approved', 'needs_revision')
+        /* Drafts may share a neutral title; duplicates are enforced once work is in the pipeline. */
+        AND status IN ('submitted', 'review', 'approved', 'needs_revision')
       LIMIT 1
       `,
       [input.userId, input.title.trim(), input.description?.trim() ?? null],

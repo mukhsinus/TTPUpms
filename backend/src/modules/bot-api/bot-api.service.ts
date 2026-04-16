@@ -338,9 +338,8 @@ export class BotApiService {
   /** Draft submission for Telegram multi-item flow (POST /api/submissions equivalent). */
   async createDraftSubmissionForBot(telegramId: string): Promise<{ submissionId: string }> {
     const user = await this.findOrCreateUserByTelegramId(telegramId);
-    const displayName = (user.studentFullName ?? user.fullName ?? "Student").trim().slice(0, 80);
-    const sid = (user.studentId ?? "pending").trim().slice(0, 32);
-    const draftTitle = `Achievement request — ${sid} — ${displayName}`.slice(0, 200);
+    /** Neutral title only — identity lives on `users`, never in submission title. */
+    const draftTitle = "Achievement submission";
     try {
       const created = await this.submissions.createSubmission(toAuthUser(user), {
         title: draftTitle,

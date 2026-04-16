@@ -12,6 +12,9 @@ interface SubmissionRow {
   reviewed_at: string | null;
   created_at: string;
   updated_at: string;
+  owner_student_full_name?: string | null;
+  owner_faculty?: string | null;
+  owner_student_id?: string | null;
 }
 
 export interface SubmissionEntity {
@@ -25,10 +28,35 @@ export interface SubmissionEntity {
   reviewedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Present when loaded via JOIN to users (single source of truth for identity). */
+  ownerStudentFullName?: string | null;
+  ownerFaculty?: string | null;
+  ownerStudentId?: string | null;
 }
 
+const SUBMISSION_SELECT_WITH_OWNER = `
+  s.id,
+  s.user_id,
+  s.title,
+  s.description,
+  s.total_score,
+  s.status,
+  s.submitted_at,
+  s.reviewed_at,
+  s.created_at,
+  s.updated_at,
+  u.student_full_name AS owner_student_full_name,
+  u.faculty AS owner_faculty,
+  u.student_id AS owner_student_id
+`;
+
+const FROM_SUBMISSIONS_JOIN_OWNER = `
+  FROM submissions s
+  LEFT JOIN users u ON u.id = s.user_id
+`;
+
 function mapSubmission(row: SubmissionRow): SubmissionEntity {
-  return {
+  const base: SubmissionEntity = {
     id: row.id,
     userId: row.user_id,
     title: row.title,
@@ -40,6 +68,18 @@ function mapSubmission(row: SubmissionRow): SubmissionEntity {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+
+  if (
+    row.owner_student_full_name !== undefined ||
+    row.owner_faculty !== undefined ||
+    row.owner_student_id !== undefined
+  ) {
+    base.ownerStudentFullName = row.owner_student_full_name ?? null;
+    base.ownerFaculty = row.owner_faculty ?? null;
+    base.ownerStudentId = row.owner_student_id ?? null;
+  }
+
+  return base;
 }
 
 export class SubmissionsRepository {
@@ -80,9 +120,9 @@ export class SubmissionsRepository {
   async findById(id: string): Promise<SubmissionEntity | null> {
     const result = await this.app.db.query<SubmissionRow>(
       `
-      SELECT id, user_id, title, description, total_score, status, submitted_at, reviewed_at, created_at, updated_at
-      FROM submissions
-      WHERE id = $1
+      SELECT ${SUBMISSION_SELECT_WITH_OWNER}
+      ${FROM_SUBMISSIONS_JOIN_OWNER}
+      WHERE s.id = $1
       `,
       [id],
     );
@@ -112,10 +152,10 @@ export class SubmissionsRepository {
   async findByUserId(userId: string): Promise<SubmissionEntity[]> {
     const result = await this.app.db.query<SubmissionRow>(
       `
-      SELECT id, user_id, title, description, total_score, status, submitted_at, reviewed_at, created_at, updated_at
-      FROM submissions
-      WHERE user_id = $1
-      ORDER BY created_at DESC
+      SELECT ${SUBMISSION_SELECT_WITH_OWNER}
+      ${FROM_SUBMISSIONS_JOIN_OWNER}
+      WHERE s.user_id = $1
+      ORDER BY s.created_at DESC
       `,
       [userId],
     );
@@ -126,9 +166,9 @@ export class SubmissionsRepository {
   async findAll(): Promise<SubmissionEntity[]> {
     const result = await this.app.db.query<SubmissionRow>(
       `
-      SELECT id, user_id, title, description, total_score, status, submitted_at, reviewed_at, created_at, updated_at
-      FROM submissions
-      ORDER BY created_at DESC
+      SELECT ${SUBMISSION_SELECT_WITH_OWNER}
+      ${FROM_SUBMISSIONS_JOIN_OWNER}
+      ORDER BY s.created_at DESC
       `,
     );
 
@@ -138,9 +178,10 @@ export class SubmissionsRepository {
   async findAssignedToReviewer(reviewerId: string): Promise<SubmissionEntity[]> {
     const result = await this.app.db.query<SubmissionRow>(
       `
-      SELECT s.id, s.user_id, s.title, s.description, s.total_score, s.status, s.submitted_at, s.reviewed_at, s.created_at, s.updated_at
+      SELECT ${SUBMISSION_SELECT_WITH_OWNER}
       FROM submissions s
       INNER JOIN reviews r ON r.submission_id = s.id
+      LEFT JOIN users u ON u.id = s.user_id
       WHERE r.reviewer_id = $1
       ORDER BY s.created_at DESC
       `,
@@ -153,9 +194,10 @@ export class SubmissionsRepository {
   async findReviewerAssignedById(id: string, reviewerId: string): Promise<SubmissionEntity | null> {
     const result = await this.app.db.query<SubmissionRow>(
       `
-      SELECT s.id, s.user_id, s.title, s.description, s.total_score, s.status, s.submitted_at, s.reviewed_at, s.created_at, s.updated_at
+      SELECT ${SUBMISSION_SELECT_WITH_OWNER}
       FROM submissions s
       INNER JOIN reviews r ON r.submission_id = s.id
+      LEFT JOIN users u ON u.id = s.user_id
       WHERE s.id = $1 AND r.reviewer_id = $2
       `,
       [id, reviewerId],
