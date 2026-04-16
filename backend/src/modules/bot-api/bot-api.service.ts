@@ -33,15 +33,19 @@ interface UserRow {
   is_profile_completed: boolean;
 }
 
+/** Bot list row: submission envelope + first line item (no user identity). */
 export interface BotSubmissionListRow {
   id: string;
+  /** Headline: first item title, else submission `title`. */
   title: string;
+  category: string | null;
+  subcategory: string | null;
+  description: string | null;
+  link: string | null;
+  hasFile: boolean;
   status: string;
   totalPoints: string;
   createdAt: string;
-  studentFullName: string | null;
-  faculty: string | null;
-  studentId: string | null;
 }
 
 /** Post-submit payload for Telegram bot (business fields only in `items`). */
@@ -915,40 +919,52 @@ export class BotApiService {
   async getUserSubmissions(telegramId: string): Promise<BotSubmissionListRow[]> {
     const user = await this.findOrCreateUserByTelegramId(telegramId);
 
-    let includeProfile = await this.resolveStudentProfileColumnsFullyPresent();
-
-    const listSql = (profile: boolean) => `
+    const result = await this.app.db.query<BotSubmissionListRow>(
+      `
       SELECT
         s.id,
-        s.title,
+        COALESCE(
+          NULLIF(BTRIM(fi.item_title), ''),
+          NULLIF(BTRIM(s.title), ''),
+          '—'
+        ) AS title,
+        fi.category_name AS category,
+        COALESCE(
+          NULLIF(BTRIM(fi.subcategory_label), ''),
+          NULLIF(BTRIM(fi.subcategory_slug), '')
+        ) AS subcategory,
+        fi.item_description AS description,
+        CASE
+          WHEN fi.external_link IS NOT NULL AND BTRIM(fi.external_link) <> '' THEN BTRIM(fi.external_link)
+          ELSE NULL
+        END AS link,
+        COALESCE(fi.has_file, false) AS "hasFile",
         s.status::text AS status,
         s.total_score::text AS "totalPoints",
-        s.created_at AS "createdAt",
-        ${profile ? `u.student_full_name AS "studentFullName",
-        u.faculty AS "faculty",
-        u.student_id AS "studentId"` : `NULL::text AS "studentFullName",
-        NULL::text AS "faculty",
-        NULL::text AS "studentId"`}
+        s.created_at AS "createdAt"
       FROM submissions s
-      INNER JOIN users u ON u.id = s.user_id
+      LEFT JOIN LATERAL (
+        SELECT
+          si.title AS item_title,
+          c.name AS category_name,
+          cs.label AS subcategory_label,
+          cs.slug AS subcategory_slug,
+          si.description AS item_description,
+          si.external_link,
+          (si.proof_file_url IS NOT NULL AND BTRIM(si.proof_file_url) <> '') AS has_file
+        FROM submission_items si
+        LEFT JOIN categories c ON c.id = si.category_id
+        LEFT JOIN category_subcategories cs ON cs.id = si.subcategory_id
+        WHERE si.submission_id = s.id
+        ORDER BY si.created_at ASC, si.id ASC
+        LIMIT 1
+      ) fi ON true
       WHERE s.user_id = $1
       ORDER BY s.created_at DESC
       LIMIT 10
-    `;
-
-    let result;
-    try {
-      result = await this.app.db.query<BotSubmissionListRow>(listSql(includeProfile), [user.id]);
-    } catch (err) {
-      if (isPgUndefinedColumnError(err)) {
-        this.logProfileSchemaMismatch(err, "getUserSubmissions.select");
-        this.invalidateStudentProfileColumnCache();
-        includeProfile = false;
-        result = await this.app.db.query<BotSubmissionListRow>(listSql(false), [user.id]);
-      } else {
-        throw err;
-      }
-    }
+      `,
+      [user.id],
+    );
 
     return result.rows;
   }

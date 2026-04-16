@@ -21,12 +21,14 @@ interface BotApiUserRow {
 interface BotApiSubmissionRow {
   id: string;
   title: string;
+  category: string | null;
+  subcategory: string | null;
+  description: string | null;
+  link: string | null;
+  hasFile: boolean;
   status: string;
   totalPoints: string;
   createdAt: string;
-  studentFullName: string | null;
-  faculty: string | null;
-  studentId: string | null;
 }
 
 interface UploadProofResponse {

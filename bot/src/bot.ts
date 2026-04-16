@@ -153,15 +153,20 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
         item.status === "draft"
           ? "Status: draft (not submitted)"
           : `Status: ${item.status}`;
-      return [
+      const block = [
         `${index + 1}. ${item.title}`,
-        `   Student: ${item.studentFullName ?? "—"}`,
-        `   Faculty: ${item.faculty ?? "—"}`,
-        `   Student ID: ${item.studentId ?? "—"}`,
-        `   ${statusLine}`,
-        `   Points: ${item.totalPoints}`,
-        `   Created: ${new Date(item.createdAt).toLocaleDateString("en-US")}`,
-      ].join("\n");
+        `   Category: ${item.category ?? "—"}`,
+        `   Subcategory: ${item.subcategory ?? "—"}`,
+        `   Description: ${item.description ?? "—"}`,
+      ];
+      if (item.link) {
+        block.push(`   Link: ${item.link}`);
+      }
+      if (item.hasFile) {
+        block.push("   File: attached");
+      }
+      block.push(`   ${statusLine}`, `   Points: ${item.totalPoints}`, `   Created: ${new Date(item.createdAt).toLocaleDateString("en-US")}`);
+      return block.join("\n");
     });
 
     await ctx.reply(`My Submissions:\n\n${lines.join("\n\n")}`, mainMenuKeyboard());
