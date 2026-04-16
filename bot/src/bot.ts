@@ -148,6 +148,9 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
       return;
     }
 
+    const noSnake = (s: string | null | undefined) =>
+      s ? s.replace(/_/g, " ").replace(/\s+/g, " ").trim() : "—";
+
     const lines = submissions.map((item, index) => {
       const statusLine =
         item.status === "draft"
@@ -155,8 +158,8 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
           : `Status: ${item.status}`;
       const block = [
         `${index + 1}. ${item.title}`,
-        `   Category: ${item.category ?? "—"}`,
-        `   Subcategory: ${item.subcategory ?? "—"}`,
+        `   Category: ${noSnake(item.category)}`,
+        `   Subcategory: ${noSnake(item.subcategory)}`,
         `   Description: ${item.description ?? "—"}`,
       ];
       if (item.link) {

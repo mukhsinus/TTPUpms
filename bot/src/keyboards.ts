@@ -22,8 +22,7 @@ export function degreePickerKeyboard() {
 }
 
 function categoryButtonLabel(c: CategoryCatalogEntry): string {
-  const t = c.title?.trim();
-  return t || c.code.replace(/_/g, " ");
+  return c.title.trim() || "Category";
 }
 
 /** Two categories per row; callback cat_<uuid> — labels use human title from API. */
@@ -40,37 +39,20 @@ export function categoryPickerKeyboard(categories: CategoryCatalogEntry[]) {
   return Markup.inlineKeyboard(rows);
 }
 
-function standardizedTestsSubButtonLabel(slug: string, fallback: string): string {
-  if (slug === "high") return "SAT 1400+";
-  if (slug === "mid") return "SAT 1300–1400";
-  if (slug === "low") return "SAT 1200–1300";
-  return fallback;
-}
-
 /** Callback sub_<slug> — category is already chosen in session */
-export function subcategoryPickerKeyboard(
-  subcategories: CategoryCatalogEntry["subcategories"],
-  options?: { categoryCode?: string },
-) {
+export function subcategoryPickerKeyboard(subcategories: CategoryCatalogEntry["subcategories"]) {
   const rows: ReturnType<typeof Markup.button.callback>[][] = [];
-  const code = options?.categoryCode;
   function subButtonLabel(s: (typeof subcategories)[number]): string {
-    const t = s.title?.trim();
-    const lab = s.label?.trim();
-    return t || lab || s.slug.replace(/_/g, " ");
+    return s.title.trim() || "Type";
   }
 
   for (let i = 0; i < subcategories.length; i += 2) {
     const a = subcategories[i];
-    const humanA = subButtonLabel(a);
-    const labelA =
-      code === "standardized_tests" ? standardizedTestsSubButtonLabel(a.slug, humanA) : humanA;
+    const labelA = subButtonLabel(a);
     const row = [Markup.button.callback(labelA, `sub_${a.slug}`)];
     if (subcategories[i + 1]) {
       const b = subcategories[i + 1];
-      const humanB = subButtonLabel(b);
-      const labelB =
-        code === "standardized_tests" ? standardizedTestsSubButtonLabel(b.slug, humanB) : humanB;
+      const labelB = subButtonLabel(b);
       row.push(Markup.button.callback(labelB, `sub_${b.slug}`));
     }
     rows.push(row);

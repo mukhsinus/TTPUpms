@@ -78,6 +78,65 @@ function mapBotUserRow(user: BotApiUserRow): AuthenticatedTelegramUser {
   };
 }
 
+/** Display layer: never show snake_case from code/name/slug in UI. */
+function stripUnderscoresDisplay(s: string): string {
+  return s.replace(/_/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function universalWhatCounts(): string {
+  return (
+    "• Describe only real activities you can prove with documents.\n" +
+    "• Your proof should match the title and description you enter next."
+  );
+}
+
+function universalScoring(category: Pick<CategoryCatalogEntry, "minScore" | "maxScore">): string {
+  const min = category.minScore;
+  const max = category.maxScore;
+  if (Number.isFinite(min) && Number.isFinite(max)) {
+    return (
+      "• Reviewers apply the official UPMS rubric.\n" +
+      `• Typical points band for this category: ${min}–${max} (subject to caps and final review).`
+    );
+  }
+  return "• Reviewers apply the official UPMS rubric; final points are assigned after review.";
+}
+
+type ApiCategoryCatalogRow = Omit<CategoryCatalogEntry, "whatCounts" | "scoring"> & {
+  hasSubcategories?: boolean;
+  whatCounts?: string;
+  scoring?: string;
+};
+
+function normalizeCategoryCatalogEntry(c: ApiCategoryCatalogRow): CategoryCatalogEntry {
+  const titleSource = (c.title ?? c.name ?? c.code ?? "").toString();
+  const title = stripUnderscoresDisplay(titleSource);
+  const subcategories = (c.subcategories ?? []).map((s) => {
+    const subTitleSource = (s.title ?? s.label ?? s.slug ?? "").toString();
+    return {
+      ...s,
+      title: stripUnderscoresDisplay(subTitleSource),
+    };
+  });
+  const hasSubcategories = c.hasSubcategories ?? subcategories.length > 0;
+  const whatCountsRaw = c.whatCounts?.trim();
+  const scoringRaw = c.scoring?.trim();
+  return {
+    id: c.id,
+    code: c.code,
+    title,
+    name: c.name,
+    description: c.description,
+    type: c.type,
+    minScore: c.minScore,
+    maxScore: c.maxScore,
+    hasSubcategories,
+    whatCounts: whatCountsRaw ? stripUnderscoresDisplay(whatCountsRaw) : universalWhatCounts(),
+    scoring: scoringRaw ? stripUnderscoresDisplay(scoringRaw) : universalScoring(c),
+    subcategories,
+  };
+}
+
 interface ApiEnvelope<T> {
   data: T | null;
   error: {
@@ -274,16 +333,8 @@ export class UpmsService {
   }
 
   async getCategoriesCatalog(): Promise<CategoryCatalogEntry[]> {
-    type Row = CategoryCatalogEntry & { hasSubcategories?: boolean };
-    const raw = await this.requestJson<Row[]>("/api/bot/categories", { method: "GET" });
-    return raw.map((c) => ({
-      ...c,
-      hasSubcategories: c.hasSubcategories ?? c.subcategories.length > 0,
-      subcategories: c.subcategories.map((s) => ({
-        ...s,
-        title: (s.title ?? s.label).trim() || s.label,
-      })),
-    }));
+    const raw = await this.requestJson<ApiCategoryCatalogRow[]>("/api/bot/categories", { method: "GET" });
+    return raw.map((c) => normalizeCategoryCatalogEntry(c));
   }
 
   async createDraftSubmission(telegramId: string, title: string): Promise<{ submissionId: string }> {

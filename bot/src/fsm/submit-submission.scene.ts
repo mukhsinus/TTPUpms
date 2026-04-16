@@ -21,14 +21,6 @@ const NO_CATEGORIES_MSG = "No categories available. Please try later.";
 const MSG_PICK_CATEGORY =
   "📋 What are you submitting?\n\nTap a category. You can add several achievements before sending everything for review.";
 
-const MSG_TITLE_STEP =
-  "✏️ Enter a short title for your achievement\n\n" +
-  "Examples:\n" +
-  "• IELTS 7.5 certificate\n" +
-  "• Hackathon winner 2025\n" +
-  "• Internship at Google\n\n" +
-  "Keep it short and clear — one line is enough.";
-
 const MSG_DESCRIPTION_STEP =
   "📝 Describe what you did\n\n" +
   "Please include:\n" +
@@ -58,100 +50,31 @@ const MSG_LINK_STEP =
 const MSG_SUBCATEGORY_PROMPT =
   "🎯 Choose the specific type\n\nPlease choose a specific type of achievement for this category:";
 
-type CategoryUxFallback = { body: string; whatCounts: string[]; scoring: string[] };
+/** Backend submission validation requires `metadata.place` for this subcategory slug. */
+const SUB_SLUG_REQUIRING_PLACE_METADATA = "olympiad_participation";
 
-/** When `category.description` is empty — official-style guidance only in the bot (no API change). */
-const CATEGORY_UX_FALLBACKS: Record<string, CategoryUxFallback> = {
-  internal_competitions: {
-    body: "Contests and competitions held inside the university (faculty or whole university level).",
-    whatCounts: [
-      "Official contests with documented results",
-      "Your rank or prize (if applicable)",
-      "Organizer and level (faculty vs university)",
-    ],
-    scoring: ["Points follow the official rubric for this category", "Final score is set after review"],
-  },
-  IT_certificates: {
-    body: "Industry IT and cloud certifications (vendor exams, professional tracks, courses with assessment).",
-    whatCounts: [
-      "Valid certificate or transcript of a recognized exam",
-      "Level that matches the certificate type you select next",
-    ],
-    scoring: ["Range depends on certificate tier", "Reviewers verify authenticity and level"],
-  },
-  language_certificates: {
-    body: "Language exams such as IELTS, TOEFL, or equivalent standardized language tests.",
-    whatCounts: ["Official score report or certificate", "Test date and band/score visible on the document"],
-    scoring: ["Bands map to fixed steps in the rubric", "Final points after review"],
-  },
-  standardized_tests: {
-    body: "Standardized tests such as SAT / GRE / GMAT (or equivalents configured in UPMS).",
-    whatCounts: ["Official score report", "Test type and date"],
-    scoring: ["Band-based fixed points", "Caps apply per official rules"],
-  },
-  scientific_activity: {
-    body: "Research output: papers, patents, conferences, projects, and comparable scientific work.",
-    whatCounts: ["Publication, patent number, conference name, or clear project role", "Dates and your contribution"],
-    scoring: ["Mixed fixed and range lines", "Expert review may apply for some lines"],
-  },
-  olympiads: {
-    body: "Subject olympiads, hackathons, and competitions with placement or official ranking.",
-    whatCounts: ["Official invitation, diploma, or results listing your place", "National or international level when applicable"],
-    scoring: ["Placement (1st / 2nd / 3rd) drives points where configured", "Final score after review"],
-  },
-  volunteering: {
-    body: "Volunteering and civic engagement recognized by the university (e.g. student union, university departments).",
-    whatCounts: ["Role, organization, period", "Letter or proof from the responsible office when possible"],
-    scoring: ["Range scoring at category level", "Final points after review"],
-  },
-  work_experience: {
-    body: "Paid work, internships, or professional roles relevant to your studies or career.",
-    whatCounts: ["Employer, position, dates", "Contract, HR letter, or official internship confirmation"],
-    scoring: ["Duration bucket affects points", "Final score after review"],
-  },
-  educational_activity: {
-    body: "Contributions to educational quality: materials, exams, digital content, peer learning, etc.",
-    whatCounts: ["What you produced or facilitated", "Department or course context if applicable"],
-    scoring: ["Manual / expert scoring", "Capped per official rules"],
-  },
-  student_initiatives: {
-    body: "Student-led initiatives that improve student life (e.g. organizing study courses).",
-    whatCounts: ["Your role and scope", "Evidence of delivery (schedule, attendance, recommendation)"],
-    scoring: ["Manual / expert scoring", "Capped per official rules"],
-  },
-};
-
-function categoryUxKey(cat: CategoryCatalogEntry): string {
-  return (cat.code || cat.name).trim();
-}
-
-function bullets(lines: string[]): string {
-  return lines.map((l) => `• ${l}`).join("\n");
-}
-
-function buildCategoryIntro(cat: CategoryCatalogEntry): string {
-  const key = categoryUxKey(cat);
-  const fb = CATEGORY_UX_FALLBACKS[key] ?? {
-    body: "Submit an achievement that fits this category in UPMS.",
-    whatCounts: ["Clear, honest description", "Proof that matches your title"],
-    scoring: ["Points are assigned after admin/reviewer review"],
-  };
-  const title = (cat.title?.trim() || cat.name.replace(/_/g, " ")).trim() || cat.name;
-  const main = (cat.description ?? "").trim() || fb.body;
-  const band =
-    Number.isFinite(cat.minScore) && Number.isFinite(cat.maxScore)
-      ? `Typical band for this category: ${cat.minScore}–${cat.maxScore} points (before caps).`
-      : null;
-  const scoringLines = [...fb.scoring, ...(band ? [band] : [])];
-  return (
-    `📂 ${title}\n\n` +
-    `${main}\n\n` +
-    `💡 What counts:\n` +
-    `${bullets(fb.whatCounts)}\n\n` +
-    `🏆 Scoring:\n` +
-    `${bullets(scoringLines)}\n\n` +
-    `Next: a short title, then details and proof.`
-  );
+function buildCategoryIntroMessage(
+  category: CategoryCatalogEntry,
+  options?: { includeTitlePrompt?: boolean },
+): string {
+  const includeTitlePrompt = options?.includeTitlePrompt ?? true;
+  const desc = category.description ?? "";
+  const what = category.whatCounts ?? "";
+  const scoring = category.scoring ?? "";
+  let msg =
+    `📂 ${category.title}\n\n` +
+    `${desc}\n\n` +
+    `💡 What counts:\n${what}\n\n` +
+    `🏆 Scoring:\n${scoring}`;
+  if (includeTitlePrompt) {
+    msg +=
+      `\n\n✏️ Now enter a short title for your achievement:\n\n` +
+      `Examples:\n` +
+      `• IELTS 7.5 certificate\n` +
+      `• Hackathon winner 2025\n` +
+      `• Internship at Google`;
+  }
+  return msg;
 }
 
 function friendlyPersistenceError(e: unknown): string {
@@ -172,6 +95,10 @@ function friendlyPersistenceError(e: unknown): string {
   return raw;
 }
 
+function prettifySnake(s: string): string {
+  return s.replace(/_/g, " ").replace(/\s+/g, " ").trim();
+}
+
 function formatSubmissionSuccessSummary(item: {
   title: string;
   category: string;
@@ -180,14 +107,17 @@ function formatSubmissionSuccessSummary(item: {
   link: string | null;
   hasFile: boolean;
 }): string {
+  const catLine = item.category?.includes("_") ? prettifySnake(item.category) : item.category;
+  const subRaw = item.subcategory?.trim();
+  const subLine = subRaw ? (subRaw.includes("_") ? prettifySnake(subRaw) : subRaw) : "—";
   const lines = [
     "Your achievement has been submitted and is under review.",
     "",
     "Summary:",
     "",
     `Title: ${item.title}`,
-    `Category: ${item.category}`,
-    `Subcategory: ${item.subcategory?.trim() ? item.subcategory : "—"}`,
+    `Category: ${catLine}`,
+    `Subcategory: ${subLine}`,
     `Description: ${item.description}`,
   ];
   if (item.link) {
@@ -205,6 +135,15 @@ function st(ctx: BotContext): SubmitFlowState {
 
 function categoryHasSubcategories(entry: CategoryCatalogEntry): boolean {
   return entry.hasSubcategories ?? entry.subcategories.length > 0;
+}
+
+/** Single selectable line whose scoring uses placement metadata (matches UPMS submission rules). */
+function catalogUsesPlaceMetadataSubcategory(category: CategoryCatalogEntry): boolean {
+  return (
+    categoryHasSubcategories(category) &&
+    category.subcategories.length === 1 &&
+    category.subcategories[0].slug === SUB_SLUG_REQUIRING_PLACE_METADATA
+  );
 }
 
 function resetFlowState(s: SubmitFlowState): void {
@@ -444,34 +383,33 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       const s = st(ctx);
       s.categoryId = selected.id;
       s.categoryName = selected.name;
-      {
-        const t = selected.title?.trim();
-        s.categoryDisplayTitle =
-          t && t.length > 0 ? t : selected.name.replace(/_/g, " ").trim() || selected.name;
-      }
+      s.categoryDisplayTitle = selected.title.trim() || selected.name;
 
       botFlowStep(ctx.from?.id, "category_selected", {
         categoryCode: selected.code ?? selected.name,
         hasSubcategories: categoryHasSubcategories(selected),
       });
 
-      await ctx.reply(buildCategoryIntro(selected), cancelOnlyKeyboard());
-
       if (!categoryHasSubcategories(selected)) {
         delete s.subcategorySlug;
         delete s.subcategoryLabel;
         delete s.itemMetadata;
         botFlowStep(ctx.from?.id, "subcategory_skipped", { categoryCode: selected.code ?? selected.name });
-        await ctx.reply(MSG_TITLE_STEP, cancelOnlyKeyboard());
+        await ctx.reply(buildCategoryIntroMessage(selected, { includeTitlePrompt: true }), cancelOnlyKeyboard());
         return ctx.wizard.selectStep(3);
       }
 
-      if (selected.code === "olympiads" && categoryHasSubcategories(selected) && selected.subcategories.length === 1) {
+      await ctx.reply(buildCategoryIntroMessage(selected, { includeTitlePrompt: false }), cancelOnlyKeyboard());
+
+      if (catalogUsesPlaceMetadataSubcategory(selected)) {
         const only = selected.subcategories[0]!;
         s.subcategorySlug = only.slug;
-        s.subcategoryLabel = (only.title ?? only.label).trim() || only.label;
+        s.subcategoryLabel = only.title.trim() || "Type";
         delete s.itemMetadata;
-        botFlowStep(ctx.from?.id, "placement_prompt", { categoryCode: "olympiads", subcategorySlug: only.slug });
+        botFlowStep(ctx.from?.id, "placement_prompt", {
+          categoryCode: selected.code ?? selected.name,
+          subcategorySlug: only.slug,
+        });
         await ctx.reply(
           "🥇 Pick your placement (1st, 2nd, or 3rd) using the buttons below.",
           olympiadPlacementKeyboard(),
@@ -479,7 +417,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
         return ctx.wizard.next();
       }
 
-      await ctx.reply(MSG_SUBCATEGORY_PROMPT, subcategoryPickerKeyboard(selected.subcategories, { categoryCode: selected.code }));
+      await ctx.reply(MSG_SUBCATEGORY_PROMPT, subcategoryPickerKeyboard(selected.subcategories));
       return ctx.wizard.next();
     },
     // 2 — subcategory (or olympiad placement)
@@ -495,7 +433,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       const categories = s.categories ?? [];
       const cat = categories.find((c) => c.id === s.categoryId);
 
-      if (cat?.code === "olympiads" && s.subcategorySlug === "olympiad_participation") {
+      if (cat && s.subcategorySlug === SUB_SLUG_REQUIRING_PLACE_METADATA) {
         if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data.startsWith("place_")) {
           await ctx.answerCbQuery();
           const placeNum = Number(ctx.callbackQuery.data.replace("place_", ""));
@@ -505,7 +443,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
           }
           s.itemMetadata = { place: placeNum };
           botFlowStep(ctx.from?.id, "placement_selected", { place: placeNum });
-          await ctx.reply(MSG_TITLE_STEP, cancelOnlyKeyboard());
+          await ctx.reply(buildCategoryIntroMessage(cat, { includeTitlePrompt: true }), cancelOnlyKeyboard());
           return ctx.wizard.next();
         }
 
@@ -541,18 +479,23 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
 
       await ctx.answerCbQuery();
       s.subcategorySlug = sub.slug;
-      s.subcategoryLabel = (sub.title ?? sub.label).trim() || sub.label;
+      s.subcategoryLabel = sub.title.trim() || "Type";
 
       botFlowStep(ctx.from?.id, "subcategory_selected", { categoryCode: cat?.code ?? cat?.name, subcategorySlug: slug });
 
-      if (cat?.code === "olympiads" && slug === "olympiad_participation") {
+      if (cat && slug === SUB_SLUG_REQUIRING_PLACE_METADATA) {
         delete s.itemMetadata;
-        botFlowStep(ctx.from?.id, "placement_prompt", { categoryCode: "olympiads", subcategorySlug: slug });
+        botFlowStep(ctx.from?.id, "placement_prompt", { categoryCode: cat?.code ?? cat?.name, subcategorySlug: slug });
         await ctx.reply("🥇 Pick your placement (1st, 2nd, or 3rd) below.", olympiadPlacementKeyboard());
         return;
       }
 
-      await ctx.reply(MSG_TITLE_STEP, cancelOnlyKeyboard());
+      if (!cat) {
+        await ctx.reply("Session error. Start again from the menu.", mainMenuKeyboard());
+        await leaveWithMenu(ctx);
+        return;
+      }
+      await ctx.reply(buildCategoryIntroMessage(cat, { includeTitlePrompt: true }), cancelOnlyKeyboard());
       return ctx.wizard.next();
     },
     // 3 — title

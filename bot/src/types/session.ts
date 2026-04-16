@@ -10,6 +10,9 @@ export interface CategoryCatalogEntry {
   type: string;
   minScore: number;
   maxScore: number;
+  /** Universal UX copy (filled in client from API + rules; no per-category branching in UI). */
+  whatCounts: string;
+  scoring: string;
   /** True when API exposes at least one selectable sub-line (matches backend). */
   hasSubcategories: boolean;
   subcategories: Array<{
