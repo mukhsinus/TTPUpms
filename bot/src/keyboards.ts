@@ -11,6 +11,16 @@ export const mainMenuKeyboard = () =>
     [Markup.button.callback("Help", "menu_help")],
   ]);
 
+export function degreePickerKeyboard() {
+  return Markup.inlineKeyboard([
+    [
+      Markup.button.callback("Bachelor", "deg_bachelor"),
+      Markup.button.callback("Master", "deg_master"),
+    ],
+    CANCEL_ROW,
+  ]);
+}
+
 /** Two categories per row; callback cat_<uuid> */
 export function categoryPickerKeyboard(categories: CategoryCatalogEntry[]) {
   const rows: ReturnType<typeof Markup.button.callback>[][] = [];

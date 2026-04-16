@@ -9,42 +9,14 @@ import {
   subcategoryPickerKeyboard,
 } from "../keyboards";
 import type { UpmsService } from "../services/upms.service";
-import { UpmsApiError } from "../services/upms-api-error";
 import type { BotContext, SubmitFlowState } from "../types/session";
+import { userFacingUpmsMessage } from "../utils/upms-user-facing";
 
 const TEN_MB = 10 * 1024 * 1024;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const NO_CATEGORIES_MSG = "No categories available. Please try later.";
 const SUCCESS_MSG = "Your achievement has been submitted and is under review.";
-
-function userFacingUpmsMessage(error: unknown, fallback: string): string {
-  if (error instanceof UpmsApiError) {
-    switch (error.code) {
-      case "SUBMISSION_LIMIT_EXCEEDED":
-        return "You already have 3 active submissions (draft, submitted, or under review). Finish or withdraw one in UPMS before starting another from Telegram.";
-      case "UNAUTHORIZED":
-        return "UPMS rejected this request (bot API key). If you manage the server, ensure BOT_API_KEY matches between the bot and backend.";
-      case "VALIDATION_ERROR":
-        return error.message;
-      case "TELEGRAM_NOT_LINKED":
-        return "Your Telegram account is not linked to a university profile in UPMS.";
-      case "EMPTY_RESPONSE":
-      case "INVALID_JSON":
-      case "INVALID_ENVELOPE":
-        return "UPMS returned an unreadable response. Please try again in a moment.";
-      case "IDEMPOTENCY_IN_PROGRESS":
-      case "IDEMPOTENCY_KEY_CONFLICT":
-        return "Please wait a moment and try again.";
-      default:
-        return error.message || fallback;
-    }
-  }
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return fallback;
-}
 
 function st(ctx: BotContext): SubmitFlowState {
   return ctx.wizard.state as SubmitFlowState;
@@ -53,6 +25,9 @@ function st(ctx: BotContext): SubmitFlowState {
 function resetFlowState(s: SubmitFlowState): void {
   delete s.needsEmailLink;
   delete s.submissionId;
+  delete s.identityStudentFullName;
+  delete s.identityFaculty;
+  delete s.identityStudentId;
   delete s.categories;
   delete s.categoryId;
   delete s.categoryName;
@@ -99,6 +74,30 @@ async function presentCategoryStep(ctx: BotContext, upms: UpmsService): Promise<
   }
 
   const s = st(ctx);
+
+  let me;
+  try {
+    me = await upms.lookupUserByTelegramId({
+      telegramId: tgId,
+      telegramUsername: ctx.from?.username ? String(ctx.from.username) : null,
+      fullName: [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") || null,
+    });
+  } catch (e) {
+    console.error("Submit flow: profile refresh failed:", e);
+    await ctx.reply(userFacingUpmsMessage(e, "Could not verify your profile."), mainMenuKeyboard());
+    return false;
+  }
+
+  if (me && me.role === "student" && !me.isProfileCompleted) {
+    await ctx.reply("Complete your student profile before submitting achievements. Use /start to continue setup.");
+    return false;
+  }
+
+  if (me) {
+    s.identityStudentFullName = me.studentFullName ?? me.fullName ?? undefined;
+    s.identityFaculty = me.faculty ?? undefined;
+    s.identityStudentId = me.studentId ?? undefined;
+  }
 
   let categories;
   try {
@@ -194,6 +193,15 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       }
       if (linked) {
         ctx.session.authenticatedTelegramId = tg;
+        ctx.session.profileComplete =
+          linked.role !== "student" || (linked.isProfileCompleted ?? false) === true;
+        if (linked.role === "student" && !linked.isProfileCompleted) {
+          await ctx.reply(
+            "Complete your student profile before submitting achievements. Use /start to continue setup.",
+          );
+          await leaveWithMenu(ctx);
+          return;
+        }
         const ok = await presentCategoryStep(ctx, upms);
         if (!ok) {
           await leaveWithMenu(ctx);
@@ -249,6 +257,15 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
         }
         ctx.session.authenticatedTelegramId = String(fromId);
         st(ctx).needsEmailLink = false;
+        ctx.session.profileComplete =
+          user.role !== "student" || (user.isProfileCompleted ?? false) === true;
+        if (user.role === "student" && !user.isProfileCompleted) {
+          await ctx.reply(
+            "Linked successfully. Complete your student profile before submitting. Use /start to continue setup.",
+          );
+          await leaveWithMenu(ctx);
+          return;
+        }
       } catch (e) {
         await ctx.reply(`Could not link account: ${userFacingUpmsMessage(e, "Unknown error")}`, cancelOnlyKeyboard());
         return;
@@ -534,9 +551,20 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
           return;
         }
 
-        const summary = ["Preview — submit when ready:", "", ...blocks.map((b, i) => `— Item ${i + 1} —\n${b}`)].join(
-          "\n\n",
-        );
+        const s0 = st(ctx);
+        const identity = [
+          "Applicant",
+          `Student name: ${s0.identityStudentFullName ?? "—"}`,
+          `Faculty: ${s0.identityFaculty ?? "—"}`,
+          `Student ID: ${s0.identityStudentId ?? "—"}`,
+        ].join("\n");
+        const summary = [
+          "Preview — submit when ready:",
+          "",
+          identity,
+          "",
+          ...blocks.map((b, i) => `— Item ${i + 1} —\n${b}`),
+        ].join("\n\n");
         await ctx.reply(summary, previewSubmitKeyboard());
         return ctx.wizard.next();
       }

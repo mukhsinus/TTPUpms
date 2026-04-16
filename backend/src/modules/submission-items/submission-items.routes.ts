@@ -4,6 +4,7 @@ import { idempotencyOnSend, idempotencyPreHandler } from "../../middleware/idemp
 import { userWriteRateLimitPreHandler } from "../../middleware/user-write-rate-limit.middleware";
 import { SubmissionItemsController } from "./submission-items.controller";
 import { ScoringRulesRepository } from "../scoring/scoring-rules.repository";
+import { UsersRepository } from "../users/users.repository";
 import { SubmissionItemsRepository } from "./submission-items.repository";
 import { SubmissionItemsService } from "./submission-items.service";
 
@@ -16,7 +17,8 @@ const submissionItemsWriteRate = userWriteRateLimitPreHandler({
 export async function submissionItemsRoutes(app: FastifyInstance): Promise<void> {
   const repository = new SubmissionItemsRepository(app);
   const scoringRules = new ScoringRulesRepository(app);
-  const service = new SubmissionItemsService(repository, scoringRules);
+  const usersRepository = new UsersRepository(app);
+  const service = new SubmissionItemsService(repository, scoringRules, usersRepository);
   const controller = new SubmissionItemsController(service);
   const itemsPostIdempotency = idempotencyPreHandler(app, "submission-items", { requireIdempotencyKey: true });
   const itemsFlatPostIdempotency = idempotencyPreHandler(app, "submission-items-flat", {

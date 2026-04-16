@@ -7,23 +7,39 @@ import type { AuditLogRepository } from "../audit/audit-log.repository";
 import { normalizeMetadata } from "../scoring/scoring-metadata";
 import type { SubmissionItemsService } from "../submission-items/submission-items.service";
 import type { SubmissionsService } from "../submissions/submissions.service";
+import type { UsersRepository } from "../users/users.repository";
 import { AntiFraudError, type AntiFraudService } from "../validation/anti-fraud.service";
 import { BotApiHttpError } from "./bot-api-errors";
 
+function parseUserRole(value: string): "student" | "reviewer" | "admin" {
+  if (value === "student" || value === "reviewer" || value === "admin") {
+    return value;
+  }
+  return "student";
+}
+
 interface UserRow {
   id: string;
-  role: "student" | "reviewer" | "admin";
+  role: string;
   full_name: string | null;
   telegram_id: string | null;
   telegram_username: string | null;
+  student_full_name: string | null;
+  faculty: string | null;
+  student_id: string | null;
+  degree: string | null;
+  is_profile_completed: boolean;
 }
 
-interface SubmissionRow {
+export interface BotSubmissionListRow {
   id: string;
   title: string;
   status: string;
   totalPoints: string;
   createdAt: string;
+  studentFullName: string | null;
+  faculty: string | null;
+  studentId: string | null;
 }
 
 export interface BotUser {
@@ -31,6 +47,11 @@ export interface BotUser {
   role: "student" | "reviewer" | "admin";
   telegramUsername: string | null;
   fullName: string | null;
+  studentFullName: string | null;
+  faculty: string | null;
+  studentId: string | null;
+  degree: "bachelor" | "master" | null;
+  isProfileCompleted: boolean;
 }
 
 const TEN_MB = 10 * 1024 * 1024;
@@ -77,8 +98,20 @@ function isMissingRelationError(error: unknown): boolean {
   );
 }
 
+/** PostgreSQL undefined_column — e.g. SELECT references a column not yet migrated. */
+function isPgUndefinedColumnError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: string }).code === "42703"
+  );
+}
+
 export class BotApiService {
   private telegramUsernameColumnAvailable: boolean | null = null;
+  /** When true, all five student profile columns are present (cached after information_schema check). */
+  private studentProfileColumnsFullyPresentCached: true | null = null;
 
   constructor(
     private readonly app: FastifyInstance,
@@ -86,6 +119,7 @@ export class BotApiService {
     private readonly submissions: SubmissionsService,
     private readonly submissionItems: SubmissionItemsService,
     private readonly antiFraud: AntiFraudService,
+    private readonly usersRepository: UsersRepository,
   ) {}
 
   private async hasTelegramUsernameColumn(): Promise<boolean> {
@@ -107,17 +141,100 @@ export class BotApiService {
     return this.telegramUsernameColumnAvailable;
   }
 
+  private invalidateStudentProfileColumnCache(): void {
+    this.studentProfileColumnsFullyPresentCached = null;
+  }
+
+  private logProfileSchemaMismatch(error: unknown, queryContext: string): void {
+    const code =
+      typeof error === "object" && error !== null && "code" in error
+        ? String((error as { code?: unknown }).code)
+        : undefined;
+    const column =
+      typeof error === "object" && error !== null && "column" in error
+        ? String((error as { column?: unknown }).column)
+        : undefined;
+    const message = error instanceof Error ? error.message : String(error);
+    this.app.log.warn(
+      {
+        event: "db_schema_mismatch",
+        queryContext,
+        err: { code, column, message },
+      },
+      "PostgreSQL undefined column (42703); using SQL fallback without student profile columns",
+    );
+  }
+
+  /**
+   * True when all five student profile columns exist on public.users.
+   * Only `true` is cached so a later migration is picked up without redeploying.
+   */
+  private async resolveStudentProfileColumnsFullyPresent(): Promise<boolean> {
+    if (this.studentProfileColumnsFullyPresentCached === true) {
+      return true;
+    }
+    const result = await this.app.db.query<{ c: string }>(
+      `
+      SELECT COUNT(*)::text AS c
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'users'
+        AND column_name IN (
+          'student_full_name',
+          'degree',
+          'faculty',
+          'student_id',
+          'is_profile_completed'
+        )
+      `,
+    );
+    const count = Number(result.rows[0]?.c ?? "0");
+    if (count === 5) {
+      this.studentProfileColumnsFullyPresentCached = true;
+      return true;
+    }
+    return false;
+  }
+
+  private profileSelectFragment(include: boolean): string {
+    if (include) {
+      return `student_full_name,
+        faculty,
+        student_id,
+        degree::text AS degree,
+        is_profile_completed`;
+    }
+    return `NULL::text AS student_full_name,
+        NULL::text AS faculty,
+        NULL::text AS student_id,
+        NULL::text AS degree,
+        false AS is_profile_completed`;
+  }
+
+  private profileReturningFragment(include: boolean): string {
+    if (include) {
+      return ", student_full_name, faculty, student_id, degree::text AS degree, is_profile_completed";
+    }
+    return ", NULL::text AS student_full_name, NULL::text AS faculty, NULL::text AS student_id, NULL::text AS degree, false AS is_profile_completed";
+  }
+
   private toBotUser(row: UserRow): BotUser {
+    const deg = row.degree;
     return {
       id: row.id,
-      role: row.role,
+      role: parseUserRole(String(row.role)),
       telegramUsername: row.telegram_username,
       fullName: row.full_name,
+      studentFullName: row.student_full_name,
+      faculty: row.faculty,
+      studentId: row.student_id,
+      degree: deg === "bachelor" || deg === "master" ? deg : null,
+      isProfileCompleted: Boolean(row.is_profile_completed),
     };
   }
 
   /** Keeps Supabase JWT app_metadata.role aligned with public.users.role after linking. */
-  private async syncAuthAppMetadataRoleFromDb(userId: string, role: UserRow["role"]): Promise<void> {
+  private async syncAuthAppMetadataRoleFromDb(userId: string, role: BotUser["role"]): Promise<void> {
     try {
       const { data, error } = await this.app.supabaseAdmin.auth.admin.getUserById(userId);
       if (error || !data?.user) {
@@ -220,7 +337,9 @@ export class BotApiService {
   /** Draft submission for Telegram multi-item flow (POST /api/submissions equivalent). */
   async createDraftSubmissionForBot(telegramId: string): Promise<{ submissionId: string }> {
     const user = await this.findOrCreateUserByTelegramId(telegramId);
-    const draftTitle = `Telegram submission ${randomUUID().slice(0, 8)}`;
+    const displayName = (user.studentFullName ?? user.fullName ?? "Student").trim().slice(0, 80);
+    const sid = (user.studentId ?? "pending").trim().slice(0, 32);
+    const draftTitle = `Achievement request — ${sid} — ${displayName}`.slice(0, 200);
     try {
       const created = await this.submissions.createSubmission(toAuthUser(user), {
         title: draftTitle,
@@ -230,6 +349,38 @@ export class BotApiService {
     } catch (error) {
       throw toBotApiError(error);
     }
+  }
+
+  async completeProfileFromBot(
+    telegramId: string,
+    input: {
+      student_full_name: string;
+      degree: "bachelor" | "master";
+      faculty: string;
+      student_id: string;
+    },
+  ): Promise<BotUser> {
+    const user = await this.findOrCreateUserByTelegramId(telegramId);
+    if (user.role !== "student") {
+      throw new BotApiHttpError(403, "Only students complete this profile.", "FORBIDDEN");
+    }
+
+    try {
+      await this.usersRepository.updateProfile(user.id, {
+        studentFullName: input.student_full_name.trim(),
+        degree: input.degree,
+        faculty: input.faculty.trim(),
+        studentId: input.student_id.trim(),
+      });
+    } catch (error) {
+      throw toBotApiError(error);
+    }
+
+    const refreshed = await this.findUserByTelegramId(telegramId);
+    if (!refreshed) {
+      throw new BotApiHttpError(500, "Could not reload profile after update.", "INTERNAL_SERVER_ERROR");
+    }
+    return refreshed;
   }
 
   /**
@@ -378,15 +529,34 @@ export class BotApiService {
     const telegramUsernameSelect = hasTelegramUsername
       ? "telegram_username"
       : "NULL::text AS telegram_username";
-    const result = await this.app.db.query<UserRow>(
-      `
-      SELECT id, role, full_name, telegram_id, ${telegramUsernameSelect}
+
+    let includeProfile = await this.resolveStudentProfileColumnsFullyPresent();
+    const selectSql = (profile: boolean) => `
+      SELECT
+        id,
+        role::text AS role,
+        full_name,
+        telegram_id,
+        ${telegramUsernameSelect},
+        ${this.profileSelectFragment(profile)}
       FROM users
       WHERE telegram_id = $1::bigint
       LIMIT 1
-      `,
-      [telegramId],
-    );
+    `;
+
+    let result;
+    try {
+      result = await this.app.db.query<UserRow>(selectSql(includeProfile), [telegramId]);
+    } catch (err) {
+      if (isPgUndefinedColumnError(err)) {
+        this.logProfileSchemaMismatch(err, "findUserByTelegramId.select");
+        this.invalidateStudentProfileColumnCache();
+        includeProfile = false;
+        result = await this.app.db.query<UserRow>(selectSql(false), [telegramId]);
+      } else {
+        throw err;
+      }
+    }
 
     const row = result.rows[0];
     if (!row) return null;
@@ -453,35 +623,51 @@ export class BotApiService {
       const nextUsername = identity?.telegramUsername ? identity.telegramUsername.trim() : null;
       const nextFullName = identity?.fullName ? identity.fullName.trim() : null;
 
-      const result = hasTelegramUsername
-        ? await this.app.db.query<UserRow>(
-            `
+      let includeProfile = await this.resolveStudentProfileColumnsFullyPresent();
+      const runLink = async (profile: boolean) =>
+        hasTelegramUsername
+          ? this.app.db.query<UserRow>(
+              `
             UPDATE users
             SET telegram_id = $2::bigint,
                 telegram_username = COALESCE($3, telegram_username),
                 full_name = COALESCE($4, full_name),
                 updated_at = NOW()
             WHERE lower(email) = lower($1)
-            RETURNING id, role, full_name, telegram_id, telegram_username
+            RETURNING id, role::text AS role, full_name, telegram_id, telegram_username${this.profileReturningFragment(profile)}
             `,
-            [email, telegramId, nextUsername, nextFullName],
-          )
-        : await this.app.db.query<UserRow>(
-            `
+              [email, telegramId, nextUsername, nextFullName],
+            )
+          : this.app.db.query<UserRow>(
+              `
             UPDATE users
             SET telegram_id = $2::bigint,
                 full_name = COALESCE($3, full_name),
                 updated_at = NOW()
             WHERE lower(email) = lower($1)
-            RETURNING id, role, full_name, telegram_id, NULL::text AS telegram_username
+            RETURNING id, role::text AS role, full_name, telegram_id, NULL::text AS telegram_username${this.profileReturningFragment(profile)}
             `,
-            [email, telegramId, nextFullName],
-          );
+              [email, telegramId, nextFullName],
+            );
+
+      let result;
+      try {
+        result = await runLink(includeProfile);
+      } catch (err) {
+        if (isPgUndefinedColumnError(err)) {
+          this.logProfileSchemaMismatch(err, "linkTelegramByEmail.returning");
+          this.invalidateStudentProfileColumnCache();
+          includeProfile = false;
+          result = await runLink(false);
+        } else {
+          throw err;
+        }
+      }
 
       const row = result.rows[0];
       if (!row) return null;
 
-      await this.syncAuthAppMetadataRoleFromDb(row.id, row.role);
+      await this.syncAuthAppMetadataRoleFromDb(row.id, parseUserRole(String(row.role)));
 
       this.app.log.info(
         { telegram_id: telegramId, user_id: row.id, source: "linked_by_email" },
@@ -575,18 +761,43 @@ export class BotApiService {
     }
   }
 
-  async getUserSubmissions(telegramId: string): Promise<SubmissionRow[]> {
+  async getUserSubmissions(telegramId: string): Promise<BotSubmissionListRow[]> {
     const user = await this.findOrCreateUserByTelegramId(telegramId);
-    const result = await this.app.db.query<SubmissionRow>(
-      `
-      SELECT id, title, status, total_score::text AS "totalPoints", created_at AS "createdAt"
-      FROM submissions
-      WHERE user_id = $1
-      ORDER BY created_at DESC
+
+    let includeProfile = await this.resolveStudentProfileColumnsFullyPresent();
+
+    const listSql = (profile: boolean) => `
+      SELECT
+        s.id,
+        s.title,
+        s.status::text AS status,
+        s.total_score::text AS "totalPoints",
+        s.created_at AS "createdAt",
+        ${profile ? `u.student_full_name AS "studentFullName",
+        u.faculty AS "faculty",
+        u.student_id AS "studentId"` : `NULL::text AS "studentFullName",
+        NULL::text AS "faculty",
+        NULL::text AS "studentId"`}
+      FROM submissions s
+      INNER JOIN users u ON u.id = s.user_id
+      WHERE s.user_id = $1
+      ORDER BY s.created_at DESC
       LIMIT 10
-      `,
-      [user.id],
-    );
+    `;
+
+    let result;
+    try {
+      result = await this.app.db.query<BotSubmissionListRow>(listSql(includeProfile), [user.id]);
+    } catch (err) {
+      if (isPgUndefinedColumnError(err)) {
+        this.logProfileSchemaMismatch(err, "getUserSubmissions.select");
+        this.invalidateStudentProfileColumnCache();
+        includeProfile = false;
+        result = await this.app.db.query<BotSubmissionListRow>(listSql(false), [user.id]);
+      } else {
+        throw err;
+      }
+    }
 
     return result.rows;
   }

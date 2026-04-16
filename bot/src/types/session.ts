@@ -15,6 +15,10 @@ export interface SubmitFlowState extends Scenes.WizardSessionData {
   needsEmailLink?: boolean;
   /** Draft submission id (POST /api/bot/submissions/draft). */
   submissionId?: string;
+  /** Copied from profile for previews (not stored on submissions). */
+  identityStudentFullName?: string;
+  identityFaculty?: string;
+  identityStudentId?: string;
   categories?: CategoryCatalogEntry[];
   categoryId?: string;
   categoryName?: string;
@@ -29,6 +33,8 @@ export interface SubmitFlowState extends Scenes.WizardSessionData {
 
 export interface BotSession extends Scenes.WizardSession<SubmitFlowState> {
   authenticatedTelegramId?: string;
+  /** False when a linked student must finish onboarding; true for completed profiles and non-students. */
+  profileComplete?: boolean;
 }
 
 export interface BotContext extends Context {

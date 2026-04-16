@@ -13,9 +13,11 @@ import { SubmissionItemsRepository } from "../submission-items/submission-items.
 import { SubmissionItemsService } from "../submission-items/submission-items.service";
 import { SubmissionsRepository } from "../submissions/submissions.repository";
 import { SubmissionsService } from "../submissions/submissions.service";
+import { UsersRepository } from "../users/users.repository";
 import { AntiFraudService } from "../validation/anti-fraud.service";
 import { ServiceError } from "../../utils/service-error";
 import { BotApiHttpError } from "./bot-api-errors";
+import { updateUserProfileBodySchema } from "../users/users.schema";
 import { BotApiService } from "./bot-api.service";
 
 const linkSchema = z.object({
@@ -82,6 +84,10 @@ const submitDraftParamsSchema = z.object({
 });
 
 const submitDraftBodySchema = z.object({
+  telegram_id: z.string().regex(/^\d+$/, "telegram_id must be numeric"),
+});
+
+const completeStudentProfileSchema = updateUserProfileBodySchema.extend({
   telegram_id: z.string().regex(/^\d+$/, "telegram_id must be numeric"),
 });
 
@@ -176,11 +182,22 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
   const submissionsRepository = new SubmissionsRepository(app);
   const notifications = new NotificationService(app);
   const antiFraud = new AntiFraudService(app);
-  const submissionsService = new SubmissionsService(submissionsRepository, notifications, antiFraud, audit);
+  const usersRepository = new UsersRepository(app);
+  const submissionsService = new SubmissionsService(
+    submissionsRepository,
+    notifications,
+    antiFraud,
+    audit,
+    usersRepository,
+  );
   const submissionItemsRepository = new SubmissionItemsRepository(app);
   const scoringRules = new ScoringRulesRepository(app);
-  const submissionItemsService = new SubmissionItemsService(submissionItemsRepository, scoringRules);
-  const service = new BotApiService(app, audit, submissionsService, submissionItemsService, antiFraud);
+  const submissionItemsService = new SubmissionItemsService(
+    submissionItemsRepository,
+    scoringRules,
+    usersRepository,
+  );
+  const service = new BotApiService(app, audit, submissionsService, submissionItemsService, antiFraud, usersRepository);
 
   app.addHook("onSend", idempotencyOnSend(app));
 
@@ -249,6 +266,25 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
       handleRouteError(app, reply, error);
     }
   });
+
+  app.post(
+    "/users/profile/complete",
+    { preHandler: botWriteIdempotency(app, "bot_users_profile_complete") },
+    async (request, reply) => {
+      try {
+        const body = completeStudentProfileSchema.parse(request.body);
+        const user = await service.completeProfileFromBot(body.telegram_id, {
+          student_full_name: body.student_full_name,
+          degree: body.degree,
+          faculty: body.faculty,
+          student_id: body.student_id,
+        });
+        reply.status(200).send(success(user));
+      } catch (error) {
+        handleRouteError(app, reply, error);
+      }
+    },
+  );
 
   app.post(
     "/submissions/draft",

@@ -12,12 +12,14 @@ import {
 import { isPgUniqueViolation } from "../../utils/pg-errors";
 import { ServiceError } from "../../utils/service-error";
 import type { AuthUser } from "../../types/auth-user";
+import type { UsersRepository } from "../users/users.repository";
 import { assertStudentMayEditSubmissionContent } from "../submissions/submission-transitions";
 
 export class SubmissionItemsService {
   constructor(
     private readonly repository: SubmissionItemsRepository,
     private readonly scoringRules: ScoringRulesRepository,
+    private readonly users: UsersRepository,
   ) {}
 
   async addItem(
@@ -26,6 +28,8 @@ export class SubmissionItemsService {
     body: AddSubmissionItemBody,
   ): Promise<SubmissionItemEntity> {
     const submission = await this.requireOwnedSubmissionEditableByStudent(user, submissionId);
+
+    await this.users.assertStudentProfileCompleteForSubmission(submission.userId);
 
     const bounds = await this.repository.findCategoryBounds(body.category_id);
     if (!bounds) {

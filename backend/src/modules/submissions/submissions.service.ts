@@ -5,6 +5,7 @@ import type { NotificationService } from "../notifications/notification.service"
 import type { AntiFraudService } from "../validation/anti-fraud.service";
 import { assertStudentMaySubmitFromStatus } from "./submission-transitions";
 import { MAX_ACTIVE_SUBMISSIONS_PER_USER } from "./submission-quota";
+import type { UsersRepository } from "../users/users.repository";
 import type { SubmissionsRepository, SubmissionEntity } from "./submissions.repository";
 import type { CreateSubmissionBody } from "./submissions.schema";
 
@@ -14,6 +15,7 @@ export class SubmissionsService {
     private readonly notifications: NotificationService,
     private readonly antiFraud: AntiFraudService,
     private readonly audit: AuditLogRepository,
+    private readonly users: UsersRepository,
   ) {}
 
   async createSubmission(user: AuthUser, input: CreateSubmissionBody): Promise<SubmissionEntity> {
@@ -22,6 +24,8 @@ export class SubmissionsService {
     if (user.role !== "admin" && input.userId && input.userId !== user.id) {
       throw new ServiceError(403, "You cannot create submissions for another user");
     }
+
+    await this.users.assertStudentProfileCompleteForSubmission(targetUserId);
 
     await this.assertActiveSubmissionQuota(targetUserId, user.role);
 
@@ -79,6 +83,8 @@ export class SubmissionsService {
     }
 
     assertStudentMaySubmitFromStatus(submission.status);
+
+    await this.users.assertStudentProfileCompleteForSubmission(submission.userId);
 
     const missingProof = await this.repository.countItemsMissingProof(submissionId);
     if (missingProof > 0) {

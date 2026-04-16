@@ -11,6 +11,11 @@ interface BotApiUserRow {
   role: "student" | "reviewer" | "admin";
   telegramUsername: string | null;
   fullName: string | null;
+  studentFullName: string | null;
+  faculty: string | null;
+  studentId: string | null;
+  degree: "bachelor" | "master" | null;
+  isProfileCompleted: boolean;
 }
 
 interface BotApiSubmissionRow {
@@ -19,6 +24,9 @@ interface BotApiSubmissionRow {
   status: string;
   totalPoints: string;
   createdAt: string;
+  studentFullName: string | null;
+  faculty: string | null;
+  studentId: string | null;
 }
 
 interface UploadProofResponse {
@@ -32,6 +40,25 @@ export interface AuthenticatedTelegramUser {
   role: "student" | "reviewer" | "admin";
   telegramUsername: string | null;
   fullName: string | null;
+  studentFullName: string | null;
+  faculty: string | null;
+  studentId: string | null;
+  degree: "bachelor" | "master" | null;
+  isProfileCompleted: boolean;
+}
+
+function mapBotUserRow(user: BotApiUserRow): AuthenticatedTelegramUser {
+  return {
+    id: user.id,
+    role: user.role,
+    telegramUsername: user.telegramUsername,
+    fullName: user.fullName,
+    studentFullName: user.studentFullName ?? null,
+    faculty: user.faculty ?? null,
+    studentId: user.studentId ?? null,
+    degree: user.degree ?? null,
+    isProfileCompleted: Boolean(user.isProfileCompleted),
+  };
 }
 
 interface ApiEnvelope<T> {
@@ -188,12 +215,7 @@ export class UpmsService {
       return null;
     }
 
-    return {
-      id: user.id,
-      role: user.role,
-      telegramUsername: user.telegramUsername,
-      fullName: user.fullName,
-    };
+    return mapBotUserRow(user);
   }
 
   /** Ensures a user row exists (used by list/points/upload). */
@@ -211,12 +233,7 @@ export class UpmsService {
       }),
     });
 
-    return {
-      id: user.id,
-      role: user.role,
-      telegramUsername: user.telegramUsername,
-      fullName: user.fullName,
-    };
+    return mapBotUserRow(user);
   }
 
   async linkTelegramByEmail(input: {
@@ -245,14 +262,27 @@ export class UpmsService {
     }
 
     const user = envelope.data;
-    return user
-      ? {
-          id: user.id,
-          role: user.role,
-          telegramUsername: user.telegramUsername,
-          fullName: user.fullName,
-        }
-      : null;
+    return user ? mapBotUserRow(user) : null;
+  }
+
+  async completeStudentProfile(input: {
+    telegramId: string;
+    studentFullName: string;
+    degree: "bachelor" | "master";
+    faculty: string;
+    studentId: string;
+  }): Promise<AuthenticatedTelegramUser> {
+    const data = await this.requestJson<BotApiUserRow>("/api/bot/users/profile/complete", {
+      method: "POST",
+      body: JSON.stringify({
+        telegram_id: input.telegramId,
+        student_full_name: input.studentFullName,
+        degree: input.degree,
+        faculty: input.faculty,
+        student_id: input.studentId,
+      }),
+    });
+    return mapBotUserRow(data);
   }
 
   async getCategoriesCatalog(): Promise<CategoryCatalogEntry[]> {
