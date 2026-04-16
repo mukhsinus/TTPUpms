@@ -10,9 +10,13 @@ export interface CategoryCatalogEntry {
   type: string;
   minScore: number;
   maxScore: number;
+  /** True when API exposes at least one selectable sub-line (matches backend). */
+  hasSubcategories: boolean;
   subcategories: Array<{
     slug: string;
     label: string;
+    /** Human-readable button text (no slug). */
+    title: string;
     minScore: number;
     maxScore: number;
     scoringMode: string;
@@ -30,6 +34,8 @@ export interface SubmitFlowState extends Scenes.WizardSessionData {
   categories?: CategoryCatalogEntry[];
   categoryId?: string;
   categoryName?: string;
+  /** API category.title for previews (human, no snake_case). */
+  categoryDisplayTitle?: string;
   subcategorySlug?: string;
   subcategoryLabel?: string;
   /** e.g. olympiads: { place: 1 | 2 | 3 } */

@@ -274,7 +274,16 @@ export class UpmsService {
   }
 
   async getCategoriesCatalog(): Promise<CategoryCatalogEntry[]> {
-    return this.requestJson<CategoryCatalogEntry[]>("/api/bot/categories", { method: "GET" });
+    type Row = CategoryCatalogEntry & { hasSubcategories?: boolean };
+    const raw = await this.requestJson<Row[]>("/api/bot/categories", { method: "GET" });
+    return raw.map((c) => ({
+      ...c,
+      hasSubcategories: c.hasSubcategories ?? c.subcategories.length > 0,
+      subcategories: c.subcategories.map((s) => ({
+        ...s,
+        title: (s.title ?? s.label).trim() || s.label,
+      })),
+    }));
   }
 
   async createDraftSubmission(telegramId: string, title: string): Promise<{ submissionId: string }> {

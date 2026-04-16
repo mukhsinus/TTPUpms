@@ -275,6 +275,7 @@ export class SubmissionItemsRepository {
       SELECT COUNT(*)::text AS n
       FROM category_subcategories
       WHERE category_id = $1
+        AND slug IS DISTINCT FROM 'general'
       `,
       [categoryId],
     );
@@ -292,6 +293,7 @@ export class SubmissionItemsRepository {
       SELECT id
       FROM category_subcategories
       WHERE category_id = $1
+        AND slug IS DISTINCT FROM 'general'
       ORDER BY sort_order ASC, id ASC
       LIMIT 1
       `,

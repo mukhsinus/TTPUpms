@@ -21,13 +21,18 @@ export function degreePickerKeyboard() {
   ]);
 }
 
-/** Two categories per row; callback cat_<uuid> */
+function categoryButtonLabel(c: CategoryCatalogEntry): string {
+  const t = c.title?.trim();
+  return t || c.code.replace(/_/g, " ");
+}
+
+/** Two categories per row; callback cat_<uuid> — labels use human title from API. */
 export function categoryPickerKeyboard(categories: CategoryCatalogEntry[]) {
   const rows: ReturnType<typeof Markup.button.callback>[][] = [];
   for (let i = 0; i < categories.length; i += 2) {
-    const row = [Markup.button.callback(categories[i].name, `cat_${categories[i].id}`)];
+    const row = [Markup.button.callback(categoryButtonLabel(categories[i]), `cat_${categories[i].id}`)];
     if (categories[i + 1]) {
-      row.push(Markup.button.callback(categories[i + 1].name, `cat_${categories[i + 1].id}`));
+      row.push(Markup.button.callback(categoryButtonLabel(categories[i + 1]), `cat_${categories[i + 1].id}`));
     }
     rows.push(row);
   }
@@ -49,15 +54,23 @@ export function subcategoryPickerKeyboard(
 ) {
   const rows: ReturnType<typeof Markup.button.callback>[][] = [];
   const code = options?.categoryCode;
+  function subButtonLabel(s: (typeof subcategories)[number]): string {
+    const t = s.title?.trim();
+    const lab = s.label?.trim();
+    return t || lab || s.slug.replace(/_/g, " ");
+  }
+
   for (let i = 0; i < subcategories.length; i += 2) {
     const a = subcategories[i];
+    const humanA = subButtonLabel(a);
     const labelA =
-      code === "standardized_tests" ? standardizedTestsSubButtonLabel(a.slug, a.label) : a.label;
+      code === "standardized_tests" ? standardizedTestsSubButtonLabel(a.slug, humanA) : humanA;
     const row = [Markup.button.callback(labelA, `sub_${a.slug}`)];
     if (subcategories[i + 1]) {
       const b = subcategories[i + 1];
+      const humanB = subButtonLabel(b);
       const labelB =
-        code === "standardized_tests" ? standardizedTestsSubButtonLabel(b.slug, b.label) : b.label;
+        code === "standardized_tests" ? standardizedTestsSubButtonLabel(b.slug, humanB) : humanB;
       row.push(Markup.button.callback(labelB, `sub_${b.slug}`));
     }
     rows.push(row);

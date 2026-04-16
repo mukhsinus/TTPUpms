@@ -75,6 +75,31 @@ export interface BotUser {
   isProfileCompleted: boolean;
 }
 
+/** GET /api/bot/categories — stable contract for Telegram clients. */
+export interface BotCategoryCatalogSub {
+  slug: string;
+  label: string;
+  /** Human label for buttons (same as label; no slug in UI). */
+  title: string;
+  minScore: number;
+  maxScore: number;
+  scoringMode: string;
+  defaultPoints: number | null;
+}
+
+export interface BotCategoryCatalogEntry {
+  id: string;
+  code: string;
+  title: string;
+  name: string;
+  description: string | null;
+  type: string;
+  minScore: number;
+  maxScore: number;
+  hasSubcategories: boolean;
+  subcategories: BotCategoryCatalogSub[];
+}
+
 const TEN_MB = 10 * 1024 * 1024;
 const ALLOWED_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
 
@@ -117,6 +142,10 @@ function isMissingRelationError(error: unknown): boolean {
     "code" in error &&
     (error as { code?: string }).code === "42P01"
   );
+}
+
+function isPostgresUndefinedColumnError(error: unknown): boolean {
+  return getPostgresDriverErrorFields(error)?.code === "42703";
 }
 
 /** PostgreSQL undefined_column — e.g. SELECT references a column not yet migrated. */
@@ -277,46 +306,8 @@ export class BotApiService {
     }
   }
 
-  async getCategoriesCatalog(): Promise<
-    Array<{
-      id: string;
-      code: string;
-      title: string;
-      name: string;
-      description: string | null;
-      type: string;
-      minScore: number;
-      maxScore: number;
-      subcategories: Array<{
-        slug: string;
-        label: string;
-        minScore: number;
-        maxScore: number;
-        scoringMode: string;
-        defaultPoints: number | null;
-      }>;
-    }>
-  > {
-    let result;
-    try {
-      result = await this.app.db.query<{
-        id: string;
-        code: string | null;
-        title: string | null;
-        name: string;
-        description: string | null;
-        type: string;
-        min_score: string;
-        max_score: string;
-        slug: string | null;
-        label: string | null;
-        sort_order: number | null;
-        sub_min: string | null;
-        sub_max: string | null;
-        scoring_mode: string | null;
-        sub_default: string | null;
-      }>(
-        `
+  async getCategoriesCatalog(): Promise<BotCategoryCatalogEntry[]> {
+    const sqlFull = `
         SELECT
           c.id,
           COALESCE(NULLIF(BTRIM(c.code), ''), c.name) AS code,
@@ -338,16 +329,93 @@ export class BotApiService {
           AND cs.slug IS DISTINCT FROM 'general'
         WHERE c.name IS DISTINCT FROM 'legacy_uncategorized'
         ORDER BY c.name ASC, cs.sort_order ASC NULLS LAST, cs.slug ASC NULLS LAST
-        `,
-      );
+        `;
+
+    const sqlLegacy = `
+        SELECT
+          c.id,
+          c.name AS code,
+          c.name AS title,
+          c.name,
+          c.description,
+          c.type::text AS type,
+          c.min_score,
+          c.max_score,
+          cs.slug,
+          cs.label,
+          cs.sort_order,
+          cs.min_points::text AS sub_min,
+          cs.max_points::text AS sub_max,
+          cs.scoring_mode::text AS scoring_mode,
+          cs.default_points::text AS sub_default
+        FROM categories c
+        LEFT JOIN category_subcategories cs ON cs.category_id = c.id
+          AND cs.slug IS DISTINCT FROM 'general'
+        WHERE c.name IS DISTINCT FROM 'legacy_uncategorized'
+        ORDER BY c.name ASC, cs.sort_order ASC NULLS LAST, cs.slug ASC NULLS LAST
+        `;
+
+    type Row = {
+      id: string;
+      code: string | null;
+      title: string | null;
+      name: string;
+      description: string | null;
+      type: string;
+      min_score: string;
+      max_score: string;
+      slug: string | null;
+      label: string | null;
+      sort_order: number | null;
+      sub_min: string | null;
+      sub_max: string | null;
+      scoring_mode: string | null;
+      sub_default: string | null;
+    };
+
+    let rows: Row[];
+    try {
+      const result = await this.app.db.query<Row>(sqlFull);
+      rows = result.rows;
     } catch (error) {
       if (isMissingRelationError(error)) {
         this.app.log.warn("categories tables are not available yet; returning empty catalog");
         return [];
       }
-      throw error;
+      if (isPostgresUndefinedColumnError(error)) {
+        this.app.log.warn(
+          { err: error },
+          "getCategoriesCatalog: categories.code/title missing; using legacy projection",
+        );
+        const result = await this.app.db.query<Row>(sqlLegacy);
+        rows = result.rows;
+      } else {
+        throw error;
+      }
     }
 
+    return this.aggregateCatalogRows(rows);
+  }
+
+  private aggregateCatalogRows(
+    rows: Array<{
+      id: string;
+      code: string | null;
+      title: string | null;
+      name: string;
+      description: string | null;
+      type: string;
+      min_score: string;
+      max_score: string;
+      slug: string | null;
+      label: string | null;
+      sort_order: number | null;
+      sub_min: string | null;
+      sub_max: string | null;
+      scoring_mode: string | null;
+      sub_default: string | null;
+    }>,
+  ): BotCategoryCatalogEntry[] {
     const byId = new Map<
       string,
       {
@@ -359,18 +427,11 @@ export class BotApiService {
         type: string;
         minScore: number;
         maxScore: number;
-        subcategories: Array<{
-          slug: string;
-          label: string;
-          minScore: number;
-          maxScore: number;
-          scoringMode: string;
-          defaultPoints: number | null;
-        }>;
+        subcategories: BotCategoryCatalogSub[];
       }
     >();
 
-    for (const row of result.rows) {
+    for (const row of rows) {
       let entry = byId.get(row.id);
       if (!entry) {
         entry = {
@@ -391,9 +452,11 @@ export class BotApiService {
         const subMax = row.sub_max !== null && row.sub_max !== "" ? Number(row.sub_max) : entry.maxScore;
         const subDefault =
           row.sub_default !== null && row.sub_default !== "" ? Number(row.sub_default) : null;
+        const label = row.label;
         entry.subcategories.push({
           slug: row.slug,
-          label: row.label,
+          label,
+          title: label,
           minScore: subMin,
           maxScore: subMax,
           scoringMode: row.scoring_mode ?? row.type,
@@ -402,7 +465,18 @@ export class BotApiService {
       }
     }
 
-    return [...byId.values()];
+    return [...byId.values()].map((e) => ({
+      id: e.id,
+      code: e.code,
+      title: e.title,
+      name: e.name,
+      description: e.description,
+      type: e.type,
+      minScore: e.minScore,
+      maxScore: e.maxScore,
+      hasSubcategories: e.subcategories.length > 0,
+      subcategories: e.subcategories,
+    }));
   }
 
   /** Draft submission for Telegram multi-item flow (POST /api/submissions equivalent). */
@@ -922,14 +996,13 @@ export class BotApiService {
       SELECT id, slug
       FROM category_subcategories
       WHERE category_id = $1
+        AND slug IS DISTINCT FROM 'general'
       ORDER BY sort_order ASC NULLS LAST, slug ASC
       LIMIT 1
       `,
       [categoryRow.id],
     );
-    if (!genSub.rows[0]) {
-      throw new BotApiHttpError(400, "Category is missing a subcategory", "VALIDATION_ERROR");
-    }
+    const defaultSubSlug = genSub.rows[0]?.slug;
 
     try {
       const created = await this.submissions.createSubmission(auth, {
@@ -939,7 +1012,7 @@ export class BotApiService {
 
       await this.submissionItems.addItem(auth, created.id, {
         category_id: categoryRow.id,
-        subcategory: genSub.rows[0].slug,
+        ...(defaultSubSlug ? { subcategory: defaultSubSlug } : {}),
         title: `Achievement: ${input.category}`,
         description: input.details,
         proof_file_url: input.proofFileUrl,
