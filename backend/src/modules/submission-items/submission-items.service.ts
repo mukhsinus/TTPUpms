@@ -8,14 +8,8 @@ import type { ScoringRulesRepository } from "../scoring/scoring-rules.repository
 import { normalizeMetadata, resolveFixedPointsFromRules } from "../scoring/scoring-metadata";
 import { isPgUniqueViolation } from "../../utils/pg-errors";
 import { ServiceError } from "../../utils/service-error";
+import type { AuthUser } from "../../types/auth-user";
 import { assertStudentMayEditSubmissionContent } from "../submissions/submission-transitions";
-
-type Role = "student" | "reviewer" | "admin";
-
-export interface AuthUser {
-  id: string;
-  role: Role;
-}
 
 export class SubmissionItemsService {
   constructor(

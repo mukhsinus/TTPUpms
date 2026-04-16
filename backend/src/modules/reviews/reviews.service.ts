@@ -6,7 +6,6 @@ import type {
 import type { CompleteSubmissionReviewBody, ReviewItemBody } from "./reviews.schema";
 import type { AuditLogRepository } from "../audit/audit-log.repository";
 import type { NotificationService } from "../notifications/notification.service";
-import type { ScoringService } from "../scoring/scoring.service";
 import type { ScoringRulesRepository } from "../scoring/scoring-rules.repository";
 import { resolveFixedPointsFromRules } from "../scoring/scoring-metadata";
 import {
@@ -14,19 +13,12 @@ import {
   REVIEW_ACTIVE_STATUSES,
 } from "../submissions/submission-transitions";
 import { ServiceError } from "../../utils/service-error";
-
-type Role = "student" | "reviewer" | "admin";
-
-export interface AuthUser {
-  id: string;
-  role: Role;
-}
+import type { AuthUser } from "../../types/auth-user";
 
 export class ReviewsService {
   constructor(
     private readonly repository: ReviewsRepository,
     private readonly notifications: NotificationService,
-    private readonly scoring: ScoringService,
     private readonly audit: AuditLogRepository,
     private readonly scoringRules: ScoringRulesRepository,
   ) {}
@@ -37,7 +29,7 @@ export class ReviewsService {
     }
 
     if (user.role === "reviewer") {
-      return this.repository.findSubmissionsAwaitingReview();
+      return this.repository.findSubmissionsAwaitingReviewForReviewer(user.id);
     }
 
     throw new ServiceError(403, "Forbidden");
@@ -118,29 +110,18 @@ export class ReviewsService {
 
     await this.assertValidItemScore(item, finalScore, scoringKind);
 
-    let reviewed: ReviewSubmissionItemEntity;
     if (submission.status === "submitted") {
       assertValidTransition("submitted", "review");
-      reviewed = await this.repository.reviewItemPromotingFromSubmitted({
-        submissionId,
-        itemId,
-        reviewerId: user.id,
-        score: finalScore,
-        comment: body.comment,
-        decision: body.decision,
-      });
-    } else {
-      reviewed = await this.repository.reviewItem({
-        itemId,
-        reviewerId: user.id,
-        score: finalScore,
-        comment: body.comment,
-        decision: body.decision,
-      });
     }
 
-    await this.scoring.syncSubmissionTotalPoints(submissionId);
-    return reviewed;
+    return this.repository.reviewSubmissionItemLocked({
+      submissionId,
+      itemId,
+      reviewerId: user.id,
+      score: finalScore,
+      comment: body.comment,
+      decision: body.decision,
+    });
   }
 
   async startSubmissionReview(user: AuthUser, submissionId: string): Promise<ReviewSubmissionEntity> {
@@ -169,34 +150,12 @@ export class ReviewsService {
 
     assertValidTransition(submission.status, body.decision);
 
-    const items = await this.repository.findSubmissionItems(submissionId);
-    if (items.length === 0) {
-      throw new ServiceError(409, "Submission has no items to review");
-    }
-
-    const unreviewedCount = await this.repository.countUnreviewedItems(submissionId);
-    if (unreviewedCount > 0) {
-      throw new ServiceError(
-        409,
-        "Each submission item must be reviewed before the submission can be finalized",
-      );
-    }
-
-    const scoringResult = await this.scoring.syncSubmissionTotalPoints(submissionId);
-
-    await this.repository.upsertSubmissionReview({
+    const updated = await this.repository.completeSubmissionReviewLocked({
       submissionId,
       reviewerId: user.id,
-      score: scoringResult.totalScore,
       decision: body.decision,
       comment: body.comment,
     });
-
-    const updated = await this.repository.setSubmissionWorkflowStatus(
-      submissionId,
-      body.decision,
-      true,
-    );
 
     if (body.decision === "approved" || body.decision === "rejected" || body.decision === "needs_revision") {
       this.notifications.notifySubmissionStatusChanged({
@@ -273,6 +232,10 @@ export class ReviewsService {
     if (user.role === "reviewer") {
       if (submission.status === "draft") {
         throw new ServiceError(403, "Submission is not available for review");
+      }
+      const assigned = await this.repository.isReviewerAssigned(submissionId, user.id);
+      if (!assigned) {
+        throw new ServiceError(403, "You are not assigned to review this submission");
       }
       return submission;
     }

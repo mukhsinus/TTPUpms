@@ -1,12 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Pool } from "pg";
+import type { AuthUser } from "./auth-user";
 
-type Role = "student" | "reviewer" | "admin";
-
-interface AuthenticatedUser {
-  id: string;
+interface AuthenticatedUser extends AuthUser {
   email: string | null;
-  role: Role;
 }
 
 interface IdempotencyContext {

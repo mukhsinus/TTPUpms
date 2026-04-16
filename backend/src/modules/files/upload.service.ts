@@ -1,19 +1,14 @@
 import { createHash, randomUUID } from "crypto";
 import type { FastifyInstance } from "fastify";
 import { env } from "../../config/env";
+import type { AuthUser } from "../../types/auth-user";
+import { ServiceError } from "../../utils/service-error";
 import type { SubmissionStatus } from "../submissions/submissions.schema";
 import { assertStudentMayEditSubmissionContent } from "../submissions/submission-transitions";
 import type { AntiFraudService } from "../validation/anti-fraud.service";
 
 const TEN_MB = 10 * 1024 * 1024;
 const ALLOWED_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
-
-type Role = "student" | "reviewer" | "admin";
-
-interface AuthUser {
-  id: string;
-  role: Role;
-}
 
 export interface UploadInput {
   user: AuthUser;
@@ -60,15 +55,6 @@ interface ItemRow {
   submission_id: string;
 }
 
-class ServiceError extends Error {
-  statusCode: number;
-
-  constructor(statusCode: number, message: string) {
-    super(message);
-    this.statusCode = statusCode;
-  }
-}
-
 function toSafeFilename(filename: string): string {
   return filename.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
@@ -112,7 +98,6 @@ export class UploadService {
     await this.antiFraud.assertNoDuplicateFile({
       userId: submission.user_id,
       checksum,
-      filename: input.filename,
     });
 
     const safeFilename = toSafeFilename(input.filename);
@@ -286,4 +271,4 @@ export class UploadService {
   }
 }
 
-export { ServiceError as FileServiceError };
+export { ServiceError as FileServiceError } from "../../utils/service-error";

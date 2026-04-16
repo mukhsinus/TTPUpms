@@ -7,7 +7,14 @@ import { userWriteRateLimitPreHandler } from "../../middleware/user-write-rate-l
 import { mapPgErrorToClient } from "../../utils/pg-http-map";
 import { failure, success } from "../../utils/http-response";
 import { AuditLogRepository } from "../audit/audit-log.repository";
+import { NotificationService } from "../notifications/notification.service";
 import { ScoringRulesRepository } from "../scoring/scoring-rules.repository";
+import { SubmissionItemsRepository } from "../submission-items/submission-items.repository";
+import { SubmissionItemsService } from "../submission-items/submission-items.service";
+import { SubmissionsRepository } from "../submissions/submissions.repository";
+import { SubmissionsService } from "../submissions/submissions.service";
+import { AntiFraudService } from "../validation/anti-fraud.service";
+import { ServiceError } from "../../utils/service-error";
 import { BotApiHttpError } from "./bot-api-errors";
 import { BotApiService } from "./bot-api.service";
 
@@ -149,6 +156,11 @@ function handleRouteError(app: FastifyInstance, reply: FastifyReply, error: unkn
     return;
   }
 
+  if (error instanceof ServiceError) {
+    reply.status(error.statusCode).send(failure(error.message, error.clientCode ?? "SERVICE_ERROR", {}));
+    return;
+  }
+
   const mapped = mapPgErrorToClient(error);
   if (mapped) {
     reply.status(mapped.status).send(failure(mapped.message, mapped.code, {}));
@@ -161,8 +173,14 @@ function handleRouteError(app: FastifyInstance, reply: FastifyReply, error: unkn
 
 export async function botApiRoutes(app: FastifyInstance): Promise<void> {
   const audit = new AuditLogRepository(app);
+  const submissionsRepository = new SubmissionsRepository(app);
+  const notifications = new NotificationService(app);
+  const antiFraud = new AntiFraudService(app);
+  const submissionsService = new SubmissionsService(submissionsRepository, notifications, antiFraud, audit);
+  const submissionItemsRepository = new SubmissionItemsRepository(app);
   const scoringRules = new ScoringRulesRepository(app);
-  const service = new BotApiService(app, audit, scoringRules);
+  const submissionItemsService = new SubmissionItemsService(submissionItemsRepository, scoringRules);
+  const service = new BotApiService(app, audit, submissionsService, submissionItemsService, antiFraud);
 
   app.addHook("onSend", idempotencyOnSend(app));
 

@@ -1,17 +1,12 @@
 import { ServiceError } from "../../utils/service-error";
+import type { AuthUser } from "../../types/auth-user";
 import type { AuditLogRepository } from "../audit/audit-log.repository";
 import type { NotificationService } from "../notifications/notification.service";
 import type { AntiFraudService } from "../validation/anti-fraud.service";
 import { assertStudentMaySubmitFromStatus } from "./submission-transitions";
+import { MAX_ACTIVE_SUBMISSIONS_PER_USER } from "./submission-quota";
 import type { SubmissionsRepository, SubmissionEntity } from "./submissions.repository";
 import type { CreateSubmissionBody } from "./submissions.schema";
-
-type Role = "student" | "reviewer" | "admin";
-
-export interface AuthUser {
-  id: string;
-  role: Role;
-}
 
 export class SubmissionsService {
   constructor(
@@ -27,6 +22,8 @@ export class SubmissionsService {
     if (user.role !== "admin" && input.userId && input.userId !== user.id) {
       throw new ServiceError(403, "You cannot create submissions for another user");
     }
+
+    await this.assertActiveSubmissionQuota(targetUserId, user.role);
 
     await this.antiFraud.assertNoDuplicateSubmission({
       userId: targetUserId,
@@ -114,6 +111,21 @@ export class SubmissionsService {
     });
 
     return updated;
+  }
+
+  private async assertActiveSubmissionQuota(targetUserId: string, actorRole: AuthUser["role"]): Promise<void> {
+    if (actorRole === "admin") {
+      return;
+    }
+
+    const count = await this.repository.countActiveSubmissionsForUser(targetUserId);
+    if (count >= MAX_ACTIVE_SUBMISSIONS_PER_USER) {
+      throw new ServiceError(
+        409,
+        `You can have at most ${MAX_ACTIVE_SUBMISSIONS_PER_USER} active submissions (draft, submitted, in review, or awaiting revision).`,
+        "QUOTA_EXCEEDED",
+      );
+    }
   }
 
   private async requireSubmission(submissionId: string): Promise<SubmissionEntity> {

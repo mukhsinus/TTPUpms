@@ -94,6 +94,21 @@ export class SubmissionsRepository {
     return mapSubmission(result.rows[0]);
   }
 
+  /** Draft, submitted, review, needs_revision — used for per-user active cap. */
+  async countActiveSubmissionsForUser(userId: string): Promise<number> {
+    const result = await this.app.db.query<{ c: string }>(
+      `
+      SELECT COUNT(*)::text AS c
+      FROM submissions
+      WHERE user_id = $1
+        AND status IN ('draft', 'submitted', 'review', 'needs_revision')
+      `,
+      [userId],
+    );
+
+    return Number(result.rows[0]?.c ?? "0");
+  }
+
   async findByUserId(userId: string): Promise<SubmissionEntity[]> {
     const result = await this.app.db.query<SubmissionRow>(
       `

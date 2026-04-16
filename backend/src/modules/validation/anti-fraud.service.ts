@@ -48,20 +48,16 @@ export class AntiFraudService {
     }
   }
 
-  async assertNoDuplicateFile(input: {
-    userId: string;
-    checksum: string;
-    filename: string;
-  }): Promise<void> {
+  async assertNoDuplicateFile(input: { userId: string; checksum: string }): Promise<void> {
     const result = await this.app.db.query<DuplicateRow>(
       `
       SELECT id
       FROM files
       WHERE user_id = $1
-        AND (checksum_sha256 = $2 OR original_filename = $3)
+        AND checksum_sha256 = $2
       LIMIT 1
       `,
-      [input.userId, input.checksum, input.filename],
+      [input.userId, input.checksum],
     );
 
     if (result.rows[0]) {

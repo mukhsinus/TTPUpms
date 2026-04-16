@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { ServiceError } from "../../utils/service-error";
 import { normalizeMetadata } from "../scoring/scoring-metadata";
+import { REVIEW_ACTIVE_STATUSES } from "../submissions/submission-transitions";
 
 type SubmissionStatus = "draft" | "submitted" | "review" | "approved" | "rejected" | "needs_revision";
 type ItemDecision = "approved" | "rejected" | null;
@@ -102,6 +103,10 @@ const submissionSelectColumns = `
   id, user_id, status, title, description, total_score, submitted_at, reviewed_at, created_at, updated_at
 `;
 
+const submissionSelectColumnsFromS = `
+  s.id, s.user_id, s.status, s.title, s.description, s.total_score, s.submitted_at, s.reviewed_at, s.created_at, s.updated_at
+`;
+
 function mapItem(row: SubmissionItemRow): ReviewSubmissionItemEntity {
   const workflowStatus = row.status as ItemWorkflowStatus;
   const approved =
@@ -142,7 +147,7 @@ function mapItem(row: SubmissionItemRow): ReviewSubmissionItemEntity {
 const submissionItemJoinedSelectColumns = `
   si.id,
   si.submission_id,
-  (SELECT s.user_id FROM submissions s WHERE s.id = si.submission_id LIMIT 1) AS user_id,
+  s.user_id AS user_id,
   c.name AS category,
   cs.slug AS subcategory,
   si.title,
@@ -161,24 +166,24 @@ const submissionItemJoinedSelectColumns = `
 `;
 
 const submissionItemReturningColumns = `
-  submission_items.id,
-  submission_items.submission_id,
-  (SELECT s.user_id FROM submissions s WHERE s.id = submission_items.submission_id LIMIT 1) AS user_id,
-  (SELECT c.name FROM categories c WHERE c.id = submission_items.category_id LIMIT 1) AS category,
-  (SELECT cs.slug FROM category_subcategories cs WHERE cs.id = submission_items.subcategory_id LIMIT 1) AS subcategory,
-  submission_items.title,
-  submission_items.description,
-  submission_items.proposed_score,
-  submission_items.approved_score,
-  submission_items.reviewer_comment,
-  submission_items.status::text AS status,
-  submission_items.reviewed_by,
-  submission_items.reviewed_at,
-  submission_items.created_at,
-  submission_items.updated_at,
-  submission_items.subcategory_id,
-  coalesce(submission_items.metadata, '{}'::jsonb) AS metadata,
-  (SELECT c.type::text FROM categories c WHERE c.id = submission_items.category_id LIMIT 1) AS category_type
+  si.id,
+  si.submission_id,
+  s.user_id AS user_id,
+  c.name AS category,
+  cs.slug AS subcategory,
+  si.title,
+  si.description,
+  si.proposed_score,
+  si.approved_score,
+  si.reviewer_comment,
+  si.status::text AS status,
+  si.reviewed_by,
+  si.reviewed_at,
+  si.created_at,
+  si.updated_at,
+  si.subcategory_id,
+  coalesce(si.metadata, '{}'::jsonb) AS metadata,
+  c.type::text AS category_type
 `;
 
 export class ReviewsRepository {
@@ -193,6 +198,27 @@ export class ReviewsRepository {
       WHERE status IN ('submitted', 'review')
       ORDER BY created_at DESC
       `,
+    );
+
+    return result.rows.map(mapSubmission);
+  }
+
+  /** Submissions in review queue that this reviewer is assigned to (legacy `reviews` row per submission). */
+  async findSubmissionsAwaitingReviewForReviewer(reviewerId: string): Promise<ReviewSubmissionEntity[]> {
+    const result = await this.app.db.query<SubmissionRow>(
+      `
+      SELECT ${submissionSelectColumnsFromS}
+      FROM submissions s
+      WHERE s.status IN ('submitted', 'review')
+        AND EXISTS (
+          SELECT 1
+          FROM reviews r
+          WHERE r.submission_id = s.id
+            AND r.reviewer_id = $1
+        )
+      ORDER BY s.created_at DESC
+      `,
+      [reviewerId],
     );
 
     return result.rows.map(mapSubmission);
@@ -246,6 +272,7 @@ export class ReviewsRepository {
       `
       SELECT ${submissionItemJoinedSelectColumns}
       FROM submission_items si
+      INNER JOIN submissions s ON s.id = si.submission_id
       LEFT JOIN categories c ON c.id = si.category_id
       LEFT JOIN category_subcategories cs ON cs.id = si.subcategory_id
       WHERE si.submission_id = $1
@@ -299,6 +326,7 @@ export class ReviewsRepository {
       `
       SELECT ${submissionItemJoinedSelectColumns}
       FROM submission_items si
+      INNER JOIN submissions s ON s.id = si.submission_id
       LEFT JOIN categories c ON c.id = si.category_id
       LEFT JOIN category_subcategories cs ON cs.id = si.subcategory_id
       WHERE si.id = $1
@@ -313,36 +341,11 @@ export class ReviewsRepository {
     return mapItem(result.rows[0]);
   }
 
-  async reviewItem(input: {
-    itemId: string;
-    reviewerId: string;
-    score: number;
-    comment?: string;
-    decision: "approved" | "rejected";
-  }): Promise<ReviewSubmissionItemEntity> {
-    const result = await this.app.db.query<SubmissionItemRow>(
-      `
-      UPDATE submission_items
-      SET
-        approved_score = $2,
-        reviewer_comment = $3,
-        status = $4::public.submission_item_status,
-        reviewed_by = $5,
-        reviewed_at = NOW(),
-        updated_at = NOW()
-      WHERE id = $1
-      RETURNING ${submissionItemReturningColumns}
-      `,
-      [input.itemId, input.score, input.comment ?? null, input.decision, input.reviewerId],
-    );
-
-    return mapItem(result.rows[0] as SubmissionItemRow);
-  }
-
   /**
-   * Atomically moves submitted → review (if still submitted) and records the item review.
+   * Locks the submission row, optionally promotes submitted → review, updates the item.
+   * `submission_items` remain the SSOT for scores; DB triggers refresh `submissions.total_score`.
    */
-  async reviewItemPromotingFromSubmitted(input: {
+  async reviewSubmissionItemLocked(input: {
     submissionId: string;
     itemId: string;
     reviewerId: string;
@@ -369,11 +372,8 @@ export class ReviewsRepository {
         throw new ServiceError(404, "Submission not found");
       }
 
-      if (rowStatus !== "submitted" && rowStatus !== "review") {
-        throw new ServiceError(
-          409,
-          `Submission in status "${rowStatus}" cannot be reviewed`,
-        );
+      if (!REVIEW_ACTIVE_STATUSES.has(rowStatus)) {
+        throw new ServiceError(409, `Submission in status "${rowStatus}" cannot be reviewed`);
       }
 
       if (rowStatus === "submitted") {
@@ -381,7 +381,7 @@ export class ReviewsRepository {
           `
           UPDATE submissions
           SET status = $2, updated_at = NOW()
-          WHERE id = $1
+          WHERE id = $1 AND status = 'submitted'
           `,
           [input.submissionId, "review"],
         );
@@ -389,7 +389,7 @@ export class ReviewsRepository {
 
       const result = await client.query<SubmissionItemRow>(
         `
-        UPDATE submission_items
+        UPDATE submission_items si
         SET
           approved_score = $2,
           reviewer_comment = $3,
@@ -397,7 +397,12 @@ export class ReviewsRepository {
           reviewed_by = $5,
           reviewed_at = NOW(),
           updated_at = NOW()
-        WHERE id = $1
+        FROM submissions s
+        LEFT JOIN categories c ON c.id = si.category_id
+        LEFT JOIN category_subcategories cs ON cs.id = si.subcategory_id
+        WHERE si.id = $1
+          AND si.submission_id = $6
+          AND s.id = si.submission_id
         RETURNING ${submissionItemReturningColumns}
         `,
         [
@@ -406,8 +411,13 @@ export class ReviewsRepository {
           input.comment ?? null,
           input.decision,
           input.reviewerId,
+          input.submissionId,
         ],
       );
+
+      if (!result.rows[0]) {
+        throw new ServiceError(404, "Submission item not found");
+      }
 
       await client.query("COMMIT");
       return mapItem(result.rows[0] as SubmissionItemRow);
@@ -437,48 +447,118 @@ export class ReviewsRepository {
     return Number(result.rows[0]?.count ?? "0");
   }
 
-  async upsertSubmissionReview(input: {
+  /**
+   * Single transaction: lock submission, verify all items reviewed, persist legacy submission-level review row
+   * with `score` = current `submissions.total_score` (derived from items via triggers), then set workflow status.
+   */
+  async completeSubmissionReviewLocked(input: {
     submissionId: string;
     reviewerId: string;
-    score: number;
     decision: "approved" | "rejected" | "needs_revision";
     comment?: string;
-  }): Promise<void> {
-    await this.app.db.query(
-      `
-      INSERT INTO reviews (submission_id, reviewer_id, score, decision, comment, reviewed_at)
-      VALUES ($1, $2, $3, $4, $5, NOW())
-      ON CONFLICT (submission_id, reviewer_id) WHERE submission_item_id IS NULL
-      DO UPDATE
-        SET score = EXCLUDED.score,
-            decision = EXCLUDED.decision,
-            comment = EXCLUDED.comment,
-            reviewed_at = NOW(),
-            updated_at = NOW()
-      `,
-      [input.submissionId, input.reviewerId, input.score, input.decision, input.comment ?? null],
-    );
-  }
+  }): Promise<ReviewSubmissionEntity> {
+    const client = await this.app.db.connect();
+    try {
+      await client.query("BEGIN");
 
-  async setSubmissionWorkflowStatus(
-    submissionId: string,
-    status: SubmissionStatus,
-    touchReviewedAt: boolean,
-  ): Promise<ReviewSubmissionEntity> {
-    const result = await this.app.db.query<SubmissionRow>(
-      `
-      UPDATE submissions
-      SET
-        status = $2,
-        reviewed_at = CASE WHEN $3::boolean THEN NOW() ELSE reviewed_at END,
-        updated_at = NOW()
-      WHERE id = $1
-      RETURNING ${submissionSelectColumns}
-      `,
-      [submissionId, status, touchReviewedAt],
-    );
+      const subRes = await client.query<SubmissionRow>(
+        `
+        SELECT ${submissionSelectColumns}
+        FROM submissions
+        WHERE id = $1
+        FOR UPDATE
+        `,
+        [input.submissionId],
+      );
 
-    return mapSubmission(result.rows[0] as SubmissionRow);
+      const sub = subRes.rows[0];
+      if (!sub) {
+        throw new ServiceError(404, "Submission not found");
+      }
+
+      if (sub.status !== "review") {
+        throw new ServiceError(
+          409,
+          'Submission review can only be completed while status is "review"',
+        );
+      }
+
+      const itemCount = await client.query<{ c: string }>(
+        `
+        SELECT COUNT(*)::text AS c
+        FROM submission_items
+        WHERE submission_id = $1
+        `,
+        [input.submissionId],
+      );
+
+      if (Number(itemCount.rows[0]?.c ?? "0") === 0) {
+        throw new ServiceError(409, "Submission has no items to review");
+      }
+
+      const pending = await client.query<{ c: string }>(
+        `
+        SELECT COUNT(*)::text AS c
+        FROM submission_items
+        WHERE submission_id = $1
+          AND status = 'pending'
+        `,
+        [input.submissionId],
+      );
+
+      if (Number(pending.rows[0]?.c ?? "0") > 0) {
+        throw new ServiceError(
+          409,
+          "Each submission item must be reviewed before the submission can be finalized",
+        );
+      }
+
+      const totalScore = Number(sub.total_score);
+
+      await client.query(
+        `
+        INSERT INTO reviews (submission_id, reviewer_id, score, decision, comment, reviewed_at)
+        VALUES ($1, $2, $3, $4, $5, NOW())
+        ON CONFLICT (submission_id, reviewer_id) WHERE submission_item_id IS NULL
+        DO UPDATE
+          SET score = EXCLUDED.score,
+              decision = EXCLUDED.decision,
+              comment = EXCLUDED.comment,
+              reviewed_at = NOW(),
+              updated_at = NOW()
+        `,
+        [input.submissionId, input.reviewerId, totalScore, input.decision, input.comment ?? null],
+      );
+
+      const updated = await client.query<SubmissionRow>(
+        `
+        UPDATE submissions
+        SET
+          status = $2,
+          reviewed_at = NOW(),
+          updated_at = NOW()
+        WHERE id = $1
+        RETURNING ${submissionSelectColumns}
+        `,
+        [input.submissionId, input.decision],
+      );
+
+      if (!updated.rows[0]) {
+        throw new ServiceError(404, "Submission not found");
+      }
+
+      await client.query("COMMIT");
+      return mapSubmission(updated.rows[0] as SubmissionRow);
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // ignore
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   /**

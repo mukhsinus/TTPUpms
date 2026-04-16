@@ -1,10 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import { createHash, randomUUID } from "crypto";
 import { env } from "../../config/env";
+import type { AuthUser } from "../../types/auth-user";
+import { ServiceError } from "../../utils/service-error";
 import type { AuditLogRepository } from "../audit/audit-log.repository";
-import type { ScoringRulesRepository } from "../scoring/scoring-rules.repository";
-import { normalizeMetadata, resolveFixedPointsFromRules } from "../scoring/scoring-metadata";
-import { isPgUniqueViolation } from "../../utils/pg-errors";
+import { normalizeMetadata } from "../scoring/scoring-metadata";
+import type { SubmissionItemsService } from "../submission-items/submission-items.service";
+import type { SubmissionsService } from "../submissions/submissions.service";
+import { AntiFraudError, type AntiFraudService } from "../validation/anti-fraud.service";
 import { BotApiHttpError } from "./bot-api-errors";
 
 interface UserRow {
@@ -48,6 +51,23 @@ function toSafeFilename(filename: string): string {
   return filename.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
+function toAuthUser(user: BotUser): AuthUser {
+  return { id: user.id, role: user.role };
+}
+
+function toBotApiError(error: unknown): BotApiHttpError {
+  if (error instanceof ServiceError) {
+    return new BotApiHttpError(error.statusCode, error.message, error.clientCode ?? "SERVICE_ERROR");
+  }
+  if (error instanceof AntiFraudError) {
+    return new BotApiHttpError(error.statusCode, error.message, "ANTI_FRAUD");
+  }
+  if (error instanceof Error) {
+    return new BotApiHttpError(500, error.message, "INTERNAL_SERVER_ERROR");
+  }
+  return new BotApiHttpError(500, "Unexpected error", "INTERNAL_SERVER_ERROR");
+}
+
 function isMissingRelationError(error: unknown): boolean {
   return (
     typeof error === "object" &&
@@ -63,37 +83,10 @@ export class BotApiService {
   constructor(
     private readonly app: FastifyInstance,
     private readonly audit: AuditLogRepository,
-    private readonly scoringRules: ScoringRulesRepository,
+    private readonly submissions: SubmissionsService,
+    private readonly submissionItems: SubmissionItemsService,
+    private readonly antiFraud: AntiFraudService,
   ) {}
-
-  private async resolveProposedScoreForBot(
-    categoryId: string,
-    subcategoryId: string,
-    metadata: Record<string, unknown>,
-  ): Promise<number> {
-    const typeRow = await this.app.db.query<{ type: string; max_score: string }>(
-      `
-      SELECT type::text AS type, max_score::text
-      FROM categories
-      WHERE id = $1
-      `,
-      [categoryId],
-    );
-    const row = typeRow.rows[0];
-    if (!row) {
-      throw new Error("Unknown category");
-    }
-    const kind = row.type === "manual" ? "expert" : row.type;
-    if (kind === "fixed") {
-      const rules = await this.scoringRules.findRulesBySubcategoryId(subcategoryId);
-      const resolved = resolveFixedPointsFromRules(metadata, rules);
-      if (resolved === null) {
-        throw new Error("Metadata does not match any scoring rule for this subcategory");
-      }
-      return resolved;
-    }
-    return Number(row.max_score);
-  }
 
   private async hasTelegramUsernameColumn(): Promise<boolean> {
     if (this.telegramUsernameColumnAvailable !== null) {
@@ -228,26 +221,15 @@ export class BotApiService {
   async createDraftSubmissionForBot(telegramId: string): Promise<{ submissionId: string }> {
     const user = await this.findOrCreateUserByTelegramId(telegramId);
     const draftTitle = `Telegram submission ${randomUUID().slice(0, 8)}`;
-    const result = await this.app.db.query<{ id: string }>(
-      `
-      INSERT INTO submissions (user_id, title, description, status)
-      VALUES ($1, $2, $3, 'draft')
-      RETURNING id
-      `,
-      [user.id, draftTitle, null],
-    );
-
-    const submissionId = result.rows[0].id;
-    await this.audit.insert({
-      actorUserId: user.id,
-      targetUserId: user.id,
-      entityTable: "submissions",
-      entityId: submissionId,
-      action: "submission_created",
-      newValues: { source: "telegram_bot", title: draftTitle, status: "draft" },
-    });
-
-    return { submissionId };
+    try {
+      const created = await this.submissions.createSubmission(toAuthUser(user), {
+        title: draftTitle,
+        description: undefined,
+      });
+      return { submissionId: created.id };
+    } catch (error) {
+      throw toBotApiError(error);
+    }
   }
 
   /**
@@ -267,222 +249,73 @@ export class BotApiService {
     this.validateProofStorageUrl(input.proofFileUrl);
 
     const user = await this.findOrCreateUserByTelegramId(input.telegramId);
-    const client = await this.app.db.connect();
+    const slug = await this.resolveBotSubcategorySlug(input.categoryId, input.subcategory);
+    const ext =
+      input.externalLink && input.externalLink.trim() !== "" ? input.externalLink.trim() : undefined;
+
     try {
-      await client.query("BEGIN");
+      const item = await this.submissionItems.addItem(toAuthUser(user), input.submissionId, {
+        category_id: input.categoryId,
+        subcategory: slug,
+        title: input.title,
+        description: input.description,
+        proof_file_url: input.proofFileUrl,
+        external_link: ext,
+        proposed_score: 0,
+        metadata: normalizeMetadata(input.metadata) as Record<string, string | number | boolean>,
+      });
 
-      const submissionLock = await client.query<{ user_id: string; status: string }>(
-        `SELECT user_id, status FROM submissions WHERE id = $1 FOR UPDATE`,
-        [input.submissionId],
-      );
-
-      const submission = submissionLock.rows[0];
-      if (!submission) {
-        throw new Error("Submission not found");
-      }
-      if (submission.user_id !== user.id) {
-        throw new Error("You cannot modify this submission");
-      }
-      if (submission.status !== "draft" && submission.status !== "needs_revision") {
-        throw new Error("Items can only be added while the submission is a draft");
-      }
-
-      const cat = await client.query<{
-        id: string;
-        name: string;
-        max_score: string;
-      }>(
-        `
-        SELECT id, name, max_score
-        FROM categories
-        WHERE id = $1
-        `,
-        [input.categoryId],
-      );
-
-      const categoryRow = cat.rows[0];
-      if (!categoryRow) {
-        throw new Error("Unknown category");
-      }
-
-      const subCount = await client.query<{ c: string }>(
-        `
-        SELECT COUNT(*)::text AS c
-        FROM category_subcategories
-        WHERE category_id = $1
-        `,
-        [input.categoryId],
-      );
-
-      const hasSubs = Number(subCount.rows[0]?.c ?? "0") > 0;
-      const slug = hasSubs ? input.subcategory?.trim() : "general";
-      if (hasSubs && !slug) {
-        throw new Error("Subcategory is required for this category");
-      }
-
-      const subcategoryRow = await client.query<{ id: string }>(
-        `
-        SELECT id
-        FROM category_subcategories
-        WHERE category_id = $1 AND slug = $2
-        LIMIT 1
-        `,
-        [input.categoryId, slug ?? "general"],
-      );
-
-      if (!subcategoryRow.rows[0]) {
-        throw new Error("Invalid subcategory for this category");
-      }
-
-      const subcategoryId = subcategoryRow.rows[0].id;
-      const metadata = normalizeMetadata(input.metadata);
-      const proposedScore = await this.resolveProposedScoreForBot(input.categoryId, subcategoryId, metadata);
-
-      const ext =
-        input.externalLink && input.externalLink.trim() !== "" ? input.externalLink.trim() : null;
-
-      const insert = await client.query<{ id: string }>(
-        `
-        INSERT INTO submission_items (
-          submission_id,
-          category_id,
-          subcategory_id,
-          title,
-          description,
-          proof_file_url,
-          external_link,
-          proposed_score,
-          metadata,
-          status
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, 'pending')
-        RETURNING id
-        `,
-        [
-          input.submissionId,
-          input.categoryId,
-          subcategoryId,
-          input.title,
-          input.description,
-          input.proofFileUrl,
-          ext,
-          proposedScore,
-          JSON.stringify(metadata),
-        ],
-      );
-
-      await client.query("COMMIT");
       this.app.log.info(
         {
           telegram_id: input.telegramId,
           user_id: user.id,
           submission_id: input.submissionId,
-          item_id: insert.rows[0].id,
+          item_id: item.id,
         },
         "Added submission item from bot",
       );
 
-      return { itemId: insert.rows[0].id };
+      return { itemId: item.id };
     } catch (error) {
-      try {
-        await client.query("ROLLBACK");
-      } catch {
-        // ignore
-      }
-      if (isPgUniqueViolation(error)) {
-        throw new BotApiHttpError(
-          409,
-          "This achievement line already exists on this submission (same category, subcategory, and title).",
-          "DUPLICATE_ITEM",
-        );
-      }
-      throw error;
-    } finally {
-      client.release();
+      throw toBotApiError(error);
     }
   }
 
   /** PATCH /api/submissions/:id/submit equivalent for Telegram bot. */
   async submitDraftFromBot(telegramId: string, submissionId: string): Promise<void> {
     const user = await this.findOrCreateUserByTelegramId(telegramId);
-
-    const client = await this.app.db.connect();
     try {
-      await client.query("BEGIN");
-
-      const subRow = await client.query<{ user_id: string; status: string; title: string }>(
-        `SELECT user_id, status, title FROM submissions WHERE id = $1 FOR UPDATE`,
-        [submissionId],
-      );
-
-      const submission = subRow.rows[0];
-      if (!submission) {
-        throw new Error("Submission not found");
-      }
-      if (submission.user_id !== user.id) {
-        throw new Error("Only the submission owner can submit");
-      }
-
-      if (submission.status !== "draft" && submission.status !== "needs_revision") {
-        throw new Error(`Submit is not allowed from status "${submission.status}"`);
-      }
-
-      const itemsCount = await client.query<{ c: string }>(
-        `SELECT COUNT(*)::text AS c FROM submission_items WHERE submission_id = $1`,
-        [submissionId],
-      );
-
-      if (Number(itemsCount.rows[0]?.c ?? "0") < 1) {
-        throw new Error("Add at least one achievement item before submitting");
-      }
-
-      const proofCheck = await client.query<{ c: string }>(
-        `
-        SELECT COUNT(*)::text AS c
-        FROM submission_items
-        WHERE submission_id = $1
-          AND (proof_file_url IS NULL OR btrim(proof_file_url) = '')
-        `,
-        [submissionId],
-      );
-      if (Number(proofCheck.rows[0]?.c ?? "0") > 0) {
-        throw new Error("Each line must include a proof file before submitting");
-      }
-
-      await client.query(
-        `
-        UPDATE submissions
-        SET status = 'submitted', submitted_at = NOW(), updated_at = NOW()
-        WHERE id = $1
-        `,
-        [submissionId],
-      );
-
-      await client.query("COMMIT");
-
+      await this.submissions.submitSubmission(toAuthUser(user), submissionId);
       this.app.log.info(
         { telegram_id: telegramId, user_id: user.id, submission_id: submissionId },
         "Bot submitted draft submission",
       );
-
-      await this.audit.insert({
-        actorUserId: user.id,
-        targetUserId: user.id,
-        entityTable: "submissions",
-        entityId: submissionId,
-        action: "submission_submitted",
-        newValues: { source: "telegram_bot", status: "submitted" },
-      });
     } catch (error) {
-      try {
-        await client.query("ROLLBACK");
-      } catch {
-        // ignore
-      }
-      throw error;
-    } finally {
-      client.release();
+      throw toBotApiError(error);
     }
+  }
+
+  private async resolveBotSubcategorySlug(categoryId: string, subcategory: string | null): Promise<string> {
+    const subCount = await this.app.db.query<{ c: string }>(
+      `
+      SELECT COUNT(*)::text AS c
+      FROM category_subcategories
+      WHERE category_id = $1
+      `,
+      [categoryId],
+    );
+
+    const hasSubs = Number(subCount.rows[0]?.c ?? "0") > 0;
+    if (!hasSubs) {
+      return "general";
+    }
+
+    const slug = subcategory?.trim() ?? "";
+    if (!slug) {
+      throw new BotApiHttpError(400, "Subcategory is required for this category", "VALIDATION_ERROR");
+    }
+
+    return slug;
   }
 
   private validateProofStorageUrl(url: string): void {
@@ -506,115 +339,34 @@ export class BotApiService {
     this.validateProofStorageUrl(input.proofFileUrl);
 
     const user = await this.findOrCreateUserByTelegramId(input.telegramId);
-    const client = await this.app.db.connect();
+    const auth = toAuthUser(user);
+    const slug = await this.resolveBotSubcategorySlug(input.categoryId, input.subcategory);
+
     try {
-      await client.query("BEGIN");
+      const created = await this.submissions.createSubmission(auth, {
+        title: input.title,
+        description: input.description,
+      });
 
-      const cat = await client.query<{
-        id: string;
-        name: string;
-        max_score: string;
-      }>(
-        `
-        SELECT id, name, max_score
-        FROM categories
-        WHERE id = $1
-        `,
-        [input.categoryId],
-      );
+      await this.submissionItems.addItem(auth, created.id, {
+        category_id: input.categoryId,
+        subcategory: slug,
+        title: input.title,
+        description: input.description,
+        proof_file_url: input.proofFileUrl,
+        proposed_score: 0,
+        metadata: normalizeMetadata(input.metadata) as Record<string, string | number | boolean>,
+      });
 
-      const categoryRow = cat.rows[0];
-      if (!categoryRow) {
-        throw new Error("Unknown category");
-      }
+      await this.submissions.submitSubmission(auth, created.id);
 
-      const subCount = await client.query<{ c: string }>(
-        `
-        SELECT COUNT(*)::text AS c
-        FROM category_subcategories
-        WHERE category_id = $1
-        `,
-        [input.categoryId],
-      );
-
-      const hasSubs = Number(subCount.rows[0]?.c ?? "0") > 0;
-      const slug = hasSubs ? input.subcategory.trim() : "general";
-      if (hasSubs && !input.subcategory?.trim()) {
-        throw new Error("Subcategory is required for this category");
-      }
-
-      const subcategoryRow = await client.query<{ id: string }>(
-        `
-        SELECT id
-        FROM category_subcategories
-        WHERE category_id = $1 AND slug = $2
-        LIMIT 1
-        `,
-        [input.categoryId, slug],
-      );
-
-      if (!subcategoryRow.rows[0]) {
-        throw new Error("Invalid subcategory for this category");
-      }
-
-      const subcategoryId = subcategoryRow.rows[0].id;
-      const metadata = normalizeMetadata(input.metadata);
-      const proposedScore = await this.resolveProposedScoreForBot(input.categoryId, subcategoryId, metadata);
-
-      const submissionResult = await client.query<{ id: string }>(
-        `
-        INSERT INTO submissions (user_id, title, description, status, submitted_at)
-        VALUES ($1, $2, $3, 'submitted', NOW())
-        RETURNING id
-        `,
-        [user.id, input.title, input.description],
-      );
-
-      const submissionId = submissionResult.rows[0].id;
-
-      await client.query(
-        `
-        INSERT INTO submission_items (
-          submission_id,
-          category_id,
-          subcategory_id,
-          title,
-          description,
-          proof_file_url,
-          external_link,
-          proposed_score,
-          metadata,
-          status
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, $8::jsonb, 'pending')
-        `,
-        [
-          submissionId,
-          input.categoryId,
-          subcategoryId,
-          input.title,
-          input.description,
-          input.proofFileUrl,
-          proposedScore,
-          JSON.stringify(metadata),
-        ],
-      );
-
-      await client.query("COMMIT");
       this.app.log.info(
-        { telegram_id: input.telegramId, user_id: user.id, submission_id: submissionId },
+        { telegram_id: input.telegramId, user_id: user.id, submission_id: created.id },
         "Created student submission from bot",
       );
-      return { submissionId };
+      return { submissionId: created.id };
     } catch (error) {
-      try {
-        await client.query("ROLLBACK");
-      } catch {
-        // ignore
-      }
-      throw error;
-    } finally {
-      client.release();
+      throw toBotApiError(error);
     }
   }
 
@@ -753,126 +505,73 @@ export class BotApiService {
     details: string;
     proofFileUrl: string;
   }): Promise<{ submissionId: string }> {
-    if (isUnsafeTelegramProofUrl(input.proofFileUrl)) {
-      this.app.log.warn(
-        { telegram_id: input.telegramId },
-        "Blocked unsafe Telegram proof URL payload",
-      );
-      throw new Error("Unsafe proof URL is not allowed");
-    }
-
-    if (!isSafeProofStorageUrl(input.proofFileUrl)) {
-      this.app.log.warn(
-        { telegram_id: input.telegramId },
-        "Blocked non-storage proof URL payload",
-      );
-      throw new Error("Proof URL must be a safe storage URL");
-    }
+    this.validateProofStorageUrl(input.proofFileUrl);
 
     const user = await this.findOrCreateUserByTelegramId(input.telegramId);
-    const client = await this.app.db.connect();
-    try {
-      await client.query("BEGIN");
+    const auth = toAuthUser(user);
 
-      let catRes = await client.query<{ id: string; name: string }>(
+    let catRes = await this.app.db.query<{ id: string; name: string }>(
+      `
+      SELECT id, name
+      FROM categories
+      WHERE name = $1
+      LIMIT 1
+      `,
+      [input.category],
+    );
+    if (!catRes.rows[0]) {
+      catRes = await this.app.db.query<{ id: string; name: string }>(
         `
         SELECT id, name
         FROM categories
-        WHERE name = $1
+        WHERE name = 'legacy_uncategorized'
         LIMIT 1
         `,
-        [input.category],
       );
-      if (!catRes.rows[0]) {
-        catRes = await client.query<{ id: string; name: string }>(
-          `
-          SELECT id, name
-          FROM categories
-          WHERE name = 'legacy_uncategorized'
-          LIMIT 1
-          `,
-        );
-      }
-      const categoryRow = catRes.rows[0];
-      if (!categoryRow) {
-        throw new Error("Unknown category for achievement");
-      }
+    }
+    const categoryRow = catRes.rows[0];
+    if (!categoryRow) {
+      throw new BotApiHttpError(400, "Unknown category for achievement", "VALIDATION_ERROR");
+    }
 
-      const genSub = await client.query<{ id: string }>(
-        `
-        SELECT id
-        FROM category_subcategories
-        WHERE category_id = $1 AND slug = 'general'
-        LIMIT 1
-        `,
-        [categoryRow.id],
-      );
-      const defaultSubId = genSub.rows[0]?.id;
-      if (!defaultSubId) {
-        throw new Error("Category is missing default subcategory");
-      }
+    const genSub = await this.app.db.query<{ id: string }>(
+      `
+      SELECT id
+      FROM category_subcategories
+      WHERE category_id = $1 AND slug = 'general'
+      LIMIT 1
+      `,
+      [categoryRow.id],
+    );
+    if (!genSub.rows[0]) {
+      throw new BotApiHttpError(400, "Category is missing default subcategory", "VALIDATION_ERROR");
+    }
 
-      const achievementMeta: Record<string, unknown> = {};
-      const proposedScore = await this.resolveProposedScoreForBot(
-        categoryRow.id,
-        defaultSubId,
-        achievementMeta,
-      );
+    try {
+      const created = await this.submissions.createSubmission(auth, {
+        title: `Achievement: ${input.category}`,
+        description: input.details,
+      });
 
-      const submissionResult = await client.query<{ id: string }>(
-        `
-        INSERT INTO submissions (user_id, title, description, status, submitted_at)
-        VALUES ($1, $2, $3, 'submitted', NOW())
-        RETURNING id
-        `,
-        [user.id, `Achievement: ${input.category}`, input.details],
-      );
+      await this.submissionItems.addItem(auth, created.id, {
+        category_id: categoryRow.id,
+        subcategory: "general",
+        title: `Achievement: ${input.category}`,
+        description: input.details,
+        proof_file_url: input.proofFileUrl,
+        proposed_score: 0,
+        metadata: {},
+      });
 
-      const submissionId = submissionResult.rows[0].id;
+      await this.submissions.submitSubmission(auth, created.id);
 
-      await client.query(
-        `
-        INSERT INTO submission_items (
-          submission_id,
-          category_id,
-          subcategory_id,
-          title,
-          description,
-          proof_file_url,
-          external_link,
-          proposed_score,
-          metadata,
-          status
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, $8::jsonb, 'pending')
-        `,
-        [
-          submissionId,
-          categoryRow.id,
-          defaultSubId,
-          `Achievement: ${input.category}`,
-          input.details,
-          input.proofFileUrl,
-          proposedScore,
-          JSON.stringify(achievementMeta),
-        ],
-      );
-
-      await client.query("COMMIT");
       this.app.log.info(
-        { telegram_id: input.telegramId, user_id: user.id, submission_id: submissionId },
+        { telegram_id: input.telegramId, user_id: user.id, submission_id: created.id },
         "Created submission from bot request",
       );
-      return { submissionId };
+      return { submissionId: created.id };
     } catch (error) {
-      try {
-        await client.query("ROLLBACK");
-      } catch {
-        // ignore
-      }
-      throw error;
-    } finally {
-      client.release();
+      throw toBotApiError(error);
     }
   }
 
@@ -923,6 +622,7 @@ export class BotApiService {
 
     const user = await this.findOrCreateUserByTelegramId(input.telegramId);
     const checksum = createHash("sha256").update(input.bytes).digest("hex");
+    await this.antiFraud.assertNoDuplicateFile({ userId: user.id, checksum });
     const safeFilename = toSafeFilename(input.filename);
     const storagePath = `${user.id}/proofs/${randomUUID()}-${safeFilename}`;
 

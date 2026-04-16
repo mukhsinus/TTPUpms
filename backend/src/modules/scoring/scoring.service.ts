@@ -39,19 +39,18 @@ interface CategoryCapRow {
 }
 
 /**
- * Computes submission `total_score` as the sum of each approved item's `approved_score`,
- * applies per-category caps from `categories.max_points`, deduplicates by item id,
- * and persists `submissions.total_score` (also maintained by DB triggers).
+ * Reads persisted `submissions.total_score` (maintained by DB triggers from `submission_items`)
+ * and returns a config-style category breakdown for analytics. Does not write `total_score`.
  */
 export class ScoringService {
   constructor(private readonly app: FastifyInstance) {}
 
   /**
-   * Recompute and persist total points for a submission (idempotent per DB state).
-   * Call after item approval/rejection and after submission workflow finalization.
+   * Snapshot of scoring state: authoritative total comes from `submissions.total_score` (DB trigger);
+   * breakdown reflects category caps for display consistency with config-driven rules.
    */
   async syncSubmissionTotalPoints(submissionId: string): Promise<ScoringEngineResult> {
-    const submission = await this.findSubmission(submissionId);
+    const submission = await this.findSubmissionWithTotal(submissionId);
     if (!submission) {
       throw new ScoringServiceError(404, "Submission not found");
     }
@@ -89,7 +88,6 @@ export class ScoringService {
     }
 
     const categoryBreakdown: ScoringEngineResult["categoryBreakdown"] = [];
-    let totalScore = 0;
 
     for (const [category, rawScore] of categoryRawTotals.entries()) {
       const cap = categoryCaps.get(category);
@@ -99,7 +97,6 @@ export class ScoringService {
 
       const finalScore = cap === undefined ? rawScore : Math.min(rawScore, cap);
       const normalizedFinal = round2(finalScore);
-      totalScore = round2(totalScore + normalizedFinal);
 
       categoryBreakdown.push({
         category,
@@ -109,9 +106,8 @@ export class ScoringService {
       });
     }
 
-    await this.updateSubmissionTotalScore(submissionId, totalScore);
-
     const countedItems = items.filter((i) => i.status === "approved").length;
+    const totalScore = round2(Number(submission.total_score));
 
     return {
       submissionId,
@@ -136,10 +132,12 @@ export class ScoringService {
     return map;
   }
 
-  private async findSubmission(submissionId: string): Promise<{ id: string } | null> {
-    const result = await this.app.db.query<{ id: string }>(
+  private async findSubmissionWithTotal(
+    submissionId: string,
+  ): Promise<{ id: string; total_score: string } | null> {
+    const result = await this.app.db.query<{ id: string; total_score: string }>(
       `
-      SELECT id
+      SELECT id, total_score::text AS total_score
       FROM submissions
       WHERE id = $1
       `,
@@ -168,16 +166,6 @@ export class ScoringService {
     return result.rows;
   }
 
-  private async updateSubmissionTotalScore(submissionId: string, totalScore: number): Promise<void> {
-    await this.app.db.query(
-      `
-      UPDATE submissions
-      SET total_score = $2, updated_at = NOW()
-      WHERE id = $1
-      `,
-      [submissionId, totalScore],
-    );
-  }
 }
 
 export { ScoringServiceError };
