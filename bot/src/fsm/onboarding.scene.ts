@@ -33,7 +33,7 @@ export function createStudentOnboardingScene(upms: UpmsService): Scenes.WizardSc
       if (ctx.message && "text" in ctx.message) {
         const raw = ctx.message.text.trim();
         if (raw.startsWith("/")) {
-          await ctx.reply("Enter your full name (Last Name I.O.):", cancelOnlyKeyboard());
+          await ctx.reply("Enter your full name (First Name Last Name):", cancelOnlyKeyboard());
           return;
         }
         if (!raw) {
@@ -49,7 +49,7 @@ export function createStudentOnboardingScene(upms: UpmsService): Scenes.WizardSc
         return ctx.wizard.next();
       }
 
-      await ctx.reply("Enter your full name (Last Name I.O.):", cancelOnlyKeyboard());
+      await ctx.reply("Enter your full name (First Name Last Name):", cancelOnlyKeyboard());
     },
     // 1 — degree (callbacks only)
     async (ctx) => {

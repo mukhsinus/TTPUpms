@@ -8,18 +8,9 @@ import { UpmsService } from "./services/upms.service";
 import { HELP_TEXT } from "./text/help";
 import type { BotContext } from "./types/session";
 
-const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-function displayStudentGreeting(user: {
-  studentFullName: string | null;
-  fullName: string | null;
-}): string {
+function displayStudentGreeting(user: { studentFullName: string | null }): string {
   const n = user.studentFullName?.trim();
-  if (n) {
-    return n;
-  }
-  const legacy = user.fullName?.trim();
-  return legacy && legacy.length > 0 ? legacy : "there";
+  return n && n.length > 0 ? n : "there";
 }
 
 function setSessionFromLinkedUser(
@@ -91,37 +82,30 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
     }
 
     const tg = String(telegramUserId);
-    let linkedUser = null;
+    let user = null;
     try {
-      linkedUser = await upmsService.lookupUserByTelegramId({
+      user = await upmsService.resolveUserByTelegramId({
         telegramId: tg,
         telegramUsername: ctx.from?.username ? String(ctx.from.username) : null,
         fullName: [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") || null,
       });
     } catch (error) {
-      process.stderr.write(`start lookup failed: ${String(error)}\n`);
+      process.stderr.write(`start resolve failed: ${String(error)}\n`);
       await ctx.reply("UPMS service is temporarily unavailable. Please try again later.");
       return;
     }
 
-    if (linkedUser) {
-      ctx.session.authenticatedTelegramId = tg;
-      setSessionFromLinkedUser(ctx, linkedUser);
+    ctx.session.authenticatedTelegramId = tg;
+    setSessionFromLinkedUser(ctx, user);
 
-      if (linkedUser.role === "student" && !linkedUser.isProfileCompleted) {
-        await ctx.reply("Welcome to UPMS. Enter the steps below to complete your student profile.");
-        await ctx.scene.enter("student-onboarding");
-        return;
-      }
-
-      const who = displayStudentGreeting(linkedUser);
-      await ctx.reply(`Welcome back, ${who}.\nChoose an action below.`, mainMenuKeyboard());
+    if (user.role === "student" && !user.isProfileCompleted) {
+      await ctx.reply("Welcome to UPMS. Enter the steps below to complete your student profile.");
+      await ctx.scene.enter("student-onboarding");
       return;
     }
 
-    await ctx.reply(
-      "Welcome to UPMS.\nSend your registered university email address to link this Telegram account.",
-    );
+    const who = displayStudentGreeting(user);
+    await ctx.reply(`Welcome back, ${who}.\nChoose an action below.`, mainMenuKeyboard());
   });
 
   bot.command("help", async (ctx) => {
@@ -143,48 +127,7 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
       return;
     }
 
-    const text = ctx.message.text.trim();
-    if (!emailRegex.test(text)) {
-      await ctx.reply("Please send a valid email address.");
-      return;
-    }
-
-    const telegramUserId = ctx.from?.id;
-    if (!telegramUserId) {
-      await ctx.reply("Unable to identify your Telegram account.");
-      return;
-    }
-
-    let linkedUser = null;
-    try {
-      linkedUser = await upmsService.linkTelegramByEmail({
-        email: text,
-        telegramId: String(telegramUserId),
-        telegramUsername: ctx.from?.username ? String(ctx.from.username) : null,
-        fullName: [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") || null,
-      });
-    } catch (error) {
-      process.stderr.write(`link by email failed: ${String(error)}\n`);
-      await ctx.reply("Could not link your account right now. Please try again later.");
-      return;
-    }
-
-    if (!linkedUser) {
-      await ctx.reply("Email not found. Use the address registered in UPMS.");
-      return;
-    }
-
-    ctx.session.authenticatedTelegramId = String(telegramUserId);
-    setSessionFromLinkedUser(ctx, linkedUser);
-
-    if (linkedUser.role === "student" && !linkedUser.isProfileCompleted) {
-      await ctx.reply("Linked successfully. Complete your student profile using the steps below.");
-      await ctx.scene.enter("student-onboarding");
-      return;
-    }
-
-    const who = displayStudentGreeting(linkedUser);
-    await ctx.reply(`Linked successfully. Welcome, ${who}.`, mainMenuKeyboard());
+    await ctx.reply("Send /start to use UPMS.");
   });
 
   bot.action("menu_submit", async (ctx) => {
@@ -195,7 +138,7 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
   bot.action("menu_submissions", async (ctx) => {
     await ctx.answerCbQuery();
     if (!ctx.session.authenticatedTelegramId) {
-      await ctx.reply("Please use /start and link your account first.");
+      await ctx.reply("Please use /start first.");
       return;
     }
 
@@ -223,7 +166,7 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
   bot.action("menu_points", async (ctx) => {
     await ctx.answerCbQuery();
     if (!ctx.session.authenticatedTelegramId) {
-      await ctx.reply("Please use /start and link your account first.");
+      await ctx.reply("Please use /start first.");
       return;
     }
 

@@ -87,7 +87,8 @@ const submitDraftBodySchema = z.object({
   telegram_id: z.string().regex(/^\d+$/, "telegram_id must be numeric"),
 });
 
-const completeStudentProfileSchema = updateUserProfileBodySchema.extend({
+/** telegram_id binds the Telegram principal; body fields are the student profile only (no extra uniqueness rules). */
+const botStudentProfileCompleteSchema = updateUserProfileBodySchema.extend({
   telegram_id: z.string().regex(/^\d+$/, "telegram_id must be numeric"),
 });
 
@@ -248,6 +249,7 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
+  /** Optional: attach Telegram to an existing web-registered user (not used by the Telegram bot UI). */
   app.post("/users/link-email", async (request, reply) => {
     try {
       const body = linkSchema.parse(request.body);
@@ -272,7 +274,7 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: botWriteIdempotency(app, "bot_users_profile_complete") },
     async (request, reply) => {
       try {
-        const body = completeStudentProfileSchema.parse(request.body);
+        const body = botStudentProfileCompleteSchema.parse(request.body);
         const user = await service.completeProfileFromBot(body.telegram_id, {
           student_full_name: body.student_full_name,
           degree: body.degree,

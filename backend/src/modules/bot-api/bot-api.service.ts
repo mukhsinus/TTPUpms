@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { createHash, randomUUID } from "crypto";
+import { createHash, randomBytes, randomUUID } from "crypto";
 import { env } from "../../config/env";
 import type { AuthUser } from "../../types/auth-user";
 import { ServiceError } from "../../utils/service-error";
@@ -597,6 +597,66 @@ export class BotApiService {
     return this.toBotUser(row);
   }
 
+  /**
+   * Creates Supabase auth user + public.users row for a Telegram-only student (no email onboarding).
+   * Synthetic email is unique per telegram_id; not used for bot UX.
+   */
+  private async createBotStudentUserForTelegram(
+    telegramId: string,
+    identity?: { telegramUsername: string | null; fullName: string | null },
+  ): Promise<void> {
+    const email = `tg.${telegramId}@telegram.bot.upms`;
+    const password = randomBytes(32).toString("hex");
+    const nextUsername = identity?.telegramUsername ? identity.telegramUsername.trim() : null;
+    const nextFullName = identity?.fullName ? identity.fullName.trim() : null;
+
+    const { data, error } = await this.app.supabaseAdmin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: nextFullName ? { full_name: nextFullName } : {},
+      app_metadata: { role: "student" },
+    });
+
+    if (error || !data?.user?.id) {
+      this.app.log.error({ err: error?.message, telegram_id: telegramId }, "createBotStudentUserForTelegram: auth.admin.createUser failed");
+      throw new BotApiHttpError(
+        502,
+        "Could not register Telegram user with auth service.",
+        "AUTH_USER_CREATE_FAILED",
+      );
+    }
+
+    const userId = data.user.id;
+
+    try {
+      if (await this.hasTelegramUsernameColumn()) {
+        await this.app.db.query(
+          `
+          INSERT INTO public.users (id, email, role, full_name, telegram_id, telegram_username)
+          VALUES ($1::uuid, $2::citext, 'student'::public.user_role, $3, $4::bigint, $5)
+          `,
+          [userId, email, nextFullName, telegramId, nextUsername],
+        );
+      } else {
+        await this.app.db.query(
+          `
+          INSERT INTO public.users (id, email, role, full_name, telegram_id)
+          VALUES ($1::uuid, $2::citext, 'student'::public.user_role, $3, $4::bigint)
+          `,
+          [userId, email, nextFullName, telegramId],
+        );
+      }
+    } catch (dbErr) {
+      try {
+        await this.app.supabaseAdmin.auth.admin.deleteUser(userId);
+      } catch (delErr) {
+        this.app.log.warn({ err: delErr, userId }, "createBotStudentUserForTelegram: deleteUser after failed insert");
+      }
+      throw dbErr;
+    }
+  }
+
   async findOrCreateUserByTelegramId(
     telegramId: string,
     identity?: { telegramUsername: string | null; fullName: string | null },
@@ -610,7 +670,30 @@ export class BotApiService {
       return existing;
     }
 
-    throw new Error("Telegram account is not linked. Please link via email first.");
+    try {
+      await this.createBotStudentUserForTelegram(telegramId, identity);
+    } catch (err) {
+      const raced = await this.findUserByTelegramId(telegramId, identity);
+      if (raced) {
+        this.app.log.info(
+          { telegram_id: telegramId, user_id: raced.id, source: "existing_after_create_race" },
+          "Resolved bot user mapping",
+        );
+        return raced;
+      }
+      throw err;
+    }
+
+    const created = await this.findUserByTelegramId(telegramId, identity);
+    if (!created) {
+      throw new BotApiHttpError(500, "User was created but could not be reloaded.", "INTERNAL_SERVER_ERROR");
+    }
+
+    this.app.log.info(
+      { telegram_id: telegramId, user_id: created.id, source: "telegram_registered" },
+      "Resolved bot user mapping",
+    );
+    return created;
   }
 
   async linkTelegramByEmail(

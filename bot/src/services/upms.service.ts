@@ -236,35 +236,6 @@ export class UpmsService {
     return mapBotUserRow(user);
   }
 
-  async linkTelegramByEmail(input: {
-    email: string;
-    telegramId: string;
-    telegramUsername?: string | null;
-    fullName?: string | null;
-  }): Promise<AuthenticatedTelegramUser | null> {
-    const path = "/api/bot/users/link-email";
-    const response = await fetch(`${env.BACKEND_API_URL}${path}`, {
-      method: "POST",
-      headers: this.buildBotApiHeaders({ method: "POST" }),
-      body: JSON.stringify({
-        email: input.email,
-        telegram_id: input.telegramId,
-        telegram_username: input.telegramUsername ?? null,
-        full_name: input.fullName ?? null,
-      }),
-    });
-
-    const rawText = await response.text();
-    const envelope = parseEnvelopeFromText(rawText, response.status, path) as ApiEnvelope<BotApiUserRow | null>;
-
-    if (!response.ok || envelope.error) {
-      throw this.readFailure(envelope, response.status);
-    }
-
-    const user = envelope.data;
-    return user ? mapBotUserRow(user) : null;
-  }
-
   async completeStudentProfile(input: {
     telegramId: string;
     studentFullName: string;
