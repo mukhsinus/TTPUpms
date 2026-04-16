@@ -15,7 +15,33 @@ import { userFacingUpmsMessage } from "../utils/upms-user-facing";
 const TEN_MB = 10 * 1024 * 1024;
 
 const NO_CATEGORIES_MSG = "No categories available. Please try later.";
-const SUCCESS_MSG = "Your achievement has been submitted and is under review.";
+
+function formatSubmissionSuccessSummary(item: {
+  title: string;
+  category: string;
+  subcategory: string;
+  description: string;
+  link: string | null;
+  hasFile: boolean;
+}): string {
+  const lines = [
+    "Your achievement has been submitted and is under review.",
+    "",
+    "Summary:",
+    "",
+    `Title: ${item.title}`,
+    `Category: ${item.category}`,
+    `Subcategory: ${item.subcategory}`,
+    `Description: ${item.description}`,
+  ];
+  if (item.link) {
+    lines.push(`Link: ${item.link}`);
+  }
+  if (item.hasFile) {
+    lines.push("File: attached");
+  }
+  return lines.join("\n");
+}
 
 function st(ctx: BotContext): SubmitFlowState {
   return ctx.wizard.state as SubmitFlowState;
@@ -111,18 +137,6 @@ async function presentCategoryStep(ctx: BotContext, upms: UpmsService): Promise<
     return false;
   }
 
-  // Create draft only after categories are available (avoid side-effects when categories fail).
-  if (!s.submissionId) {
-    try {
-      const draft = await upms.createDraftSubmission(tgId);
-      s.submissionId = draft.submissionId;
-    } catch (e) {
-      console.error("Submit flow: draft creation failed:", e);
-      await ctx.reply(userFacingUpmsMessage(e, "Could not start a new submission."), mainMenuKeyboard());
-      return false;
-    }
-  }
-
   s.categories = categories;
   await ctx.reply("Select a category:", categoryPickerKeyboard(categories));
   return true;
@@ -140,11 +154,16 @@ function formatItemBlock(s: SubmitFlowState, externalLink: string | null): strin
   ].join("\n");
 }
 
-/** Persist current item; updates previewBlocks. */
+/** Persist current item; updates previewBlocks. Draft row is created on first save using the user-entered title. */
 async function persistItemAndRecordPreview(ctx: BotContext, upms: UpmsService, externalLink: string | null): Promise<void> {
   const tgId = ctx.session.authenticatedTelegramId!;
   const s = st(ctx);
   const subSlug = s.subcategorySlug ?? "general";
+
+  if (!s.submissionId) {
+    const draft = await upms.createDraftSubmission(tgId, s.title!);
+    s.submissionId = draft.submissionId;
+  }
 
   await upms.addSubmissionItem({
     telegramId: tgId,
@@ -531,8 +550,14 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       await ctx.answerCbQuery("Submitting…");
 
       try {
-        await upms.submitDraft(tgId, s.submissionId);
-        await ctx.reply(SUCCESS_MSG, mainMenuKeyboard());
+        const submitted = await upms.submitDraft(tgId, s.submissionId);
+        const first = submitted.items[0];
+        await ctx.reply(
+          first
+            ? formatSubmissionSuccessSummary(first)
+            : "Your achievement has been submitted and is under review.",
+          mainMenuKeyboard(),
+        );
       } catch (e) {
         console.error("Submit flow: final submit failed:", e);
         await ctx.reply(userFacingUpmsMessage(e, "Submission failed."), mainMenuKeyboard());

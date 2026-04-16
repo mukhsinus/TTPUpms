@@ -65,6 +65,7 @@ const createStudentSubmissionSchema = z.object({
 
 const createDraftSubmissionSchema = z.object({
   telegram_id: z.string().regex(/^\d+$/, "telegram_id must be numeric"),
+  title: z.string().min(1).max(200),
 });
 
 const addBotSubmissionItemSchema = z.object({
@@ -320,7 +321,7 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       try {
         const body = createDraftSubmissionSchema.parse(request.body);
-        const data = await service.createDraftSubmissionForBot(body.telegram_id);
+        const data = await service.createDraftSubmissionForBot(body.telegram_id, body.title);
         reply.status(201).send(success(data));
       } catch (error) {
         handleRouteError(app, reply, error);
@@ -363,8 +364,8 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
       try {
         const params = submitDraftParamsSchema.parse(request.params);
         const body = submitDraftBodySchema.parse(request.body);
-        await service.submitDraftFromBot(body.telegram_id, params.id);
-        reply.status(200).send(success({ ok: true }));
+        const data = await service.submitDraftFromBot(body.telegram_id, params.id);
+        reply.status(200).send(success(data));
       } catch (error) {
         handleRouteError(app, reply, error);
       }

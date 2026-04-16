@@ -19,6 +19,7 @@ interface SubmissionItemRow {
   category_id: string | null;
   category: string;
   subcategory: string | null;
+  subcategory_label: string | null;
   subcategory_id: string | null;
   metadata: unknown;
   category_type: string | null;
@@ -41,6 +42,8 @@ export interface SubmissionItemEntity {
   categoryId: string | null;
   category: string;
   subcategory: string | null;
+  /** Human label from `category_subcategories` when joined; otherwise null. */
+  subcategoryLabel: string | null;
   subcategoryId: string;
   metadata: Record<string, unknown>;
   categoryType: string;
@@ -70,6 +73,7 @@ function mapItem(row: SubmissionItemRow): SubmissionItemEntity {
     categoryId: row.category_id,
     category: row.category,
     subcategory: row.subcategory,
+    subcategoryLabel: row.subcategory_label ?? null,
     subcategoryId: row.subcategory_id ?? "",
     metadata: normalizeMetadata(row.metadata),
     categoryType: row.category_type ?? "range",
@@ -93,6 +97,7 @@ const itemSelectColumns = `
   si.category_id,
   c.name AS category,
   cs.slug AS subcategory,
+  cs.label AS subcategory_label,
   si.subcategory_id,
   si.metadata,
   si.title,

@@ -5,6 +5,7 @@ import type { AuthUser } from "../../types/auth-user";
 import { ServiceError } from "../../utils/service-error";
 import type { AuditLogRepository } from "../audit/audit-log.repository";
 import { normalizeMetadata } from "../scoring/scoring-metadata";
+import type { SubmissionItemEntity } from "../submission-items/submission-items.repository";
 import type { SubmissionItemsService } from "../submission-items/submission-items.service";
 import type { SubmissionsService } from "../submissions/submissions.service";
 import type { UsersRepository } from "../users/users.repository";
@@ -41,6 +42,21 @@ export interface BotSubmissionListRow {
   studentFullName: string | null;
   faculty: string | null;
   studentId: string | null;
+}
+
+/** Post-submit payload for Telegram bot (business fields only in `items`). */
+export interface BotSubmitDraftItemSummary {
+  title: string;
+  category: string;
+  subcategory: string;
+  description: string;
+  link: string | null;
+  hasFile: boolean;
+}
+
+export interface BotSubmitDraftResult {
+  submissionId: string;
+  items: BotSubmitDraftItemSummary[];
 }
 
 export interface BotUser {
@@ -336,19 +352,36 @@ export class BotApiService {
   }
 
   /** Draft submission for Telegram multi-item flow (POST /api/submissions equivalent). */
-  async createDraftSubmissionForBot(telegramId: string): Promise<{ submissionId: string }> {
+  async createDraftSubmissionForBot(telegramId: string, title: string): Promise<{ submissionId: string }> {
     const user = await this.findOrCreateUserByTelegramId(telegramId);
-    /** Neutral title only — identity lives on `users`, never in submission title. */
-    const draftTitle = "Achievement submission";
+    const trimmed = title.trim();
+    if (!trimmed) {
+      throw new BotApiHttpError(400, "Title is required.", "VALIDATION_ERROR");
+    }
     try {
       const created = await this.submissions.createSubmission(toAuthUser(user), {
-        title: draftTitle,
+        title: trimmed.slice(0, 200),
         description: undefined,
       });
       return { submissionId: created.id };
     } catch (error) {
       throw toBotApiError(error);
     }
+  }
+
+  private mapItemToBotSubmitSummary(item: SubmissionItemEntity): BotSubmitDraftItemSummary {
+    const link =
+      item.externalLink && item.externalLink.trim() !== "" ? item.externalLink.trim() : null;
+    const sub =
+      (item.subcategoryLabel ?? item.subcategory ?? "").trim() || "—";
+    return {
+      title: item.title,
+      category: item.category,
+      subcategory: sub,
+      description: (item.description ?? "").trim() || "—",
+      link,
+      hasFile: Boolean(item.proofFileUrl && item.proofFileUrl.trim() !== ""),
+    };
   }
 
   async completeProfileFromBot(
@@ -462,14 +495,20 @@ export class BotApiService {
   }
 
   /** PATCH /api/submissions/:id/submit equivalent for Telegram bot. */
-  async submitDraftFromBot(telegramId: string, submissionId: string): Promise<void> {
+  async submitDraftFromBot(telegramId: string, submissionId: string): Promise<BotSubmitDraftResult> {
     const user = await this.findOrCreateUserByTelegramId(telegramId);
+    const auth = toAuthUser(user);
     try {
-      await this.submissions.submitSubmission(toAuthUser(user), submissionId);
+      await this.submissions.submitSubmission(auth, submissionId);
+      const items = await this.submissionItems.listItems(auth, submissionId);
       this.app.log.info(
         { telegram_id: telegramId, user_id: user.id, submission_id: submissionId },
         "Bot submitted draft submission",
       );
+      return {
+        submissionId,
+        items: items.map((it) => this.mapItemToBotSubmitSummary(it)),
+      };
     } catch (error) {
       throw toBotApiError(error);
     }

@@ -35,6 +35,21 @@ interface UploadProofResponse {
   sizeBytes: number;
 }
 
+/** Mirrors backend `BotSubmitDraftResult` (camelCase in JSON). */
+export interface SubmitDraftSuccessItem {
+  title: string;
+  category: string;
+  subcategory: string;
+  description: string;
+  link: string | null;
+  hasFile: boolean;
+}
+
+export interface SubmitDraftSuccess {
+  submissionId: string;
+  items: SubmitDraftSuccessItem[];
+}
+
 export interface AuthenticatedTelegramUser {
   id: string;
   role: "student" | "reviewer" | "admin";
@@ -260,10 +275,10 @@ export class UpmsService {
     return this.requestJson<CategoryCatalogEntry[]>("/api/bot/categories", { method: "GET" });
   }
 
-  async createDraftSubmission(telegramId: string): Promise<{ submissionId: string }> {
+  async createDraftSubmission(telegramId: string, title: string): Promise<{ submissionId: string }> {
     return this.requestJson<{ submissionId: string }>("/api/bot/submissions/draft", {
       method: "POST",
-      body: JSON.stringify({ telegram_id: telegramId }),
+      body: JSON.stringify({ telegram_id: telegramId, title }),
     });
   }
 
@@ -292,8 +307,8 @@ export class UpmsService {
     });
   }
 
-  async submitDraft(telegramId: string, submissionId: string): Promise<void> {
-    await this.requestJson<{ ok: boolean }>(`/api/bot/submissions/${submissionId}/submit`, {
+  async submitDraft(telegramId: string, submissionId: string): Promise<SubmitDraftSuccess> {
+    return this.requestJson<SubmitDraftSuccess>(`/api/bot/submissions/${submissionId}/submit`, {
       method: "POST",
       body: JSON.stringify({ telegram_id: telegramId }),
     });

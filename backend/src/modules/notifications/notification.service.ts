@@ -14,7 +14,7 @@ export class NotificationService {
 
   notifySubmissionSubmitted(input: { userId: string; submissionId: string; title?: string }): void {
     const titlePart = input.title ? `\nTitle: ${input.title}` : "";
-    const text = `Your submission has been submitted successfully.${titlePart}\nSubmission ID: ${input.submissionId}`;
+    const text = `Your submission has been submitted successfully.${titlePart}`;
     this.notifyUser(input.userId, text);
   }
 
@@ -25,7 +25,7 @@ export class NotificationService {
   }): void {
     const readableStatus =
       input.status === "needs_revision" ? "Needs Revision" : input.status[0].toUpperCase() + input.status.slice(1);
-    const text = `Submission status updated: ${readableStatus}\nSubmission ID: ${input.submissionId}`;
+    const text = `Submission status updated: ${readableStatus}`;
     this.notifyUser(input.userId, text);
   }
 
