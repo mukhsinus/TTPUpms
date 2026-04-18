@@ -12,6 +12,7 @@ const AUTH_ROLE_KEY = "upms_session_role";
 const JWT_EXPIRY_SKEW_MS = 60_000;
 
 let sessionRedirectInProgress = false;
+let syncSessionRoleInFlight: Promise<void> | null = null;
 
 interface RequestResultOptions {
   /** When true, a 401 does not clear storage or navigate (e.g. login probe before token is stored). */
@@ -93,6 +94,8 @@ export interface AdminSubmissionDetailPayload {
     totalPoints: number;
     submittedAt?: string | null;
     reviewedAt?: string | null;
+    reviewedById?: string | null;
+    reviewerEmail?: string | null;
     createdAt: string;
     updatedAt: string;
   };
@@ -387,15 +390,25 @@ export const api = {
     if (!sessionIsValid()) {
       return;
     }
-    const result = await requestResult<AuthMePayload>(
-      "/api/auth/me",
-      { method: "GET" },
-      undefined,
-      { skipUnauthorizedRedirect: true },
-    );
-    if (result.data?.role) {
-      setSessionRoleFromServer(result.data.role);
+    if (syncSessionRoleInFlight) {
+      return syncSessionRoleInFlight;
     }
+    syncSessionRoleInFlight = (async () => {
+      try {
+        const result = await requestResult<AuthMePayload>(
+          "/api/auth/me",
+          { method: "GET" },
+          undefined,
+          { skipUnauthorizedRedirect: true },
+        );
+        if (result.data?.role) {
+          setSessionRoleFromServer(result.data.role);
+        }
+      } finally {
+        syncSessionRoleInFlight = null;
+      }
+    })();
+    return syncSessionRoleInFlight;
   },
 
   needsSessionRoleHydration(): boolean {
@@ -569,6 +582,7 @@ export const api = {
     pageSize?: number;
     status?: AdminModerationStatus;
     category?: string;
+    search?: string;
     dateFrom?: string;
     dateTo?: string;
     sort?: "created_at" | "title" | "status" | "score";
@@ -586,6 +600,9 @@ export const api = {
     }
     if (params.category) {
       q.set("category", params.category);
+    }
+    if (params.search?.trim()) {
+      q.set("search", params.search.trim());
     }
     if (params.dateFrom) {
       q.set("dateFrom", params.dateFrom);
@@ -616,7 +633,7 @@ export const api = {
 
   adminRejectSubmission(
     submissionId: string,
-    body: { reason?: string },
+    body: { reason: string },
   ): Promise<AdminSubmissionDetailPayload["submission"]> {
     return request<AdminSubmissionDetailPayload["submission"]>(`/api/admin/submissions/${submissionId}/reject`, {
       method: "POST",

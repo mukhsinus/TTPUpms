@@ -1,5 +1,10 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { parseAdminEmailSet, syncPublicUserRoleFromAuth } from "../../auth/public-user-sync";
+import {
+  isAdminEmail,
+  isAdminUsersListed,
+  parseAdminEmailSet,
+  syncPublicUserRoleFromAuth,
+} from "../../auth/public-user-sync";
 import { env } from "../../config/env";
 import { authMiddleware } from "../../middleware/auth.middleware";
 import type { AppRole } from "../../types/auth-user";
@@ -51,9 +56,18 @@ async function handleMe(app: FastifyInstance, request: FastifyRequest, reply: Fa
   const hasRow = Boolean(existing.rows[0]);
   let roleText = existing.rows[0]?.role;
 
-  if (!hasRow || adminPanelLogin) {
+  const listedInAdminUsers = adminPanelLogin ? await isAdminUsersListed(pool, id) : false;
+  const envListedAdmin = isAdminEmail(request.authIdentity?.email, ADMIN_EMAIL_SET);
+  const allowAdminPanelSync = adminPanelLogin && (listedInAdminUsers || envListedAdmin);
+
+  if (!hasRow) {
     const { roleText: synced } = await syncPublicUserRoleFromAuth(pool, request.authIdentity, ADMIN_EMAIL_SET, {
-      adminPanelLogin,
+      adminPanelLogin: allowAdminPanelSync,
+    });
+    roleText = synced;
+  } else if (allowAdminPanelSync) {
+    const { roleText: synced } = await syncPublicUserRoleFromAuth(pool, request.authIdentity, ADMIN_EMAIL_SET, {
+      adminPanelLogin: true,
     });
     roleText = synced;
   }

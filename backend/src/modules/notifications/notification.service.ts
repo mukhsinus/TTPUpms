@@ -3,6 +3,14 @@ import { env } from "../../config/env";
 
 type SubmissionNotificationStatus = "submitted" | "approved" | "rejected" | "needs_revision";
 
+export interface SubmissionModerationNotificationInput {
+  userId: string;
+  submissionId: string;
+  status: "approved" | "rejected";
+  totalScore?: number;
+  rejectReason?: string;
+}
+
 interface TelegramUserRow {
   telegram_id: string | null;
 }
@@ -26,6 +34,21 @@ export class NotificationService {
     const readableStatus =
       input.status === "needs_revision" ? "Needs Revision" : input.status[0].toUpperCase() + input.status.slice(1);
     const text = `Submission status updated: ${readableStatus}`;
+    this.notifyUser(input.userId, text);
+  }
+
+  /** Instant Telegram message for admin approve/reject from the moderation panel. */
+  notifySubmissionModerationResult(input: SubmissionModerationNotificationInput): void {
+    let text: string;
+    if (input.status === "approved") {
+      const score =
+        input.totalScore !== undefined && Number.isFinite(input.totalScore)
+          ? input.totalScore.toFixed(2)
+          : "—";
+      text = `Your submission was approved.\nScore awarded: ${score}`;
+    } else {
+      text = `Your submission was rejected.\nReason: ${input.rejectReason ?? "—"}`;
+    }
     this.notifyUser(input.userId, text);
   }
 

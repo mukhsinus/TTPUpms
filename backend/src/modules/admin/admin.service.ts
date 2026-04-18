@@ -174,11 +174,12 @@ export class AdminService {
         "admin moderation approve",
       );
 
-      await this.repository.updateItemsApprove(client, submissionId, scores);
+      await this.repository.updateItemsApprove(client, submissionId, scores, actor.actorUserId);
 
       updated = await this.repository.finalizeSubmission(client, {
         submissionId,
         status: "approved",
+        reviewedByUserId: actor.actorUserId,
       });
 
       await client.query("COMMIT");
@@ -209,10 +210,11 @@ export class AdminService {
         },
       });
 
-      this.notifications.notifySubmissionStatusChanged({
+      this.notifications.notifySubmissionModerationResult({
         userId: targetUserId,
         submissionId,
         status: "approved",
+        totalScore: Number(updated.total_score),
       });
     } catch (postErr) {
       this.app.log.error({ err: postErr, submissionId }, "approveSubmission post-commit failed");
@@ -288,10 +290,16 @@ export class AdminService {
       oldDbStatus = submission.db_status;
       targetUserId = submission.user_id;
 
-      await this.repository.updateItemsRejectAll(client, submissionId);
+      const rejectItems = await this.repository.listItemsForSubmission(client, submissionId);
+      if (rejectItems.length === 0) {
+        throw new ServiceError(400, "Submission has no line items to reject");
+      }
+
+      await this.repository.updateItemsRejectAll(client, submissionId, actor.actorUserId);
       updated = await this.repository.finalizeSubmission(client, {
         submissionId,
         status: "rejected",
+        reviewedByUserId: actor.actorUserId,
       });
 
       await client.query("COMMIT");
@@ -318,10 +326,11 @@ export class AdminService {
         newValues: { status: "rejected", reason: body.reason ?? null },
       });
 
-      this.notifications.notifySubmissionStatusChanged({
+      this.notifications.notifySubmissionModerationResult({
         userId: targetUserId,
         submissionId,
         status: "rejected",
+        rejectReason: body.reason,
       });
     } catch (postErr) {
       this.app.log.error({ err: postErr, submissionId }, "rejectSubmission post-commit failed");
@@ -341,6 +350,8 @@ export class AdminService {
       totalPoints: Number(row.total_score),
       submittedAt: row.submitted_at,
       reviewedAt: row.reviewed_at,
+      reviewedById: row.reviewed_by,
+      reviewerEmail: row.reviewed_by_email,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -351,11 +362,7 @@ export class AdminService {
     return data.publicUrl;
   }
 
-  private resolveItemProofFileUrl(
-    proof: string | null,
-    submissionOwnerUserId: string,
-    submissionOwnerTelegramId: string | null,
-  ): string | null {
+  private resolveItemProofFileUrl(proof: string | null, submissionOwnerUserId: string): string | null {
     if (!proof?.trim()) {
       return null;
     }
@@ -368,9 +375,8 @@ export class AdminService {
     let bucket: string;
 
     if (!t.includes("/")) {
-      const prefix = submissionOwnerTelegramId?.trim() || submissionOwnerUserId;
-      path = `${prefix}/${t}`;
-      bucket = "proofs";
+      path = `${submissionOwnerUserId}/${t}`;
+      bucket = env.STORAGE_BUCKET;
     } else {
       path = normalizeLegacyStoragePathForRead(t, submissionOwnerUserId);
       bucket = storageBucketForObjectPath(path);
@@ -407,11 +413,7 @@ export class AdminService {
       submissionId: row.submission_id,
       title: row.title,
       description: row.description,
-      proofFileUrl: this.resolveItemProofFileUrl(
-        row.proof_file_url,
-        row.submission_user_id,
-        row.submission_telegram_id,
-      ),
+      proofFileUrl: this.resolveItemProofFileUrl(row.proof_file_url, row.submission_user_id),
       externalLink: row.external_link,
       proposedScore: numOrNull(row.proposed_score),
       approvedScore: numOrNull(row.approved_score),

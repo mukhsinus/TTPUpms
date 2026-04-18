@@ -23,6 +23,14 @@ export function isAdminEmail(email: string | null | undefined, admins: Set<strin
   return admins.has(email.trim().toLowerCase());
 }
 
+export async function isAdminUsersListed(db: Pool, userId: string): Promise<boolean> {
+  const r = await db.query<{ ok: boolean }>(
+    `SELECT true AS ok FROM public.admin_users WHERE id = $1::uuid LIMIT 1`,
+    [userId],
+  );
+  return Boolean(r.rows[0]?.ok);
+}
+
 export interface SyncPublicUserOptions {
   /**
    * When true (admin web login with `X-Upms-Auth-Source: admin_panel`), allow promoting this
@@ -32,9 +40,9 @@ export interface SyncPublicUserOptions {
 }
 
 /**
- * Ensures `public.users` has a row for this Supabase user and normalizes `role`:
- * - New row: `student`, or `admin` when email is listed in ADMIN_EMAILS or `adminPanelLogin`.
- * - Existing: promote via admin email list; `adminPanelLogin` forces `admin` unless `superadmin`.
+ * Ensures `public.users` has a row for this Supabase user and normalizes `role`.
+ * `adminPanelLogin` must only be true when the caller already verified the user is in `admin_users`
+ * or `ADMIN_EMAILS` — it no longer elevates arbitrary accounts.
  */
 export async function syncPublicUserRoleFromAuth(
   db: Pool,

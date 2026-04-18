@@ -62,7 +62,9 @@ export function LoginPage(): ReactElement {
           </div>
         </div>
         <p className="auth-subtitle">
-          {adminPanelLogin ? "Admin panel sign-in (elevates this account to admin)." : "Sign in with your university account"}
+          {adminPanelLogin
+            ? "Admin panel — only allowlisted operator accounts can access moderation."
+            : "Sign in with your university account"}
         </p>
         <form className="auth-form" onSubmit={(event) => void onSubmit(event)}>
           <label>

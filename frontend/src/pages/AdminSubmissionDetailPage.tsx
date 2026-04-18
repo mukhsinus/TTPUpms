@@ -21,6 +21,8 @@ export function AdminSubmissionDetailPage(): ReactElement {
   const [actionError, setActionError] = useState<string | null>(null);
   const [approveOpen, setApproveOpen] = useState(false);
   const [approveScore, setApproveScore] = useState("");
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
   const [busy, setBusy] = useState(false);
 
   const reload = useCallback(async (): Promise<void> => {
@@ -93,33 +95,29 @@ export function AdminSubmissionDetailPage(): ReactElement {
     }
   };
 
-  const onReject = (): void => {
+  const onRejectConfirm = async (): Promise<void> => {
     if (!submissionId) {
       return;
     }
-    const ok = window.confirm("Reject this submission? The student will be notified.");
-    if (!ok) {
+    const reason = rejectReason.trim();
+    if (reason.length === 0) {
+      setActionError("A reject reason is required.");
       return;
     }
-    const reasonRaw = window.prompt("Optional reason (stored in audit trail):", "");
-    if (reasonRaw === null) {
-      return;
+    try {
+      setBusy(true);
+      setActionError(null);
+      await api.adminRejectSubmission(submissionId, { reason });
+      setRejectOpen(false);
+      setRejectReason("");
+      await reload();
+      toast.success("Submission rejected");
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : "Reject failed";
+      setActionError(message);
+    } finally {
+      setBusy(false);
     }
-    const reason = reasonRaw.trim().length > 0 ? reasonRaw.trim() : undefined;
-    void (async () => {
-      try {
-        setBusy(true);
-        setActionError(null);
-        await api.adminRejectSubmission(submissionId, { reason });
-        await reload();
-        toast.success("Submission rejected");
-      } catch (err) {
-        const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : "Reject failed";
-        setActionError(message);
-      } finally {
-        setBusy(false);
-      }
-    })();
   };
 
   if (loading) {
@@ -167,6 +165,36 @@ export function AdminSubmissionDetailPage(): ReactElement {
 
   return (
     <section className="detail-layout">
+      {rejectOpen ? (
+        <div className="modal-backdrop" role="presentation" onClick={() => !busy && setRejectOpen(false)}>
+          <div className="modal-panel" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <h3>Reject submission</h3>
+            <p className="muted" style={{ marginTop: 0 }}>
+              The student will be notified in Telegram. A clear reason is required.
+            </p>
+            <label className="item-review-field">
+              <span>Reason</span>
+              <textarea
+                className="ui-input"
+                rows={4}
+                value={rejectReason}
+                disabled={busy}
+                onChange={(e) => setRejectReason(e.target.value)}
+                placeholder="Explain why this submission is rejected…"
+              />
+            </label>
+            <div className="modal-actions">
+              <Button type="button" variant="ghost" disabled={busy} onClick={() => setRejectOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="button" variant="danger" disabled={busy} onClick={() => void onRejectConfirm()}>
+                {busy ? "Saving…" : "Confirm reject"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {approveOpen ? (
         <div className="modal-backdrop" role="presentation" onClick={() => !busy && setApproveOpen(false)}>
           <div className="modal-panel" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
@@ -210,6 +238,12 @@ export function AdminSubmissionDetailPage(): ReactElement {
             Workflow: <code>{submission.workflowStatus ?? "—"}</code>
           </p>
           <p className="muted">Total score (approved lines): {submission.totalPoints.toFixed(2)}</p>
+          {submission.reviewedAt ? (
+            <p className="muted">
+              Reviewed: {new Date(submission.reviewedAt).toLocaleString()}
+              {submission.reviewerEmail ? ` · ${submission.reviewerEmail}` : ""}
+            </p>
+          ) : null}
         </Card>
 
         <Card title="Student">
@@ -305,8 +339,18 @@ export function AdminSubmissionDetailPage(): ReactElement {
               <Button type="button" variant="primary" disabled={busy} onClick={() => setApproveOpen(true)}>
                 Approve…
               </Button>
-              <Button type="button" variant="danger" disabled={busy} onClick={() => onReject()} style={{ marginTop: 12 }}>
-                Reject
+              <Button
+                type="button"
+                variant="danger"
+                disabled={busy}
+                onClick={() => {
+                  setActionError(null);
+                  setRejectReason("");
+                  setRejectOpen(true);
+                }}
+                style={{ marginTop: 12 }}
+              >
+                Reject…
               </Button>
             </div>
           ) : (

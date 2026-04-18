@@ -1389,10 +1389,6 @@ export class BotApiService {
 
     const { data: publicUrlData } = this.app.supabaseAdmin.storage.from(env.STORAGE_BUCKET).getPublicUrl(storagePath);
     const proofFileUrl = publicUrlData.publicUrl;
-    // eslint-disable-next-line no-console -- temporary storage debug
-    console.log("FILE PATH:", storagePath);
-    // eslint-disable-next-line no-console -- temporary storage debug
-    console.log("PUBLIC URL:", proofFileUrl);
 
     this.app.log.info(
       {

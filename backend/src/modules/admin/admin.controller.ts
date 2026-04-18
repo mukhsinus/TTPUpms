@@ -90,7 +90,10 @@ export class AdminController {
 
   private handleError(reply: FastifyReply, error: unknown): void {
     if (error instanceof ZodError) {
-      reply.status(400).send(failure("Validation error", "VALIDATION_ERROR"));
+      const first = error.issues[0];
+      reply
+        .status(400)
+        .send(failure(first?.message ?? "Validation error", "VALIDATION_ERROR"));
       return;
     }
 

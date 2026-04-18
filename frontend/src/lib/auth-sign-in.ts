@@ -5,7 +5,8 @@ import { ApiError } from "./api-error";
 const DEBUG_AUTH =
   import.meta.env.DEV || String(import.meta.env.VITE_DEBUG_AUTH ?? "").toLowerCase() === "true";
 
-const NETWORK_RETRY_COUNT = 2;
+/** After the fast direct-fetch path, only one retry round for transient failures. */
+const NETWORK_RETRY_COUNT = 1;
 const MAX_SIGN_IN_ATTEMPTS = 1 + NETWORK_RETRY_COUNT;
 const FETCH_FALLBACK_RETRIES = 2;
 
@@ -91,12 +92,25 @@ async function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Password sign-in using Supabase JS, with retries on transient network errors
- * and a fetch fallback that mirrors GoTrue headers.
+ * Password sign-in: single direct GoTrue fetch first (fastest), then Supabase JS with light retries,
+ * then fetch fallback again for flaky networks.
  */
 export async function signInWithSupabasePassword(email: string, password: string): Promise<string> {
   const { url } = getSupabaseBrowserEnv();
   logAuth("signIn start", { supabaseUrl: url, emailPrefix: `${email.slice(0, 2)}***` });
+
+  try {
+    const direct = await signInWithPasswordViaFetch(email, password);
+    if (direct.access_token) {
+      logAuth("signIn OK (direct fetch)");
+      return direct.access_token;
+    }
+  } catch (e) {
+    if (e instanceof ApiError && !isLikelyNetworkFailure(e)) {
+      throw e;
+    }
+    logAuth("direct fetch failed; continuing with Supabase JS", e);
+  }
 
   let lastNetworkError: unknown;
 

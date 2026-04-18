@@ -12,6 +12,8 @@ export const adminSubmissionsQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
   status: adminModerationStatusSchema.optional(),
   category: z.string().trim().min(1).max(128).optional(),
+  /** Title / student name search (server-side; uses trigram indexes when present). */
+  search: z.string().trim().min(1).max(200).optional(),
   /** ISO-8601 timestamps (e.g. from `Date.toISOString()`). */
   dateFrom: z.string().trim().min(1).optional(),
   dateTo: z.string().trim().min(1).optional(),
@@ -27,7 +29,7 @@ export const adminApproveBodySchema = z
 
 export const adminRejectBodySchema = z
   .object({
-    reason: z.string().trim().max(2000).optional(),
+    reason: z.string().trim().min(1).max(2000),
   })
   .strict();
 

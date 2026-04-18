@@ -31,9 +31,23 @@ export function AdminSubmissionsPage(): ReactElement {
   const [dateTo, setDateTo] = useState("");
   const [sort, setSort] = useState<"created_at" | "title" | "status" | "score">("created_at");
   const [order, setOrder] = useState<"asc" | "desc">("desc");
-  const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      const next = searchInput.trim();
+      setDebouncedSearch((prev) => {
+        if (next !== prev) {
+          setPage(1);
+        }
+        return next;
+      });
+    }, 320);
+    return () => window.clearTimeout(t);
+  }, [searchInput]);
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -44,6 +58,7 @@ export function AdminSubmissionsPage(): ReactElement {
         pageSize: PAGE_SIZE,
         status: status || undefined,
         category: category.trim() || undefined,
+        search: debouncedSearch || undefined,
         dateFrom: dateFrom ? new Date(dateFrom).toISOString() : undefined,
         dateTo: dateTo ? new Date(dateTo).toISOString() : undefined,
         sort,
@@ -56,18 +71,11 @@ export function AdminSubmissionsPage(): ReactElement {
     } finally {
       setLoading(false);
     }
-  }, [page, status, category, dateFrom, dateTo, sort, order]);
+  }, [page, status, category, dateFrom, dateTo, sort, order, debouncedSearch]);
 
   useEffect(() => {
     void load();
   }, [load]);
-
-  const filtered = search.trim()
-    ? items.filter((row) => {
-        const q = search.trim().toLowerCase();
-        return row.title.toLowerCase().includes(q) || formatUser(row).toLowerCase().includes(q);
-      })
-    : items;
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -76,9 +84,9 @@ export function AdminSubmissionsPage(): ReactElement {
       <Card title="Submissions" subtitle="Moderation queue — filter, sort, and open a record to approve or reject.">
         <div className="table-toolbar admin-submissions-toolbar">
           <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search title or user…"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Search title, student name, or submission ID…"
           />
           <select
             className="ui-input"
@@ -152,7 +160,7 @@ export function AdminSubmissionsPage(): ReactElement {
       <Card>
         {loading ? (
           <TableSkeleton rows={10} cols={6} />
-        ) : filtered.length === 0 ? (
+        ) : items.length === 0 ? (
           <EmptyState
             icon={ClipboardList}
             tone="muted"
@@ -174,7 +182,7 @@ export function AdminSubmissionsPage(): ReactElement {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((row) => (
+                {items.map((row) => (
                   <tr
                     key={row.id}
                     className="clickable-row"

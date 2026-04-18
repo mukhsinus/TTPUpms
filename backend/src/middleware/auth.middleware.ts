@@ -1,13 +1,12 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
+import type { VerifiedJwtIdentity } from "../auth/supabase-jwt";
+import { verifySupabaseAccessToken } from "../auth/supabase-jwt";
+import { env } from "../config/env";
 import type { AppRole } from "../types/auth-user";
 import { failure } from "../utils/http-response";
 
 /** Identity from Supabase JWT — used by `/api/auth/me` for one-shot sync, not on every route. */
-export interface JwtAuthIdentity {
-  id: string;
-  email?: string | null;
-  user_metadata?: Record<string, unknown>;
-}
+export type JwtAuthIdentity = VerifiedJwtIdentity;
 
 function parseBearerToken(authorizationHeader?: string): string | null {
   if (!authorizationHeader) {
@@ -40,8 +39,9 @@ function isRetryableAuthError(error: unknown): boolean {
 }
 
 /**
- * Validates JWT and attaches `request.user` from token claims only — no DB queries, no writes.
- * Role sync runs in `GET /api/auth/me` when needed; staff routes use `mergePublicUserRoleFromDb` after this.
+ * Validates JWT and attaches `request.user` from token claims.
+ * When `SUPABASE_JWT_SECRET` is set, verifies locally (no GoTrue HTTP call per request).
+ * Otherwise falls back to `auth.getUser` (network round-trip — slow under load).
  */
 export async function authMiddleware(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const token = parseBearerToken(request.headers.authorization);
@@ -49,6 +49,20 @@ export async function authMiddleware(request: FastifyRequest, reply: FastifyRepl
   if (!token) {
     reply.status(401).send(failure("Missing or invalid Authorization header", "UNAUTHORIZED", {}));
     return;
+  }
+
+  if (env.SUPABASE_JWT_SECRET) {
+    const verified = await verifySupabaseAccessToken(token, env.SUPABASE_JWT_SECRET);
+    if (verified) {
+      request.authIdentity = verified.identity;
+      request.user = {
+        id: verified.identity.id,
+        email: verified.identity.email ?? null,
+        role: verified.role,
+      };
+      return;
+    }
+    request.log.debug("Local JWT verification failed; falling back to Supabase auth.getUser");
   }
 
   const { data, error } = await request.server.supabaseAdmin.auth.getUser(token);

@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { PoolClient } from "pg";
+import { ServiceError } from "../../utils/service-error";
 import type { AdminModerationStatus, AdminSubmissionsQuery } from "./admin.schema";
 
 export interface AdminSubmissionListRow {
@@ -24,6 +25,8 @@ export interface AdminSubmissionDetailRow {
   total_score: string;
   submitted_at: string | null;
   reviewed_at: string | null;
+  reviewed_by: string | null;
+  reviewed_by_email: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -39,7 +42,6 @@ export interface AdminItemRow {
   id: string;
   submission_id: string;
   submission_user_id: string;
-  submission_telegram_id: string | null;
   title: string;
   description: string | null;
   proof_file_url: string | null;
@@ -103,6 +105,63 @@ function sortColumn(sort: AdminSubmissionsQuery["sort"]): string {
   return "s.created_at";
 }
 
+const SUBMISSION_ID_UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Shared WHERE builder for admin submission list + count (`u` join required for search).
+ */
+function buildAdminSubmissionFilters(query: AdminSubmissionsQuery): { whereSql: string; params: unknown[] } {
+  const conditions: string[] = ["s.status <> 'draft'"];
+  const params: unknown[] = [];
+  let p = 1;
+
+  if (query.status) {
+    const f = moderationStatusFilterSql(query.status);
+    conditions.push(f.clause);
+    params.push(...f.params);
+  }
+  if (query.category) {
+    conditions.push(`
+      EXISTS (
+        SELECT 1 FROM public.submission_items si2
+        INNER JOIN public.categories c2 ON c2.id = si2.category_id
+        WHERE si2.submission_id = s.id AND c2.code = $${p}
+      )
+    `);
+    params.push(query.category);
+    p += 1;
+  }
+  if (query.dateFrom) {
+    conditions.push(`s.created_at >= $${p}::timestamptz`);
+    params.push(query.dateFrom);
+    p += 1;
+  }
+  if (query.dateTo) {
+    conditions.push(`s.created_at <= $${p}::timestamptz`);
+    params.push(query.dateTo);
+    p += 1;
+  }
+  if (query.search?.trim()) {
+    const raw = query.search.trim().slice(0, 200);
+    if (SUBMISSION_ID_UUID.test(raw)) {
+      conditions.push(`s.id = $${p}::uuid`);
+      params.push(raw);
+      p += 1;
+    } else {
+      const escaped = raw.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+      const pattern = `%${escaped}%`;
+      conditions.push(
+        `(s.title ILIKE $${p} ESCAPE '\\' OR COALESCE(u.student_full_name::text, u.full_name::text, '') ILIKE $${p} ESCAPE '\\')`,
+      );
+      params.push(pattern);
+      p += 1;
+    }
+  }
+
+  return { whereSql: `WHERE ${conditions.join(" AND ")}`, params };
+}
+
 export class AdminRepository {
   constructor(private readonly app: FastifyInstance) {}
 
@@ -149,44 +208,14 @@ export class AdminRepository {
   }
 
   async countSubmissions(query: AdminSubmissionsQuery): Promise<number> {
-    const conditions: string[] = ["s.status <> 'draft'"];
-    const params: unknown[] = [];
-    let p = 1;
-
-    if (query.status) {
-      const f = moderationStatusFilterSql(query.status);
-      conditions.push(f.clause);
-      params.push(...f.params);
-    }
-    if (query.category) {
-      conditions.push(`
-        EXISTS (
-          SELECT 1 FROM public.submission_items si2
-          INNER JOIN public.categories c2 ON c2.id = si2.category_id
-          WHERE si2.submission_id = s.id AND c2.code = $${p}
-        )
-      `);
-      params.push(query.category);
-      p += 1;
-    }
-    if (query.dateFrom) {
-      conditions.push(`s.created_at >= $${p}::timestamptz`);
-      params.push(query.dateFrom);
-      p += 1;
-    }
-    if (query.dateTo) {
-      conditions.push(`s.created_at <= $${p}::timestamptz`);
-      params.push(query.dateTo);
-      p += 1;
-    }
-
-    const where = `WHERE ${conditions.join(" AND ")}`;
+    const { whereSql, params } = buildAdminSubmissionFilters(query);
 
     const result = await this.app.db.query<{ c: string }>(
       `
       SELECT COUNT(*)::text AS c
       FROM public.submissions s
-      ${where}
+      LEFT JOIN public.users u ON u.id = s.user_id
+      ${whereSql}
       `,
       params,
     );
@@ -195,38 +224,7 @@ export class AdminRepository {
   }
 
   async listSubmissions(query: AdminSubmissionsQuery): Promise<AdminSubmissionListRow[]> {
-    const conditions: string[] = ["s.status <> 'draft'"];
-    const params: unknown[] = [];
-    let p = 1;
-
-    if (query.status) {
-      const f = moderationStatusFilterSql(query.status);
-      conditions.push(f.clause);
-      params.push(...f.params);
-    }
-    if (query.category) {
-      conditions.push(`
-        EXISTS (
-          SELECT 1 FROM public.submission_items si2
-          INNER JOIN public.categories c2 ON c2.id = si2.category_id
-          WHERE si2.submission_id = s.id AND c2.code = $${p}
-        )
-      `);
-      params.push(query.category);
-      p += 1;
-    }
-    if (query.dateFrom) {
-      conditions.push(`s.created_at >= $${p}::timestamptz`);
-      params.push(query.dateFrom);
-      p += 1;
-    }
-    if (query.dateTo) {
-      conditions.push(`s.created_at <= $${p}::timestamptz`);
-      params.push(query.dateTo);
-      p += 1;
-    }
-
-    const where = `WHERE ${conditions.join(" AND ")}`;
+    const { whereSql, params } = buildAdminSubmissionFilters(query);
     const orderCol = sortColumn(query.sort);
     const orderDir = query.order === "asc" ? "ASC" : "DESC";
     const offset = (query.page - 1) * query.pageSize;
@@ -267,7 +265,7 @@ export class AdminRepository {
         ORDER BY si.created_at ASC
         LIMIT 1
       ) first_item ON true
-      ${where}
+      ${whereSql}
       ORDER BY ${orderCol} ${orderDir}, s.id ASC
       LIMIT $${limitParam}::int OFFSET $${offsetParam}::int
       `,
@@ -289,9 +287,12 @@ export class AdminRepository {
         s.total_score::text,
         s.submitted_at,
         s.reviewed_at,
+        s.reviewed_by::text,
+        reviewer.email::text AS reviewed_by_email,
         s.created_at,
         s.updated_at
       FROM public.submissions s
+      LEFT JOIN public.users reviewer ON reviewer.id = s.reviewed_by
       WHERE s.id = $1
       `,
       [submissionId],
@@ -315,9 +316,12 @@ export class AdminRepository {
         s.total_score::text,
         s.submitted_at,
         s.reviewed_at,
+        s.reviewed_by::text,
+        reviewer.email::text AS reviewed_by_email,
         s.created_at,
         s.updated_at
       FROM public.submissions s
+      LEFT JOIN public.users reviewer ON reviewer.id = s.reviewed_by
       WHERE s.id = $1
       FOR UPDATE
       `,
@@ -356,13 +360,6 @@ export class AdminRepository {
         si.id,
         si.submission_id,
         (SELECT s.user_id::text FROM public.submissions s WHERE s.id = si.submission_id LIMIT 1) AS submission_user_id,
-        (
-          SELECT s_owner.telegram_id::text
-          FROM public.submissions s2
-          LEFT JOIN public.users s_owner ON s_owner.id = s2.user_id
-          WHERE s2.id = si.submission_id
-          LIMIT 1
-        ) AS submission_telegram_id,
         si.title,
         si.description,
         si.proof_file_url,
@@ -423,64 +420,84 @@ export class AdminRepository {
     client: PoolClient,
     submissionId: string,
     scores: { itemId: string; approvedScore: number }[],
+    reviewedByUserId: string,
   ): Promise<void> {
     for (const row of scores) {
-      await client.query(
+      const res = await client.query(
         `
         UPDATE public.submission_items
         SET
           approved_score = $2,
           status = 'approved'::public.submission_item_status,
           reviewed_at = NOW(),
+          reviewed_by = $4::uuid,
           updated_at = NOW()
         WHERE id = $1 AND submission_id = $3
         `,
-        [row.itemId, row.approvedScore, submissionId],
+        [row.itemId, row.approvedScore, submissionId, reviewedByUserId],
       );
+      if (res.rowCount !== 1) {
+        throw new ServiceError(
+          409,
+          "A line item changed or was removed during approval. Refresh the page and try again.",
+          "CONCURRENT_MODIFICATION",
+        );
+      }
     }
   }
 
-  async updateItemsRejectAll(client: PoolClient, submissionId: string): Promise<void> {
+  async updateItemsRejectAll(client: PoolClient, submissionId: string, reviewedByUserId: string): Promise<void> {
     await client.query(
       `
       UPDATE public.submission_items
       SET
         approved_score = NULL,
         status = 'rejected'::public.submission_item_status,
+        reviewed_at = NOW(),
+        reviewed_by = $2::uuid,
         updated_at = NOW()
       WHERE submission_id = $1
       `,
-      [submissionId],
+      [submissionId, reviewedByUserId],
     );
   }
 
   async finalizeSubmission(
     client: PoolClient,
-    input: { submissionId: string; status: "approved" | "rejected" },
+    input: { submissionId: string; status: "approved" | "rejected"; reviewedByUserId: string },
   ): Promise<AdminSubmissionDetailRow> {
     const result = await client.query<AdminSubmissionDetailRow>(
       `
-      UPDATE public.submissions
+      UPDATE public.submissions AS s
       SET
         status = $2::public.submission_status,
         reviewed_at = NOW(),
+        reviewed_by = $3::uuid,
         updated_at = NOW()
-      WHERE id = $1
+      FROM public.users AS reviewer
+      WHERE s.id = $1
+        AND reviewer.id = $3::uuid
       RETURNING
-        id,
-        user_id,
-        title,
-        description,
-        status::text AS db_status,
-        total_score::text,
-        submitted_at,
-        reviewed_at,
-        created_at,
-        updated_at
+        s.id,
+        s.user_id,
+        s.title,
+        s.description,
+        s.status::text AS db_status,
+        s.total_score::text,
+        s.submitted_at,
+        s.reviewed_at,
+        s.reviewed_by::text,
+        reviewer.email::text AS reviewed_by_email,
+        s.created_at,
+        s.updated_at
       `,
-      [input.submissionId, input.status],
+      [input.submissionId, input.status, input.reviewedByUserId],
     );
 
-    return result.rows[0] as AdminSubmissionDetailRow;
+    const row = result.rows[0];
+    if (!row) {
+      throw new ServiceError(500, "Failed to finalize submission", "FINALIZE_FAILED");
+    }
+    return row;
   }
 }

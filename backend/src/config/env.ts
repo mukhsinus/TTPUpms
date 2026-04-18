@@ -61,6 +61,14 @@ const envSchema = z.object({
   SUPABASE_DB_URL: z.string().min(1).optional(),
   SUPABASE_PROJECT_URL: z.string().url("SUPABASE_PROJECT_URL must be a valid URL"),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1, "SUPABASE_SERVICE_ROLE_KEY is required"),
+  /**
+   * JWT Secret from Supabase Dashboard → Settings → API. When set, bearer tokens are verified
+   * locally (HS256) instead of calling `auth.getUser` on every request — major latency win.
+   */
+  SUPABASE_JWT_SECRET: z
+    .string()
+    .optional()
+    .transform((val) => (typeof val === "string" && val.trim().length > 0 ? val.trim() : undefined)),
   /** Comma-separated emails that must always resolve to `admin` in `public.users` on sign-in. */
   ADMIN_EMAILS: z.string().optional().default(""),
 });
