@@ -121,10 +121,6 @@ export class UploadService {
       .getPublicUrl(storagePath);
 
     const fileUrl = publicUrlData.publicUrl;
-    // eslint-disable-next-line no-console -- temporary storage debug
-    console.log("FILE PATH:", storagePath);
-    // eslint-disable-next-line no-console -- temporary storage debug
-    console.log("PUBLIC URL:", fileUrl);
 
     const signedUrlResult = await this.app.supabaseAdmin.storage
       .from(env.STORAGE_BUCKET)

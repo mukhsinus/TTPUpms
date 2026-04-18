@@ -323,7 +323,7 @@ export class AdminRepository {
       FROM public.submissions s
       LEFT JOIN public.users reviewer ON reviewer.id = s.reviewed_by
       WHERE s.id = $1
-      FOR UPDATE
+      FOR UPDATE OF s
       `,
       [submissionId],
     );
@@ -462,6 +462,77 @@ export class AdminRepository {
     );
   }
 
+  /**
+   * Older DBs only allowed review → approved/rejected. Moderation often runs on `submitted` or
+   * `needs_revision`; bridge through `review` so finalize succeeds even if migration
+   * `20260430120000_admin_moderation_schema` was not applied.
+   */
+  async ensureSubmissionReadyForModerationFinalize(
+    client: PoolClient,
+    submissionId: string,
+    currentDbStatus: string,
+  ): Promise<void> {
+    if (currentDbStatus === "review") {
+      return;
+    }
+    if (currentDbStatus === "submitted") {
+      const r = await client.query(
+        `
+        UPDATE public.submissions
+        SET
+          status = 'review'::public.submission_status,
+          updated_at = NOW()
+        WHERE id = $1 AND status = 'submitted'::public.submission_status
+        `,
+        [submissionId],
+      );
+      if (r.rowCount !== 1) {
+        throw new ServiceError(
+          409,
+          "Submission status changed during moderation. Refresh the page and try again.",
+          "CONCURRENT_MODIFICATION",
+        );
+      }
+      return;
+    }
+    if (currentDbStatus === "needs_revision") {
+      let r = await client.query(
+        `
+        UPDATE public.submissions
+        SET
+          status = 'submitted'::public.submission_status,
+          updated_at = NOW()
+        WHERE id = $1 AND status = 'needs_revision'::public.submission_status
+        `,
+        [submissionId],
+      );
+      if (r.rowCount !== 1) {
+        throw new ServiceError(
+          409,
+          "Submission status changed during moderation. Refresh the page and try again.",
+          "CONCURRENT_MODIFICATION",
+        );
+      }
+      r = await client.query(
+        `
+        UPDATE public.submissions
+        SET
+          status = 'review'::public.submission_status,
+          updated_at = NOW()
+        WHERE id = $1 AND status = 'submitted'::public.submission_status
+        `,
+        [submissionId],
+      );
+      if (r.rowCount !== 1) {
+        throw new ServiceError(
+          409,
+          "Submission status changed during moderation. Refresh the page and try again.",
+          "CONCURRENT_MODIFICATION",
+        );
+      }
+    }
+  }
+
   async finalizeSubmission(
     client: PoolClient,
     input: { submissionId: string; status: "approved" | "rejected"; reviewedByUserId: string },
@@ -474,9 +545,7 @@ export class AdminRepository {
         reviewed_at = NOW(),
         reviewed_by = $3::uuid,
         updated_at = NOW()
-      FROM public.users AS reviewer
       WHERE s.id = $1
-        AND reviewer.id = $3::uuid
       RETURNING
         s.id,
         s.user_id,
@@ -487,7 +556,12 @@ export class AdminRepository {
         s.submitted_at,
         s.reviewed_at,
         s.reviewed_by::text,
-        reviewer.email::text AS reviewed_by_email,
+        (
+          SELECT u.email::text
+          FROM public.users u
+          WHERE u.id = s.reviewed_by
+          LIMIT 1
+        ) AS reviewed_by_email,
         s.created_at,
         s.updated_at
       `,

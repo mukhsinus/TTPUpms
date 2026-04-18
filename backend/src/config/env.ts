@@ -44,7 +44,8 @@ const envSchema = z.object({
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
   RATE_LIMIT_TIME_WINDOW: z.string().default("1 minute"),
   RATE_LIMIT_BAN: z.coerce.number().int().positive().default(5),
-  STORAGE_BUCKET: z.string().default("chat-attachments"),
+  /** Supabase Storage bucket name (Dashboard → Storage). No code default — set STORAGE_BUCKET in .env. */
+  STORAGE_BUCKET: z.string().min(1, "STORAGE_BUCKET is required"),
   STORAGE_SIGNED_URL_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
   TELEGRAM_BOT_TOKEN: z.string().min(1, "TELEGRAM_BOT_TOKEN is required"),
   BOT_API_KEY: z

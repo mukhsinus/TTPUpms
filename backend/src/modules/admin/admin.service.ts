@@ -3,8 +3,9 @@ import type { AuditLogRepository } from "../audit/audit-log.repository";
 import type { NotificationService } from "../notifications/notification.service";
 import { env } from "../../config/env";
 import {
+  extractStoragePathFromSupabasePublicUrl,
+  normalizeLegacyStorageObjectPath,
   normalizeLegacyStoragePathForRead,
-  storageBucketForObjectPath,
 } from "../files/proof-reference";
 import { ServiceError } from "../../utils/service-error";
 import type {
@@ -120,10 +121,15 @@ export class AdminService {
 
     const primaryLink = items.map((it) => it.external_link).find((u) => u && u.trim().length > 0) ?? null;
 
+    const [mappedItems, mappedFiles] = await Promise.all([
+      Promise.all(items.map((it) => this.mapItemAsync(it))),
+      Promise.all(files.map((f) => this.mapFileAsync(f))),
+    ]);
+
     return {
       submission: this.mapSubmissionDetail(submission),
-      items: items.map((it) => this.mapItem(it)),
-      files: files.map((f) => this.mapFile(f)),
+      items: mappedItems,
+      files: mappedFiles,
       link: primaryLink,
       user: user ? this.mapUser(user) : null,
     };
@@ -175,6 +181,12 @@ export class AdminService {
       );
 
       await this.repository.updateItemsApprove(client, submissionId, scores, actor.actorUserId);
+
+      await this.repository.ensureSubmissionReadyForModerationFinalize(
+        client,
+        submissionId,
+        submission.db_status,
+      );
 
       updated = await this.repository.finalizeSubmission(client, {
         submissionId,
@@ -296,6 +308,13 @@ export class AdminService {
       }
 
       await this.repository.updateItemsRejectAll(client, submissionId, actor.actorUserId);
+
+      await this.repository.ensureSubmissionReadyForModerationFinalize(
+        client,
+        submissionId,
+        submission.db_status,
+      );
+
       updated = await this.repository.finalizeSubmission(client, {
         submissionId,
         status: "rejected",
@@ -362,58 +381,72 @@ export class AdminService {
     return data.publicUrl;
   }
 
-  private resolveItemProofFileUrl(proof: string | null, submissionOwnerUserId: string): string | null {
+  /** Prefer signed URLs so private buckets work in the admin browser; fall back to public URL. */
+  private async displayUrlForStoragePath(objectPath: string): Promise<string> {
+    const bucket = env.STORAGE_BUCKET;
+    const signed = await this.app.supabaseAdmin.storage
+      .from(bucket)
+      .createSignedUrl(objectPath, env.STORAGE_SIGNED_URL_TTL_SECONDS);
+    if (!signed.error && signed.data?.signedUrl) {
+      return signed.data.signedUrl;
+    }
+    this.app.log.warn({ err: signed.error, objectPath }, "Signed URL failed for admin file; using public URL");
+    return this.getPublicUrlForObjectPath(objectPath, bucket);
+  }
+
+  private async resolveItemProofFileUrlAsync(
+    proof: string | null,
+    submissionOwnerUserId: string,
+  ): Promise<string | null> {
     if (!proof?.trim()) {
       return null;
     }
     const t = proof.trim();
+
     if (/^https?:\/\//i.test(t)) {
+      const extracted = extractStoragePathFromSupabasePublicUrl(t);
+      if (extracted !== null) {
+        const path = normalizeLegacyStorageObjectPath(extracted);
+        return this.displayUrlForStoragePath(path);
+      }
       return t;
     }
 
     let path: string;
-    let bucket: string;
-
     if (!t.includes("/")) {
       path = `${submissionOwnerUserId}/${t}`;
-      bucket = env.STORAGE_BUCKET;
     } else {
       path = normalizeLegacyStoragePathForRead(t, submissionOwnerUserId);
-      bucket = storageBucketForObjectPath(path);
     }
-
-    if (bucket === "proofs") {
-      path = path.replace(/^proofs\/+/, "");
-      // Legacy rows sometimes stored `userId/proofs/filename` while the object key is `userId/filename`.
-      path = path.replace(
-        /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/proofs\//i,
-        "$1/",
-      );
-    }
-
-    return this.getPublicUrlForObjectPath(path, bucket);
+    path = normalizeLegacyStorageObjectPath(path);
+    return this.displayUrlForStoragePath(path);
   }
 
-  private resolveFilesRowPublicUrl(row: AdminFileRow): string | null {
+  private async resolveFilesRowPublicUrlAsync(row: AdminFileRow): Promise<string | null> {
     const stored = row.file_url?.trim();
     if (stored && /^https?:\/\//i.test(stored)) {
+      const extracted = extractStoragePathFromSupabasePublicUrl(stored);
+      if (extracted !== null) {
+        const path = normalizeLegacyStorageObjectPath(extracted);
+        return this.displayUrlForStoragePath(path);
+      }
       return stored;
     }
     if (!row.storage_path?.trim()) {
       return stored ?? null;
     }
-    const bucket = row.bucket?.trim() || env.STORAGE_BUCKET;
-    return this.getPublicUrlForObjectPath(row.storage_path, bucket);
+    const path = normalizeLegacyStorageObjectPath(row.storage_path.trim());
+    return this.displayUrlForStoragePath(path);
   }
 
-  private mapItem(row: AdminItemRow) {
+  private async mapItemAsync(row: AdminItemRow): Promise<Record<string, unknown>> {
     const categoryTitle = row.category_title ?? row.category_name;
     return {
       id: row.id,
       submissionId: row.submission_id,
       title: row.title,
       description: row.description,
-      proofFileUrl: this.resolveItemProofFileUrl(row.proof_file_url, row.submission_user_id),
+      proofFileUrl: await this.resolveItemProofFileUrlAsync(row.proof_file_url, row.submission_user_id),
       externalLink: row.external_link,
       proposedScore: numOrNull(row.proposed_score),
       approvedScore: numOrNull(row.approved_score),
@@ -428,12 +461,12 @@ export class AdminService {
     };
   }
 
-  private mapFile(row: AdminFileRow) {
+  private async mapFileAsync(row: AdminFileRow): Promise<Record<string, unknown>> {
     return {
       id: row.id,
       submissionId: row.submission_id,
       submissionItemId: row.submission_item_id,
-      fileUrl: this.resolveFilesRowPublicUrl(row),
+      fileUrl: await this.resolveFilesRowPublicUrlAsync(row),
       originalFilename: row.original_filename,
       mimeType: row.mime_type,
       createdAt: row.created_at,

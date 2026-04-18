@@ -1,27 +1,38 @@
 import { env } from "../../config/env";
 
-const LEGACY_BUCKETS = new Set(["chat-attachments", "proofs", "submission-files"]);
-
 /** Dangerous: Telegram-hosted file URLs must never be accepted as proof. */
 export function isUnsafeTelegramProofUrl(value: string): boolean {
   return /api\.telegram\.org\/file\/bot/i.test(value);
 }
 
-function extractStoragePathFromSupabasePublicUrl(urlStr: string): string | null {
+const STORAGE_PUBLIC_PREFIX = "/storage/v1/object/public/";
+const STORAGE_SIGN_PREFIX = "/storage/v1/object/sign/";
+
+/**
+ * Extracts object path (within bucket) from a Supabase Storage URL for this project
+ * (`/object/public/...` or `/object/sign/...`). The bucket segment in the URL is ignored;
+ * callers resolve reads via `STORAGE_BUCKET`.
+ */
+export function extractStoragePathFromSupabasePublicUrl(urlStr: string): string | null {
   try {
+    const projectOrigin = new URL(env.SUPABASE_PROJECT_URL.replace(/\/$/, "")).origin;
     const u = new URL(urlStr);
-    const prefix = "/storage/v1/object/public/";
-    const idx = u.pathname.indexOf(prefix);
-    if (idx === -1) {
+    if (u.origin !== projectOrigin) {
       return null;
     }
-    const afterPrefix = u.pathname.slice(idx + prefix.length);
+    let afterPrefix: string | null = null;
+    const pub = u.pathname.indexOf(STORAGE_PUBLIC_PREFIX);
+    const sig = u.pathname.indexOf(STORAGE_SIGN_PREFIX);
+    if (pub !== -1) {
+      afterPrefix = u.pathname.slice(pub + STORAGE_PUBLIC_PREFIX.length);
+    } else if (sig !== -1) {
+      afterPrefix = u.pathname.slice(sig + STORAGE_SIGN_PREFIX.length);
+    }
+    if (afterPrefix === null) {
+      return null;
+    }
     const segments = afterPrefix.split("/").filter(Boolean);
     if (segments.length < 2) {
-      return null;
-    }
-    const bucket = decodeURIComponent(segments[0] ?? "");
-    if (!LEGACY_BUCKETS.has(bucket)) {
       return null;
     }
     return segments
@@ -34,18 +45,38 @@ function extractStoragePathFromSupabasePublicUrl(urlStr: string): string | null 
 }
 
 export function isSafeSupabaseProofUrl(url: string): boolean {
-  if (!url.startsWith(env.SUPABASE_PROJECT_URL) || !url.includes("/storage/v1/object/")) {
+  try {
+    const projectOrigin = new URL(env.SUPABASE_PROJECT_URL.replace(/\/$/, "")).origin;
+    const u = new URL(url);
+    if (u.origin !== projectOrigin || !u.pathname.includes("/storage/v1/object/")) {
+      return false;
+    }
+    return extractStoragePathFromSupabasePublicUrl(url) !== null;
+  } catch {
     return false;
   }
-  const p = extractStoragePathFromSupabasePublicUrl(url);
-  return p !== null;
 }
 
 const PATH_WITH_SLASH = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/.+/i;
 
 /**
- * Validates proof reference before persistence: allowed Supabase public URL (legacy buckets) or
- * storage path under our bucket (`userId/uuid-name.ext` or legacy filename only).
+ * Strips legacy `proofs/` folder segments from object keys. Objects are always read from `STORAGE_BUCKET`.
+ */
+export function normalizeLegacyStorageObjectPath(path: string): string {
+  let p = path.trim().replace(/^\/+/, "");
+  p = p.replace(/^proofs\/+/i, "");
+  p = p.replace(
+    /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/proofs\//i,
+    "$1/",
+  );
+  // Legacy object keys sometimes duplicated a mistaken bucket name as a path prefix.
+  p = p.replace(/^submission-files\//i, "");
+  return p;
+}
+
+/**
+ * Validates proof reference before persistence: allowed Supabase public URL for this project or
+ * storage path under the active bucket (`userId/uuid-name.ext` or legacy filename only).
  */
 export function assertValidProofReference(raw: string): void {
   const t = raw.trim();
@@ -81,12 +112,12 @@ export function normalizeProofReferenceForDb(raw: string, ownerUserId: string): 
     if (!extracted) {
       throw new Error("Could not extract storage path from proof URL");
     }
-    return extracted;
+    return normalizeLegacyStorageObjectPath(extracted);
   }
   if (!t.includes("/")) {
     return `${ownerUserId}/${t}`;
   }
-  return t;
+  return normalizeLegacyStorageObjectPath(t);
 }
 
 /** For reads: DB may store legacy bare filename — prefix submission owner id. */
@@ -96,12 +127,4 @@ export function normalizeLegacyStoragePathForRead(raw: string, ownerUserId: stri
     return `${ownerUserId}/${t}`;
   }
   return t;
-}
-
-/** Object path used to live under bucket `proofs`; new uploads use `STORAGE_BUCKET` (e.g. chat-attachments). */
-export function storageBucketForObjectPath(path: string): string {
-  if (path.includes("/proofs/")) {
-    return "proofs";
-  }
-  return env.STORAGE_BUCKET;
 }
