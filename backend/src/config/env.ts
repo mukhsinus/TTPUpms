@@ -35,8 +35,11 @@ const envSchema = z.object({
   HOST: z.string().default("0.0.0.0"),
   PORT: z.coerce.number().int().positive().default(3000),
   TRUST_PROXY: z.coerce.boolean().default(false),
-  /** Must be >= max upload size (multipart + JSON base64); default 10 MiB matches bot/dashboard uploads. */
-  BODY_LIMIT_BYTES: z.coerce.number().int().positive().default(10 * 1024 * 1024),
+  /**
+   * Max raw JSON/multipart body. Bot proof upload uses base64 (~4/3 of file bytes) + JSON wrapper;
+   * 16 MiB fits a 10 MiB binary file with headroom.
+   */
+  BODY_LIMIT_BYTES: z.coerce.number().int().positive().default(16 * 1024 * 1024),
   REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
   KEEP_ALIVE_TIMEOUT_MS: z.coerce.number().int().positive().default(72000),
   LOG_LEVEL: z.string().default("info"),

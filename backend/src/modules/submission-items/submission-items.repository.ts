@@ -2,6 +2,9 @@ import type { FastifyInstance } from "fastify";
 import type { PoolClient } from "pg";
 import { normalizeMetadata } from "../scoring/scoring-metadata";
 
+/** Hidden FK row for categories with no user-visible sub-lines (bot skips subcategory step). */
+export const WHOLE_CATEGORY_PLACEHOLDER_SLUG = "whole_category";
+
 interface SubmissionOwnerRow {
   id: string;
   user_id: string;
@@ -272,6 +275,63 @@ export class SubmissionItemsRepository {
     return result.rows[0]?.slug ?? null;
   }
 
+  /**
+   * Ensures a hidden `whole_category` row exists for this category so `submission_items.subcategory_id`
+   * NOT NULL databases can still store “no sub-line” categories (educational_activity, etc.).
+   * Idempotent; safe to call on every bot submit.
+   */
+  async ensureWholeCategoryPlaceholderForCategory(categoryId: string, client?: PoolClient): Promise<void> {
+    const db: DbExecutor = client ?? this.app.db;
+    await db.query(
+      `
+      INSERT INTO public.category_subcategories (
+        category_id,
+        slug,
+        label,
+        sort_order
+      )
+      SELECT
+        c.id,
+        $2::text,
+        'General',
+        999
+      FROM public.categories c
+      WHERE c.id = $1::uuid
+      ON CONFLICT (category_id, slug) DO UPDATE SET
+        label = EXCLUDED.label,
+        sort_order = EXCLUDED.sort_order
+      `,
+      [categoryId, WHOLE_CATEGORY_PLACEHOLDER_SLUG],
+    );
+  }
+
+  /** Bulk upsert for known catalog keys (startup / migrations alignment). */
+  async ensureAllWholeCategoryPlaceholdersFromCatalog(client?: PoolClient): Promise<void> {
+    const db: DbExecutor = client ?? this.app.db;
+    await db.query(
+      `
+      INSERT INTO public.category_subcategories (
+        category_id,
+        slug,
+        label,
+        sort_order
+      )
+      SELECT
+        c.id,
+        $1::text,
+        'General',
+        999
+      FROM public.categories c
+      WHERE
+        c.name IN ('educational_activity', 'volunteering', 'student_initiatives')
+      ON CONFLICT (category_id, slug) DO UPDATE SET
+        label = EXCLUDED.label,
+        sort_order = EXCLUDED.sort_order
+      `,
+      [WHOLE_CATEGORY_PLACEHOLDER_SLUG],
+    );
+  }
+
   async countSubcategories(categoryId: string): Promise<number> {
     const result = await this.app.db.query<{ n: string }>(
       `
@@ -279,6 +339,7 @@ export class SubmissionItemsRepository {
       FROM category_subcategories
       WHERE category_id = $1
         AND slug IS DISTINCT FROM 'general'
+        AND slug IS DISTINCT FROM '${WHOLE_CATEGORY_PLACEHOLDER_SLUG}'
       `,
       [categoryId],
     );
@@ -297,6 +358,7 @@ export class SubmissionItemsRepository {
       FROM category_subcategories
       WHERE category_id = $1
         AND slug IS DISTINCT FROM 'general'
+        AND slug IS DISTINCT FROM '${WHOLE_CATEGORY_PLACEHOLDER_SLUG}'
       ORDER BY sort_order ASC, id ASC
       LIMIT 1
       `,

@@ -1,5 +1,6 @@
 import { buildApp } from "./app";
 import { env } from "./config/env";
+import { SubmissionItemsRepository } from "./modules/submission-items/submission-items.repository";
 
 /**
  * Upload limits: `buildApp` sets Fastify `bodyLimit` from `BODY_LIMIT_BYTES` and registers
@@ -8,6 +9,17 @@ import { env } from "./config/env";
 
 async function startServer(): Promise<void> {
   const app = await buildApp();
+
+  try {
+    const submissionItemsRepo = new SubmissionItemsRepository(app);
+    await submissionItemsRepo.ensureAllWholeCategoryPlaceholdersFromCatalog();
+    app.log.info("Ensured whole_category placeholder rows for no-sub-line categories");
+  } catch (err) {
+    app.log.warn(
+      { err },
+      "Could not upsert whole_category placeholders at startup; per-submit self-heal will still run",
+    );
+  }
 
   const shutdown = async (signal: string): Promise<void> => {
     app.log.info({ signal }, "Shutting down server");

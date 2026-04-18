@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
+import { env } from "../../config/env";
 import { authMiddleware } from "../../middleware/auth.middleware";
 import { mergePublicUserRoleFromDb } from "../../middleware/public-user-role";
 import { errorCodeFromStatus, failure, success } from "../../utils/http-response";
@@ -39,7 +40,7 @@ function getMultipartFieldValue(
   return undefined;
 }
 
-const JSON_UPLOAD_BODY_LIMIT = 15 * 1024 * 1024;
+const JSON_UPLOAD_BODY_LIMIT = env.BODY_LIMIT_BYTES;
 
 async function mergeRoleHook(request: FastifyRequest, _reply: FastifyReply): Promise<void> {
   await mergePublicUserRoleFromDb(request);

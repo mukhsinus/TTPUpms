@@ -1,7 +1,8 @@
-import type {
-  SubmissionItemsRepository,
-  SubmissionItemEntity,
-  SubmissionOwnerEntity,
+import {
+  WHOLE_CATEGORY_PLACEHOLDER_SLUG,
+  type SubmissionItemsRepository,
+  type SubmissionItemEntity,
+  type SubmissionOwnerEntity,
 } from "./submission-items.repository";
 import type { AddSubmissionItemBody } from "./submission-items.schema";
 import { normalizeExternalLinkForPersistence } from "./external-link-normalize";
@@ -52,6 +53,16 @@ export class SubmissionItemsService {
     const hasSubcategories = await this.repository.categoryHasSubcategories(body.category_id);
     if (subcategoryId === null && hasSubcategories) {
       throw new ServiceError(400, "Subcategory is required for this category", "VALIDATION_ERROR");
+    }
+    if (subcategoryId === null && !hasSubcategories) {
+      await this.repository.ensureWholeCategoryPlaceholderForCategory(body.category_id);
+      subcategoryId = await this.repository.findSubcategoryIdBySlug(
+        body.category_id,
+        WHOLE_CATEGORY_PLACEHOLDER_SLUG,
+      );
+      if (!subcategoryId) {
+        throw new ServiceError(400, "Unknown category_id", "VALIDATION_ERROR");
+      }
     }
 
     const metadata = normalizeMetadata(body.metadata);

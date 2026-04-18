@@ -169,6 +169,7 @@ export class CategoriesRepository {
         SELECT id, category_id, slug, label, sort_order, created_at
         FROM public.category_subcategories
         WHERE category_id = ANY($1::uuid[])
+          AND slug IS DISTINCT FROM 'whole_category'
         ORDER BY category_id ASC, sort_order ASC, slug ASC
         `,
         [categoryIds],

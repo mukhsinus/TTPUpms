@@ -6,7 +6,11 @@ import { ServiceError } from "../../utils/service-error";
 import type { AuditLogRepository } from "../audit/audit-log.repository";
 import type { NotificationService } from "../notifications/notification.service";
 import { normalizeExternalLinkForPersistence } from "../submission-items/external-link-normalize";
-import type { SubmissionItemEntity, SubmissionItemsRepository } from "../submission-items/submission-items.repository";
+import {
+  WHOLE_CATEGORY_PLACEHOLDER_SLUG,
+  type SubmissionItemEntity,
+  type SubmissionItemsRepository,
+} from "../submission-items/submission-items.repository";
 import type { SubmissionItemsService } from "../submission-items/submission-items.service";
 import {
   normalizeMetadata,
@@ -347,6 +351,7 @@ export class BotApiService {
         FROM categories c
         LEFT JOIN category_subcategories cs ON cs.category_id = c.id
           AND cs.slug IS DISTINCT FROM 'general'
+          AND cs.slug IS DISTINCT FROM '${WHOLE_CATEGORY_PLACEHOLDER_SLUG}'
         WHERE c.name IS DISTINCT FROM 'legacy_uncategorized'
         ORDER BY c.name ASC, cs.sort_order ASC NULLS LAST, cs.slug ASC NULLS LAST
         `;
@@ -371,6 +376,7 @@ export class BotApiService {
         FROM categories c
         LEFT JOIN category_subcategories cs ON cs.category_id = c.id
           AND cs.slug IS DISTINCT FROM 'general'
+          AND cs.slug IS DISTINCT FROM '${WHOLE_CATEGORY_PLACEHOLDER_SLUG}'
         WHERE c.name IS DISTINCT FROM 'legacy_uncategorized'
         ORDER BY c.name ASC, cs.sort_order ASC NULLS LAST, cs.slug ASC NULLS LAST
         `;
@@ -520,8 +526,10 @@ export class BotApiService {
   private mapItemToBotSubmitSummary(item: SubmissionItemEntity): BotSubmitDraftItemSummary {
     const link =
       item.externalLink && item.externalLink.trim() !== "" ? item.externalLink.trim() : null;
-    const sub =
-      (item.subcategoryLabel ?? item.subcategory ?? "").trim() || "—";
+    const isPlaceholder = item.subcategory === WHOLE_CATEGORY_PLACEHOLDER_SLUG;
+    const sub = isPlaceholder
+      ? "—"
+      : (item.subcategoryLabel ?? item.subcategory ?? "").trim() || "—";
     return {
       title: item.title,
       category: item.category,
@@ -734,6 +742,18 @@ export class BotApiService {
         const hasSubs = await this.submissionItemsRepository.categoryHasSubcategories(it.categoryId);
         if (hasSubs) {
           throw new BotApiHttpError(400, "Subcategory is required for this category.", "VALIDATION_ERROR");
+        }
+        await this.submissionItemsRepository.ensureWholeCategoryPlaceholderForCategory(it.categoryId);
+        subcategoryId = await this.submissionItemsRepository.findSubcategoryIdBySlug(
+          it.categoryId,
+          WHOLE_CATEGORY_PLACEHOLDER_SLUG,
+        );
+        if (!subcategoryId) {
+          throw new BotApiHttpError(
+            400,
+            "Unknown category_id — cannot attach a submission line to this category.",
+            "VALIDATION_ERROR",
+          );
         }
       }
 
