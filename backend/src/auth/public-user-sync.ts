@@ -25,8 +25,8 @@ export function isAdminEmail(email: string | null | undefined, admins: Set<strin
 
 export interface SyncPublicUserOptions {
   /**
-   * When true (admin web login with `X-Upms-Auth-Source: admin_panel`), set `role` to `admin`
-   * for this principal, except existing `superadmin` is preserved. Bot/API flows omit this flag.
+   * When true (admin web login with `X-Upms-Auth-Source: admin_panel`), allow promoting this
+   * principal only when also listed in `public.admin_users` or `ADMIN_EMAILS`. Bot/API flows omit this flag.
    */
   adminPanelLogin?: boolean;
 }
@@ -81,5 +81,32 @@ export async function syncPublicUserRoleFromAuth(
   );
 
   const roleText = res.rows[0]?.role ?? "student";
+
+  if (roleText === "admin" || roleText === "superadmin") {
+    await ensureAdminUsersRow(db, authUser.id);
+  }
+
   return { roleText };
+}
+
+/**
+ * Keeps `public.admin_users` aligned when `public.users` holds an elevated role (allowlist for the panel).
+ */
+async function ensureAdminUsersRow(db: Pool, userId: string): Promise<void> {
+  await db.query(
+    `
+    INSERT INTO public.admin_users (id, email, role, created_at)
+    SELECT u.id, u.email, u.role, u.created_at
+    FROM public.users u
+    WHERE u.id = $1::uuid
+      AND u.role::text IN ('admin', 'superadmin')
+    ON CONFLICT (id) DO UPDATE SET
+      email = EXCLUDED.email,
+      role = CASE
+        WHEN public.admin_users.role::text = 'superadmin' THEN public.admin_users.role
+        ELSE EXCLUDED.role
+      END
+    `,
+    [userId],
+  );
 }

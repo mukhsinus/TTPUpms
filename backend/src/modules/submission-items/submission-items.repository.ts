@@ -347,18 +347,6 @@ export class SubmissionItemsRepository {
           ? Number(input.proposedScore)
           : null;
 
-    const insertPayload = {
-      submission_id: input.submissionId,
-      category_id: input.categoryId,
-      subcategory_id: input.subcategoryId,
-      title: input.title,
-      description: input.description ?? null,
-      proof_file_url: input.proofFileUrl ?? null,
-      external_link: externalLink,
-      proposed_score: proposedScoreSql,
-    };
-    console.log("INSERT submission_item:", insertPayload);
-
     const result = await db.query<SubmissionItemRow>(
       `
       INSERT INTO submission_items (

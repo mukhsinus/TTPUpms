@@ -16,7 +16,11 @@ export const addSubmissionItemBodySchema = z
     subcategory: z.string().trim().max(200).optional(),
     title: z.string().trim().min(1).max(200),
     description: z.string().trim().max(5000).optional(),
-    proof_file_url: z.string().url().optional(),
+    proof_file_url: z
+      .preprocess(
+        (v) => (v === "" || v === null || v === undefined ? undefined : String(v).trim()),
+        z.string().min(1).max(2048).optional(),
+      ),
     /** Validated in service (http/https only); empty string omitted. */
     external_link: z
       .preprocess(

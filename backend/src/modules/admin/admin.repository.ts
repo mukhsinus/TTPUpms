@@ -38,6 +38,8 @@ export interface AdminUserRow {
 export interface AdminItemRow {
   id: string;
   submission_id: string;
+  submission_user_id: string;
+  submission_telegram_id: string | null;
   title: string;
   description: string | null;
   proof_file_url: string | null;
@@ -353,6 +355,14 @@ export class AdminRepository {
       SELECT
         si.id,
         si.submission_id,
+        (SELECT s.user_id::text FROM public.submissions s WHERE s.id = si.submission_id LIMIT 1) AS submission_user_id,
+        (
+          SELECT s_owner.telegram_id::text
+          FROM public.submissions s2
+          LEFT JOIN public.users s_owner ON s_owner.id = s2.user_id
+          WHERE s2.id = si.submission_id
+          LIMIT 1
+        ) AS submission_telegram_id,
         si.title,
         si.description,
         si.proof_file_url,
@@ -421,6 +431,7 @@ export class AdminRepository {
         SET
           approved_score = $2,
           status = 'approved'::public.submission_item_status,
+          reviewed_at = NOW(),
           updated_at = NOW()
         WHERE id = $1 AND submission_id = $3
         `,

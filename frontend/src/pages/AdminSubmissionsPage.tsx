@@ -59,10 +59,6 @@ export function AdminSubmissionsPage(): ReactElement {
   }, [page, status, category, dateFrom, dateTo, sort, order]);
 
   useEffect(() => {
-    setPage(1);
-  }, [status, category, dateFrom, dateTo, sort, order]);
-
-  useEffect(() => {
     void load();
   }, [load]);
 
@@ -87,23 +83,61 @@ export function AdminSubmissionsPage(): ReactElement {
           <select
             className="ui-input"
             value={status}
-            onChange={(e) => setStatus(e.target.value as "" | AdminModerationStatus)}
+            onChange={(e) => {
+              setPage(1);
+              setStatus(e.target.value as "" | AdminModerationStatus);
+            }}
           >
             <option value="">All statuses</option>
             <option value="pending">Pending</option>
             <option value="approved">Approved</option>
             <option value="rejected">Rejected</option>
           </select>
-          <Input value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Category (code)" />
-          <Input type="datetime-local" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-          <Input type="datetime-local" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-          <select className="ui-input" value={sort} onChange={(e) => setSort(e.target.value as typeof sort)}>
+          <Input
+            value={category}
+            onChange={(e) => {
+              setPage(1);
+              setCategory(e.target.value);
+            }}
+            placeholder="Category (code)"
+          />
+          <Input
+            type="datetime-local"
+            value={dateFrom}
+            onChange={(e) => {
+              setPage(1);
+              setDateFrom(e.target.value);
+            }}
+          />
+          <Input
+            type="datetime-local"
+            value={dateTo}
+            onChange={(e) => {
+              setPage(1);
+              setDateTo(e.target.value);
+            }}
+          />
+          <select
+            className="ui-input"
+            value={sort}
+            onChange={(e) => {
+              setPage(1);
+              setSort(e.target.value as typeof sort);
+            }}
+          >
             <option value="created_at">Sort: date</option>
             <option value="title">Sort: title</option>
             <option value="status">Sort: status</option>
             <option value="score">Sort: proposed score</option>
           </select>
-          <select className="ui-input" value={order} onChange={(e) => setOrder(e.target.value as "asc" | "desc")}>
+          <select
+            className="ui-input"
+            value={order}
+            onChange={(e) => {
+              setPage(1);
+              setOrder(e.target.value as "asc" | "desc");
+            }}
+          >
             <option value="desc">Descending</option>
             <option value="asc">Ascending</option>
           </select>

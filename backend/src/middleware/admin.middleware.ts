@@ -1,4 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { mergePublicUserRoleFromDb } from "./public-user-role";
 import { failure } from "../utils/http-response";
 import { isAdminPanelOperator } from "../utils/admin-roles";
 
@@ -11,6 +12,8 @@ export async function requireAdmin(request: FastifyRequest, reply: FastifyReply)
     reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED", {}));
     return;
   }
+
+  await mergePublicUserRoleFromDb(request);
 
   if (!isAdminPanelOperator(request.user.role)) {
     reply.status(403).send(failure("Admin access required", "FORBIDDEN", {}));

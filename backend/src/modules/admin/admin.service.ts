@@ -1,6 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import type { AuditLogRepository } from "../audit/audit-log.repository";
 import type { NotificationService } from "../notifications/notification.service";
+import { env } from "../../config/env";
+import {
+  normalizeLegacyStoragePathForRead,
+  storageBucketForObjectPath,
+} from "../files/proof-reference";
 import { ServiceError } from "../../utils/service-error";
 import type {
   AdminFileRow,
@@ -10,7 +15,6 @@ import type {
   AdminUserRow,
 } from "./admin.repository";
 import { AdminRepository } from "./admin.repository";
-import { resolveStoragePublicFileUrl } from "./storage-url";
 import type {
   AdminApproveBody,
   AdminModerationStatus,
@@ -28,24 +32,6 @@ function toModerationStatus(dbStatus: string): AdminModerationStatus {
     return "rejected";
   }
   return "pending";
-}
-
-function splitTotalAcrossItems(total: number, count: number): number[] {
-  if (count <= 0) {
-    return [];
-  }
-  const cents = Math.round(total * 100);
-  const baseCents = Math.floor(cents / count);
-  const remainder = cents - baseCents * count;
-  const out: number[] = [];
-  for (let i = 0; i < count; i += 1) {
-    let c = baseCents;
-    if (i < remainder) {
-      c += 1;
-    }
-    out.push(c / 100);
-  }
-  return out;
 }
 
 function numOrNull(v: string | null | undefined): number | null {
@@ -149,6 +135,11 @@ export class AdminService {
     actor: { actorUserId: string },
   ): Promise<Record<string, unknown>> {
     const client = await this.app.db.connect();
+    let updated: AdminSubmissionDetailRow;
+    let oldDbStatus: string;
+    let targetUserId: string;
+    let lineCount = 0;
+
     try {
       await client.query("BEGIN");
 
@@ -173,66 +164,91 @@ export class AdminService {
         throw new ServiceError(400, "Submission has no line items to score");
       }
 
-      const scores = this.resolveApprovedScores(items, body);
+      lineCount = items.length;
+      oldDbStatus = submission.db_status;
+      targetUserId = submission.user_id;
+
+      const scores = this.computeApproveItemScores(items, body);
+      this.app.log.info(
+        { submissionId, score: body.score ?? null, itemsCount: items.length },
+        "admin moderation approve",
+      );
+
       await this.repository.updateItemsApprove(client, submissionId, scores);
 
-      const updated = await this.repository.finalizeSubmission(client, {
+      updated = await this.repository.finalizeSubmission(client, {
         submissionId,
         status: "approved",
       });
 
       await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      this.app.log.error({ err: error, submissionId }, "approveSubmission failed");
+      if (error instanceof ServiceError) {
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : "Failed to approve submission";
+      throw new ServiceError(500, message, "APPROVE_SUBMISSION_FAILED");
+    } finally {
+      client.release();
+    }
 
+    try {
       await this.audit.insert({
         actorUserId: actor.actorUserId,
-        targetUserId: submission.user_id,
+        targetUserId,
         entityTable: "submissions",
         entityId: submissionId,
         action: "admin_moderation_approve",
-        oldValues: { status: submission.db_status },
+        oldValues: { status: oldDbStatus },
         newValues: {
           status: "approved",
           scoreProvided: body.score ?? null,
-          lineCount: items.length,
+          lineCount,
         },
       });
 
       this.notifications.notifySubmissionStatusChanged({
-        userId: submission.user_id,
+        userId: targetUserId,
         submissionId,
         status: "approved",
       });
-
-      return this.mapSubmissionDetail(updated);
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      client.release();
+    } catch (postErr) {
+      this.app.log.error({ err: postErr, submissionId }, "approveSubmission post-commit failed");
     }
+
+    return this.mapSubmissionDetail(updated);
   }
 
-  private resolveApprovedScores(
+  /**
+   * When admin omits total `score`, every line must have `proposed_score` or we reject.
+   * When admin sends `score`, split evenly across items (ignore proposed for approval amounts).
+   */
+  private computeApproveItemScores(
     items: AdminItemRow[],
     body: AdminApproveBody,
   ): { itemId: string; approvedScore: number }[] {
-    if (body.score === undefined) {
-      return items.map((it) => {
-        const proposed = numOrNull(it.proposed_score);
-        if (proposed === null) {
-          throw new ServiceError(
-            400,
-            "Every line item must have a proposed score when the admin score is omitted",
-          );
-        }
-        return { itemId: it.id, approvedScore: proposed };
-      });
+    const hasExplicitTotal = body.score !== undefined && body.score !== null && Number.isFinite(body.score);
+
+    if (!hasExplicitTotal) {
+      const missingProposed = items.some((it) => numOrNull(it.proposed_score) === null);
+      if (missingProposed) {
+        throw new ServiceError(400, "Items missing proposed_score", "VALIDATION_ERROR");
+      }
     }
 
-    const parts = splitTotalAcrossItems(body.score, items.length);
-    return items.map((it, idx) => ({
+    let perItemScore: number | null = null;
+    if (hasExplicitTotal) {
+      perItemScore = Number((Number(body.score) / items.length).toFixed(2));
+      if (!Number.isFinite(perItemScore)) {
+        throw new ServiceError(400, "Invalid total score", "VALIDATION_ERROR");
+      }
+    }
+
+    return items.map((it) => ({
       itemId: it.id,
-      approvedScore: parts[idx] ?? 0,
+      approvedScore: perItemScore !== null ? perItemScore : (numOrNull(it.proposed_score) ?? 0),
     }));
   }
 
@@ -242,6 +258,10 @@ export class AdminService {
     actor: { actorUserId: string },
   ): Promise<Record<string, unknown>> {
     const client = await this.app.db.connect();
+    let updated: AdminSubmissionDetailRow;
+    let oldDbStatus: string;
+    let targetUserId: string;
+
     try {
       await client.query("BEGIN");
 
@@ -265,37 +285,49 @@ export class AdminService {
         );
       }
 
+      oldDbStatus = submission.db_status;
+      targetUserId = submission.user_id;
+
       await this.repository.updateItemsRejectAll(client, submissionId);
-      const updated = await this.repository.finalizeSubmission(client, {
+      updated = await this.repository.finalizeSubmission(client, {
         submissionId,
         status: "rejected",
       });
 
       await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      this.app.log.error({ err: error, submissionId }, "rejectSubmission failed");
+      if (error instanceof ServiceError) {
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : "Failed to reject submission";
+      throw new ServiceError(500, message, "REJECT_SUBMISSION_FAILED");
+    } finally {
+      client.release();
+    }
 
+    try {
       await this.audit.insert({
         actorUserId: actor.actorUserId,
-        targetUserId: submission.user_id,
+        targetUserId,
         entityTable: "submissions",
         entityId: submissionId,
         action: "admin_moderation_reject",
-        oldValues: { status: submission.db_status },
+        oldValues: { status: oldDbStatus },
         newValues: { status: "rejected", reason: body.reason ?? null },
       });
 
       this.notifications.notifySubmissionStatusChanged({
-        userId: submission.user_id,
+        userId: targetUserId,
         submissionId,
         status: "rejected",
       });
-
-      return this.mapSubmissionDetail(updated);
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      client.release();
+    } catch (postErr) {
+      this.app.log.error({ err: postErr, submissionId }, "rejectSubmission post-commit failed");
     }
+
+    return this.mapSubmissionDetail(updated);
   }
 
   private mapSubmissionDetail(row: AdminSubmissionDetailRow) {
@@ -314,6 +346,60 @@ export class AdminService {
     };
   }
 
+  private getPublicUrlForObjectPath(storagePath: string, bucket: string): string {
+    const { data } = this.app.supabaseAdmin.storage.from(bucket).getPublicUrl(storagePath);
+    return data.publicUrl;
+  }
+
+  private resolveItemProofFileUrl(
+    proof: string | null,
+    submissionOwnerUserId: string,
+    submissionOwnerTelegramId: string | null,
+  ): string | null {
+    if (!proof?.trim()) {
+      return null;
+    }
+    const t = proof.trim();
+    if (/^https?:\/\//i.test(t)) {
+      return t;
+    }
+
+    let path: string;
+    let bucket: string;
+
+    if (!t.includes("/")) {
+      const prefix = submissionOwnerTelegramId?.trim() || submissionOwnerUserId;
+      path = `${prefix}/${t}`;
+      bucket = "proofs";
+    } else {
+      path = normalizeLegacyStoragePathForRead(t, submissionOwnerUserId);
+      bucket = storageBucketForObjectPath(path);
+    }
+
+    if (bucket === "proofs") {
+      path = path.replace(/^proofs\/+/, "");
+      // Legacy rows sometimes stored `userId/proofs/filename` while the object key is `userId/filename`.
+      path = path.replace(
+        /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/proofs\//i,
+        "$1/",
+      );
+    }
+
+    return this.getPublicUrlForObjectPath(path, bucket);
+  }
+
+  private resolveFilesRowPublicUrl(row: AdminFileRow): string | null {
+    const stored = row.file_url?.trim();
+    if (stored && /^https?:\/\//i.test(stored)) {
+      return stored;
+    }
+    if (!row.storage_path?.trim()) {
+      return stored ?? null;
+    }
+    const bucket = row.bucket?.trim() || env.STORAGE_BUCKET;
+    return this.getPublicUrlForObjectPath(row.storage_path, bucket);
+  }
+
   private mapItem(row: AdminItemRow) {
     const categoryTitle = row.category_title ?? row.category_name;
     return {
@@ -321,7 +407,11 @@ export class AdminService {
       submissionId: row.submission_id,
       title: row.title,
       description: row.description,
-      proofFileUrl: resolveStoragePublicFileUrl(row.proof_file_url, null, null) ?? row.proof_file_url,
+      proofFileUrl: this.resolveItemProofFileUrl(
+        row.proof_file_url,
+        row.submission_user_id,
+        row.submission_telegram_id,
+      ),
       externalLink: row.external_link,
       proposedScore: numOrNull(row.proposed_score),
       approvedScore: numOrNull(row.approved_score),
@@ -341,7 +431,7 @@ export class AdminService {
       id: row.id,
       submissionId: row.submission_id,
       submissionItemId: row.submission_item_id,
-      fileUrl: resolveStoragePublicFileUrl(row.file_url, row.bucket, row.storage_path),
+      fileUrl: this.resolveFilesRowPublicUrl(row),
       originalFilename: row.original_filename,
       mimeType: row.mime_type,
       createdAt: row.created_at,

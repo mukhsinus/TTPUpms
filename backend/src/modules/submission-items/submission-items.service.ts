@@ -12,6 +12,7 @@ import { isAdminPanelOperator } from "../../utils/admin-roles";
 import type { AuthUser } from "../../types/auth-user";
 import type { UsersRepository } from "../users/users.repository";
 import { assertStudentMayEditSubmissionContent } from "../submissions/submission-transitions";
+import { assertValidProofReference, normalizeProofReferenceForDb } from "../files/proof-reference";
 
 export class SubmissionItemsService {
   constructor(
@@ -84,6 +85,17 @@ export class SubmissionItemsService {
     const externalLink = normalizeExternalLinkForPersistence(body.external_link);
     const proposedScore: number | null = null;
 
+    let proofPath: string | undefined;
+    if (body.proof_file_url !== undefined && body.proof_file_url.length > 0) {
+      try {
+        assertValidProofReference(body.proof_file_url);
+        proofPath = normalizeProofReferenceForDb(body.proof_file_url, submission.userId);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Invalid proof file reference";
+        throw new ServiceError(400, msg, "VALIDATION_ERROR");
+      }
+    }
+
     try {
       return await this.repository.createItem({
         submissionId: submission.id,
@@ -91,7 +103,7 @@ export class SubmissionItemsService {
         subcategoryId,
         title: body.title,
         description: body.description,
-        proofFileUrl: body.proof_file_url,
+        proofFileUrl: proofPath,
         externalLink,
         proposedScore,
         metadata,

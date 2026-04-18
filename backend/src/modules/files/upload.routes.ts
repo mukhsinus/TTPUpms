@@ -1,6 +1,7 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { authMiddleware } from "../../middleware/auth.middleware";
+import { mergePublicUserRoleFromDb } from "../../middleware/public-user-role";
 import { errorCodeFromStatus, failure, success } from "../../utils/http-response";
 import { AntiFraudService } from "../validation/anti-fraud.service";
 import { FileServiceError, UploadService } from "./upload.service";
@@ -40,6 +41,10 @@ function getMultipartFieldValue(
 
 const JSON_UPLOAD_BODY_LIMIT = 15 * 1024 * 1024;
 
+async function mergeRoleHook(request: FastifyRequest, _reply: FastifyReply): Promise<void> {
+  await mergePublicUserRoleFromDb(request);
+}
+
 export async function uploadRoutes(app: FastifyInstance): Promise<void> {
   const antiFraud = new AntiFraudService(app);
   const uploadService = new UploadService(app, antiFraud);
@@ -47,7 +52,7 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     "/upload",
     {
-      preHandler: authMiddleware,
+      preHandler: [authMiddleware, mergeRoleHook],
       bodyLimit: JSON_UPLOAD_BODY_LIMIT,
       config: { rateLimit: { max: 30, timeWindow: "1 minute" } },
     },

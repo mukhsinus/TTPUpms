@@ -29,7 +29,7 @@ const createAchievementSchema = z.object({
   telegram_id: z.string().regex(/^\d+$/, "telegram_id must be numeric"),
   category: z.string().min(1),
   details: z.string().min(1),
-  proofFileUrl: z.string().url(),
+  proofFileUrl: z.string().min(1).max(2048),
 });
 
 const telegramIdentitySchema = z.object({
@@ -66,7 +66,7 @@ const createStudentSubmissionSchema = z.object({
     }),
   title: z.string().min(1).max(200),
   description: z.string().min(1).max(5000),
-  proof_file_url: z.string().url(),
+  proof_file_url: z.string().min(1).max(2048),
   metadata: metadataRecordSchema.optional(),
 });
 
@@ -89,7 +89,7 @@ const addBotSubmissionItemSchema = z.object({
     }),
   title: z.string().min(1).max(200),
   description: z.string().min(1).max(5000),
-  proof_file_url: z.string().url(),
+  proof_file_url: z.string().min(1).max(2048),
   external_link: z.union([z.string().max(2048), z.literal(""), z.null()]).optional().nullable(),
   metadata: metadataRecordSchema.optional(),
 });
@@ -106,7 +106,7 @@ const botCompleteSubmissionItemSchema = z.object({
     }),
   title: z.string().trim().min(1).max(200),
   description: z.string().trim().min(1).max(5000),
-  proof_file_url: z.string().url(),
+  proof_file_url: z.string().min(1).max(2048),
   external_link: z.union([z.string().max(2048), z.literal(""), z.null()]).optional().nullable(),
   metadata: metadataRecordSchema.optional(),
 });

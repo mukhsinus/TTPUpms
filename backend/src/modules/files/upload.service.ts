@@ -102,7 +102,7 @@ export class UploadService {
     });
 
     const safeFilename = toSafeFilename(input.filename);
-    const storagePath = `${submission.user_id}/${input.submissionId}/${randomUUID()}-${safeFilename}`;
+    const storagePath = `${submission.user_id}/${randomUUID()}-${safeFilename}`;
 
     const uploadResult = await this.app.supabaseAdmin.storage
       .from(env.STORAGE_BUCKET)
@@ -121,6 +121,10 @@ export class UploadService {
       .getPublicUrl(storagePath);
 
     const fileUrl = publicUrlData.publicUrl;
+    // eslint-disable-next-line no-console -- temporary storage debug
+    console.log("FILE PATH:", storagePath);
+    // eslint-disable-next-line no-console -- temporary storage debug
+    console.log("PUBLIC URL:", fileUrl);
 
     const signedUrlResult = await this.app.supabaseAdmin.storage
       .from(env.STORAGE_BUCKET)
@@ -145,7 +149,7 @@ export class UploadService {
     });
 
     if (input.submissionItemId) {
-      await this.setSubmissionItemProofUrl(input.submissionItemId, fileUrl);
+      await this.setSubmissionItemProofUrl(input.submissionItemId, storagePath);
     }
 
     const size = metadata.size_bytes ?? input.bytes.byteLength;
@@ -220,14 +224,14 @@ export class UploadService {
     }
   }
 
-  private async setSubmissionItemProofUrl(submissionItemId: string, proofUrl: string): Promise<void> {
+  private async setSubmissionItemProofUrl(submissionItemId: string, storagePathOnly: string): Promise<void> {
     await this.app.db.query(
       `
       UPDATE submission_items
       SET proof_file_url = $2, updated_at = NOW()
       WHERE id = $1
       `,
-      [submissionItemId, proofUrl],
+      [submissionItemId, storagePathOnly],
     );
   }
 

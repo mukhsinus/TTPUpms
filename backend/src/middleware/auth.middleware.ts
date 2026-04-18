@@ -40,8 +40,8 @@ function isRetryableAuthError(error: unknown): boolean {
 }
 
 /**
- * Fast auth: validate JWT + single indexed read of `public.users.role` (no INSERT/UPDATE).
- * Does not call `syncPublicUserRoleFromAuth` (that runs only from `GET /api/auth/me` when needed).
+ * Validates JWT and attaches `request.user` from token claims only — no DB queries, no writes.
+ * Role sync runs in `GET /api/auth/me` when needed; staff routes use `mergePublicUserRoleFromDb` after this.
  */
 export async function authMiddleware(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const token = parseBearerToken(request.headers.authorization);
@@ -78,28 +78,7 @@ export async function authMiddleware(request: FastifyRequest, reply: FastifyRepl
     request.log.warn({ userId: u.id, appRole: jwtRoleRaw }, "Invalid app_metadata.role on JWT (ignored)");
   }
 
-  let role: AppRole = jwtRoleParsed ?? "student";
-
-  try {
-    const row = await request.server.db.query<{ role: string }>(
-      `SELECT role::text AS role FROM public.users WHERE id = $1 LIMIT 1`,
-      [u.id],
-    );
-    const dbText = row.rows[0]?.role;
-    const dbRole = dbText ? toRole(dbText) : null;
-    if (dbRole) {
-      role = dbRole;
-    }
-
-    if (jwtRoleParsed !== null && jwtRoleParsed !== role) {
-      request.log.debug(
-        { userId: u.id, jwtRole: jwtRoleParsed, dbRole: role },
-        "JWT app_metadata.role differs from public.users.role; using database role",
-      );
-    }
-  } catch (err) {
-    request.log.warn({ err, userId: u.id }, "Role lookup failed; using JWT role fallback");
-  }
+  const role: AppRole = jwtRoleParsed ?? "student";
 
   request.user = {
     id: u.id,

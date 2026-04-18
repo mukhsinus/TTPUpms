@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest, preHandlerHookHandler } from "fastify";
 import type { AppRole } from "../types/auth-user";
+import { mergePublicUserRoleFromDb } from "./public-user-role";
 import { isAdminPanelOperator } from "../utils/admin-roles";
 import { failure } from "../utils/http-response";
 
@@ -14,6 +15,8 @@ export function allowRoles(allowedRoles: AppRole[]): preHandlerHookHandler {
       reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
       return;
     }
+
+    await mergePublicUserRoleFromDb(request);
 
     if (!allowedRoles.includes(request.user.role)) {
       reply.status(403).send(failure("Forbidden", "FORBIDDEN"));

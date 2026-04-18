@@ -22,6 +22,10 @@ import type { UsersRepository } from "../users/users.repository";
 import { AntiFraudError, type AntiFraudService } from "../validation/anti-fraud.service";
 import { getPostgresDriverErrorFields } from "../../utils/pg-http-map";
 import { BotApiHttpError } from "./bot-api-errors";
+import {
+  assertValidProofReference,
+  normalizeProofReferenceForDb,
+} from "../files/proof-reference";
 
 function parseUserRole(value: string): "student" | "reviewer" | "admin" {
   if (value === "superadmin") {
@@ -125,17 +129,6 @@ export interface BotCategoryCatalogEntry {
 
 const TEN_MB = 10 * 1024 * 1024;
 const ALLOWED_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
-
-function isUnsafeTelegramProofUrl(url: string): boolean {
-  return /api\.telegram\.org\/file\/bot/i.test(url);
-}
-
-function isSafeProofStorageUrl(url: string): boolean {
-  if (!url.startsWith(env.SUPABASE_PROJECT_URL) || !url.includes("/storage/v1/object/")) {
-    return false;
-  }
-  return url.includes("/object/public/proofs/") || url.includes("/object/public/submission-files/");
-}
 
 function toSafeFilename(filename: string): string {
   return filename.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -614,8 +607,6 @@ export class BotApiService {
     externalLink?: string | null;
     metadata?: Record<string, string | number | boolean>;
   }): Promise<{ itemId: string }> {
-    this.validateProofStorageUrl(input.proofFileUrl);
-
     const user = await this.findOrCreateUserByTelegramId(input.telegramId);
     const slug = await this.resolveBotSubcategorySlug(input.categoryId, input.subcategory);
     let ext: string | null;
@@ -721,7 +712,17 @@ export class BotApiService {
     const prepared: PreparedRow[] = [];
 
     for (const it of input.items) {
-      this.validateProofStorageUrl(it.proofFileUrl);
+      let proofPath: string;
+      try {
+        assertValidProofReference(it.proofFileUrl);
+        proofPath = normalizeProofReferenceForDb(it.proofFileUrl, user.id);
+      } catch (e) {
+        throw new BotApiHttpError(
+          400,
+          e instanceof Error ? e.message : "Invalid proof file reference",
+          "VALIDATION_ERROR",
+        );
+      }
       const slug = await this.resolveBotSubcategorySlug(it.categoryId, it.subcategory);
       let subcategoryId: string | null = null;
       if (slug) {
@@ -780,7 +781,7 @@ export class BotApiService {
         subcategoryId,
         title: it.title.trim(),
         description: it.description.trim(),
-        proofFileUrl: it.proofFileUrl,
+        proofFileUrl: proofPath,
         externalLink,
         metadata,
         proposedScore,
@@ -925,15 +926,6 @@ export class BotApiService {
     return slug;
   }
 
-  private validateProofStorageUrl(url: string): void {
-    if (isUnsafeTelegramProofUrl(url)) {
-      throw new Error("Unsafe proof URL is not allowed");
-    }
-    if (!isSafeProofStorageUrl(url)) {
-      throw new Error("Proof URL must be a safe storage URL");
-    }
-  }
-
   async createStudentSubmissionFromBot(input: {
     telegramId: string;
     categoryId: string;
@@ -943,8 +935,6 @@ export class BotApiService {
     proofFileUrl: string;
     metadata?: Record<string, unknown>;
   }): Promise<{ submissionId: string }> {
-    this.validateProofStorageUrl(input.proofFileUrl);
-
     const user = await this.findOrCreateUserByTelegramId(input.telegramId);
     const auth = toAuthUser(user);
     const slug = await this.resolveBotSubcategorySlug(input.categoryId, input.subcategory ?? null);
@@ -1229,8 +1219,6 @@ export class BotApiService {
     details: string;
     proofFileUrl: string;
   }): Promise<{ submissionId: string }> {
-    this.validateProofStorageUrl(input.proofFileUrl);
-
     const user = await this.findOrCreateUserByTelegramId(input.telegramId);
     const auth = toAuthUser(user);
 
@@ -1384,9 +1372,9 @@ export class BotApiService {
     const checksum = createHash("sha256").update(input.bytes).digest("hex");
     await this.antiFraud.assertNoDuplicateFile({ userId: user.id, checksum });
     const safeFilename = toSafeFilename(input.filename);
-    const storagePath = `${user.id}/proofs/${randomUUID()}-${safeFilename}`;
+    const storagePath = `${user.id}/${randomUUID()}-${safeFilename}`;
 
-    const uploadResult = await this.app.supabaseAdmin.storage.from("proofs").upload(storagePath, input.bytes, {
+    const uploadResult = await this.app.supabaseAdmin.storage.from(env.STORAGE_BUCKET).upload(storagePath, input.bytes, {
       contentType: input.mimeType,
       upsert: false,
     });
@@ -1399,8 +1387,12 @@ export class BotApiService {
       throw new Error("Storage upload failed");
     }
 
-    const publicUrlResult = this.app.supabaseAdmin.storage.from("proofs").getPublicUrl(storagePath);
-    const proofFileUrl = publicUrlResult.data.publicUrl;
+    const { data: publicUrlData } = this.app.supabaseAdmin.storage.from(env.STORAGE_BUCKET).getPublicUrl(storagePath);
+    const proofFileUrl = publicUrlData.publicUrl;
+    // eslint-disable-next-line no-console -- temporary storage debug
+    console.log("FILE PATH:", storagePath);
+    // eslint-disable-next-line no-console -- temporary storage debug
+    console.log("PUBLIC URL:", proofFileUrl);
 
     this.app.log.info(
       {
@@ -1409,6 +1401,7 @@ export class BotApiService {
         size_bytes: input.bytes.byteLength,
         mime_type: input.mimeType,
         checksum_sha256: checksum,
+        storage_path: storagePath,
       },
       "Proof uploaded successfully",
     );

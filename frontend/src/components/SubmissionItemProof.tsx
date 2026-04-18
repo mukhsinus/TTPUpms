@@ -20,10 +20,10 @@ export function SubmissionItemProof({ proofFileUrl }: SubmissionItemProofProps):
         <strong>Proof</strong>
       </p>
       <div className="item-proof-actions">
-        <a className="ui-link" href={proofFileUrl} target="_blank" rel="noreferrer">
+        <a className="ui-link" href={proofFileUrl} target="_blank" rel="noopener noreferrer">
           Open in new tab
         </a>
-        <a className="ui-link item-proof-download" href={proofFileUrl} download>
+        <a className="ui-link item-proof-download" href={proofFileUrl} download rel="noopener noreferrer">
           Download
         </a>
       </div>

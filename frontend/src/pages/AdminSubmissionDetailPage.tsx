@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useState, type ReactElement } from "react";
 import { AlertCircle, ExternalLink, FileQuestion } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, ApiError, type AdminSubmissionDetailPayload } from "../lib/api";
@@ -23,29 +23,40 @@ export function AdminSubmissionDetailPage(): ReactElement {
   const [approveScore, setApproveScore] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const reload = async (): Promise<void> => {
+  const reload = useCallback(async (): Promise<void> => {
     if (!submissionId) {
       return;
     }
     const data = await api.getAdminSubmissionDetail(submissionId);
     setDetail(data);
-  };
+  }, [submissionId]);
 
   useEffect(() => {
+    if (!submissionId) {
+      return;
+    }
+    let cancelled = false;
     void (async () => {
-      if (!submissionId) {
-        return;
-      }
       try {
         setLoading(true);
         setFetchError(null);
-        await reload();
+        const data = await api.getAdminSubmissionDetail(submissionId);
+        if (!cancelled) {
+          setDetail(data);
+        }
       } catch (err) {
-        setFetchError(err instanceof Error ? err.message : "Failed to load submission");
+        if (!cancelled) {
+          setFetchError(err instanceof Error ? err.message : "Failed to load submission");
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [submissionId]);
 
   const submission = detail?.submission;
@@ -273,7 +284,7 @@ export function AdminSubmissionDetailPage(): ReactElement {
                   <span className="submission-timeline-label">{f.originalFilename}</span>
                   <span className="submission-timeline-value">
                     {f.fileUrl ? (
-                      <a href={f.fileUrl} target="_blank" rel="noreferrer">
+                      <a href={f.fileUrl} target="_blank" rel="noopener noreferrer">
                         Open
                       </a>
                     ) : (
