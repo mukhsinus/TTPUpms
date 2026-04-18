@@ -10,8 +10,8 @@ export interface AdminSubmissionListRow {
   created_at: string;
   proposed_score: string | null;
   category_code: string | null;
+  category_title: string | null;
   subcategory_slug: string | null;
-  owner_email: string | null;
   owner_name: string | null;
 }
 
@@ -29,8 +29,6 @@ export interface AdminSubmissionDetailRow {
 }
 
 export interface AdminUserRow {
-  id: string;
-  email: string | null;
   student_full_name: string | null;
   faculty: string | null;
   student_id: string | null;
@@ -49,6 +47,7 @@ export interface AdminItemRow {
   status: string;
   category_code: string | null;
   category_name: string | null;
+  category_title: string | null;
   subcategory_slug: string | null;
   subcategory_label: string | null;
   created_at: string;
@@ -59,6 +58,8 @@ export interface AdminFileRow {
   id: string;
   submission_id: string | null;
   submission_item_id: string | null;
+  bucket: string;
+  storage_path: string;
   file_url: string | null;
   original_filename: string;
   mime_type: string | null;
@@ -242,8 +243,8 @@ export class AdminRepository {
         s.created_at,
         first_item.proposed_score::text AS proposed_score,
         first_item.category_code,
+        first_item.category_title,
         first_item.subcategory_slug,
-        u.email::text AS owner_email,
         u.student_full_name AS owner_name,
         COALESCE(first_item.proposed_score, 0) AS proposed_score_sort
       FROM public.submissions s
@@ -252,7 +253,11 @@ export class AdminRepository {
         SELECT
           si.proposed_score,
           c.code AS category_code,
-          cs.slug AS subcategory_slug
+          cs.slug AS subcategory_slug,
+          COALESCE(
+            NULLIF(btrim(c.title::text), ''),
+            initcap(regexp_replace(c.name, '_', ' ', 'g'))
+          ) AS category_title
         FROM public.submission_items si
         LEFT JOIN public.categories c ON c.id = si.category_id
         LEFT JOIN public.category_subcategories cs ON cs.id = si.subcategory_id
@@ -325,8 +330,6 @@ export class AdminRepository {
     const result = await db.query<AdminUserRow>(
       `
       SELECT
-        id,
-        email::text AS email,
         student_full_name,
         faculty,
         student_id,
@@ -359,6 +362,10 @@ export class AdminRepository {
         si.status::text AS status,
         c.code AS category_code,
         c.name AS category_name,
+        COALESCE(
+          NULLIF(btrim(c.title::text), ''),
+          initcap(regexp_replace(c.name, '_', ' ', 'g'))
+        ) AS category_title,
         cs.slug AS subcategory_slug,
         cs.label AS subcategory_label,
         si.created_at,
@@ -383,6 +390,8 @@ export class AdminRepository {
         f.id,
         f.submission_id,
         f.submission_item_id,
+        f.bucket,
+        f.storage_path,
         f.file_url,
         f.original_filename,
         f.mime_type,

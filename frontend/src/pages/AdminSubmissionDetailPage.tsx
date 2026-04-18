@@ -209,10 +209,6 @@ export function AdminSubmissionDetailPage(): ReactElement {
                 <span className="submission-timeline-value">{user.studentFullName ?? "—"}</span>
               </li>
               <li>
-                <span className="submission-timeline-label">Email</span>
-                <span className="submission-timeline-value">{user.email ?? "—"}</span>
-              </li>
-              <li>
                 <span className="submission-timeline-label">Student ID</span>
                 <span className="submission-timeline-value">{user.studentId ?? "—"}</span>
               </li>
@@ -244,7 +240,7 @@ export function AdminSubmissionDetailPage(): ReactElement {
               <article className="item-card" key={item.id}>
                 <h4>{item.title}</h4>
                 <p className="muted">
-                  {item.categoryName ?? item.categoryCode ?? "—"}
+                  {item.categoryTitle?.trim() || item.categoryName || item.categoryCode || "—"}
                   {item.subcategoryLabel || item.subcategorySlug
                     ? ` · ${item.subcategoryLabel ?? item.subcategorySlug}`
                     : ""}

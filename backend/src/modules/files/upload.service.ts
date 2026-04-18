@@ -126,8 +126,11 @@ export class UploadService {
       .from(env.STORAGE_BUCKET)
       .createSignedUrl(storagePath, env.STORAGE_SIGNED_URL_TTL_SECONDS);
 
-    if (signedUrlResult.error || !signedUrlResult.data?.signedUrl) {
-      throw new ServiceError(500, "Failed to generate secure file URL");
+    let signedUrl = fileUrl;
+    if (!signedUrlResult.error && signedUrlResult.data?.signedUrl) {
+      signedUrl = signedUrlResult.data.signedUrl;
+    } else if (signedUrlResult.error) {
+      this.app.log.warn({ err: signedUrlResult.error }, "Signed URL failed; falling back to public URL");
     }
 
     const metadata = await this.insertMetadata({
@@ -156,7 +159,7 @@ export class UploadService {
       bucket: metadata.bucket,
       storagePath: metadata.storage_path,
       originalFilename: metadata.original_filename,
-      signedUrl: signedUrlResult.data.signedUrl,
+      signedUrl,
       mimeType: mime,
       sizeBytes: size,
       checksumSha256: metadata.checksum_sha256 ?? checksum,

@@ -58,12 +58,13 @@ export interface AdminSubmissionListItem {
   id: string;
   userId: string;
   categoryCode: string | null;
+  /** Human-readable label from DB (`categories.title`) or derived from `categories.name`. */
+  categoryTitle: string | null;
   subcategorySlug: string | null;
   title: string;
   status: AdminModerationStatus;
   createdAt: string;
   proposedScore: number | null;
-  ownerEmail: string | null;
   ownerName: string | null;
 }
 
@@ -106,6 +107,7 @@ export interface AdminSubmissionDetailPayload {
     status: string;
     categoryCode: string | null;
     categoryName: string | null;
+    categoryTitle?: string | null;
     subcategorySlug: string | null;
     subcategoryLabel: string | null;
     createdAt: string;
@@ -122,8 +124,6 @@ export interface AdminSubmissionDetailPayload {
   }>;
   link: string | null;
   user: {
-    id: string;
-    email: string | null;
     studentFullName: string | null;
     faculty: string | null;
     studentId: string | null;

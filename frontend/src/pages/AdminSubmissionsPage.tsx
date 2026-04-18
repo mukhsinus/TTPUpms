@@ -17,10 +17,7 @@ function formatUser(row: AdminSubmissionListItem): string {
   if (name) {
     return name;
   }
-  if (row.ownerEmail) {
-    return row.ownerEmail;
-  }
-  return row.userId;
+  return "Student";
 }
 
 export function AdminSubmissionsPage(): ReactElement {
@@ -70,12 +67,10 @@ export function AdminSubmissionsPage(): ReactElement {
   }, [load]);
 
   const filtered = search.trim()
-    ? items.filter(
-        (row) =>
-          row.title.toLowerCase().includes(search.trim().toLowerCase()) ||
-          row.userId.toLowerCase().includes(search.trim().toLowerCase()) ||
-          (row.ownerEmail?.toLowerCase().includes(search.trim().toLowerCase()) ?? false),
-      )
+    ? items.filter((row) => {
+        const q = search.trim().toLowerCase();
+        return row.title.toLowerCase().includes(q) || formatUser(row).toLowerCase().includes(q);
+      })
     : items;
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -99,7 +94,7 @@ export function AdminSubmissionsPage(): ReactElement {
             <option value="approved">Approved</option>
             <option value="rejected">Rejected</option>
           </select>
-          <Input value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Category code" />
+          <Input value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Category (code)" />
           <Input type="datetime-local" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
           <Input type="datetime-local" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
           <select className="ui-input" value={sort} onChange={(e) => setSort(e.target.value as typeof sort)}>
@@ -122,7 +117,7 @@ export function AdminSubmissionsPage(): ReactElement {
 
       <Card>
         {loading ? (
-          <TableSkeleton rows={10} cols={7} />
+          <TableSkeleton rows={10} cols={6} />
         ) : filtered.length === 0 ? (
           <EmptyState
             icon={ClipboardList}
@@ -135,7 +130,6 @@ export function AdminSubmissionsPage(): ReactElement {
             <Table>
               <thead>
                 <tr>
-                  <th>ID</th>
                   <th>User</th>
                   <th>Category</th>
                   <th>Title</th>
@@ -152,9 +146,8 @@ export function AdminSubmissionsPage(): ReactElement {
                     className="clickable-row"
                     onClick={() => navigate(`/submissions/${row.id}`)}
                   >
-                    <td className="mono-cell">{row.id.slice(0, 8)}…</td>
                     <td>{formatUser(row)}</td>
-                    <td>{row.categoryCode ?? "—"}</td>
+                    <td>{row.categoryTitle?.trim() || row.categoryCode || "—"}</td>
                     <td className="submission-title-cell">{row.title}</td>
                     <td>
                       <ModerationStatusBadge status={row.status} />

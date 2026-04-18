@@ -10,6 +10,7 @@ import type {
   AdminUserRow,
 } from "./admin.repository";
 import { AdminRepository } from "./admin.repository";
+import { resolveStoragePublicFileUrl } from "./storage-url";
 import type {
   AdminApproveBody,
   AdminModerationStatus,
@@ -102,12 +103,12 @@ export class AdminService {
       id: row.id,
       userId: row.user_id,
       categoryCode: row.category_code,
+      categoryTitle: row.category_title,
       subcategorySlug: row.subcategory_slug,
       title: row.title,
       status: toModerationStatus(row.db_status),
       createdAt: row.created_at,
       proposedScore: numOrNull(row.proposed_score),
-      ownerEmail: row.owner_email,
       ownerName: row.owner_name,
     };
   }
@@ -314,18 +315,20 @@ export class AdminService {
   }
 
   private mapItem(row: AdminItemRow) {
+    const categoryTitle = row.category_title ?? row.category_name;
     return {
       id: row.id,
       submissionId: row.submission_id,
       title: row.title,
       description: row.description,
-      proofFileUrl: row.proof_file_url,
+      proofFileUrl: resolveStoragePublicFileUrl(row.proof_file_url, null, null) ?? row.proof_file_url,
       externalLink: row.external_link,
       proposedScore: numOrNull(row.proposed_score),
       approvedScore: numOrNull(row.approved_score),
       status: row.status,
       categoryCode: row.category_code,
       categoryName: row.category_name,
+      categoryTitle,
       subcategorySlug: row.subcategory_slug,
       subcategoryLabel: row.subcategory_label,
       createdAt: row.created_at,
@@ -338,7 +341,7 @@ export class AdminService {
       id: row.id,
       submissionId: row.submission_id,
       submissionItemId: row.submission_item_id,
-      fileUrl: row.file_url,
+      fileUrl: resolveStoragePublicFileUrl(row.file_url, row.bucket, row.storage_path),
       originalFilename: row.original_filename,
       mimeType: row.mime_type,
       createdAt: row.created_at,
@@ -347,8 +350,6 @@ export class AdminService {
 
   private mapUser(row: AdminUserRow) {
     return {
-      id: row.id,
-      email: row.email,
       studentFullName: row.student_full_name,
       faculty: row.faculty,
       studentId: row.student_id,
