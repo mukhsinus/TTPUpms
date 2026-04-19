@@ -92,25 +92,12 @@ async function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Password sign-in: single direct GoTrue fetch first (fastest), then Supabase JS with light retries,
- * then fetch fallback again for flaky networks.
+ * Password sign-in: Supabase JS first (stable browser path), then direct GoTrue fetch fallback
+ * for flaky networks.
  */
 export async function signInWithSupabasePassword(email: string, password: string): Promise<string> {
   const { url } = getSupabaseBrowserEnv();
   logAuth("signIn start", { supabaseUrl: url, emailPrefix: `${email.slice(0, 2)}***` });
-
-  try {
-    const direct = await signInWithPasswordViaFetch(email, password);
-    if (direct.access_token) {
-      logAuth("signIn OK (direct fetch)");
-      return direct.access_token;
-    }
-  } catch (e) {
-    if (e instanceof ApiError && !isLikelyNetworkFailure(e)) {
-      throw e;
-    }
-    logAuth("direct fetch failed; continuing with Supabase JS", e);
-  }
 
   let lastNetworkError: unknown;
 
