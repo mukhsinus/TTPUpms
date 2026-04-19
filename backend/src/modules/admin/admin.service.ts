@@ -107,6 +107,7 @@ export class AdminService {
       studentName: string | null;
       submissionId: string | null;
       submissionTitle: string | null;
+      submissionSubmittedAt: string | null;
       createdAt: string;
     }>;
     pagination: {
@@ -163,6 +164,7 @@ export class AdminService {
       studentName: string | null;
       submissionId: string | null;
       submissionTitle: string | null;
+      submissionSubmittedAt: string | null;
       createdAt: string;
     }>;
     pagination: {
@@ -296,6 +298,7 @@ export class AdminService {
     studentName: string | null;
     submissionId: string | null;
     submissionTitle: string | null;
+    submissionSubmittedAt: string | null;
     createdAt: string;
   } {
     return {
@@ -308,6 +311,7 @@ export class AdminService {
       studentName: row.student_name,
       submissionId: row.submission_id,
       submissionTitle: row.submission_title,
+      submissionSubmittedAt: row.submission_submitted_at,
       createdAt: row.created_at,
     };
   }

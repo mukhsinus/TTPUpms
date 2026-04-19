@@ -103,6 +103,7 @@ export interface AdminActivityRow {
   student_name: string | null;
   submission_id: string | null;
   submission_title: string | null;
+  submission_submitted_at: string | null;
   action: "approved" | "rejected" | "edited_score" | "reopened" | "login";
   created_at: string;
 }
@@ -355,6 +356,15 @@ export class AdminRepository {
               LIMIT 1
             )
           ) AS submission_title,
+          COALESCE(
+            s.created_at,
+            s.submitted_at,
+            (
+              SELECT MIN(si.created_at)
+              FROM public.submission_items si
+              WHERE si.submission_id = s.id
+            )
+          ) AS submission_submitted_at,
           CASE
             WHEN al.action = 'admin_moderation_approve' THEN 'approved'
             WHEN al.action = 'admin_moderation_reject' THEN 'rejected'
@@ -389,6 +399,7 @@ export class AdminRepository {
         student_name,
         submission_id,
         submission_title,
+        submission_submitted_at,
         action,
         created_at
       FROM base
@@ -497,6 +508,15 @@ export class AdminRepository {
               LIMIT 1
             )
           ) AS submission_title,
+          COALESCE(
+            s.created_at,
+            s.submitted_at,
+            (
+              SELECT MIN(si.created_at)
+              FROM public.submission_items si
+              WHERE si.submission_id = s.id
+            )
+          ) AS submission_submitted_at,
           CASE
             WHEN al.action = 'admin_moderation_approve' THEN 'approved'
             WHEN al.action = 'admin_moderation_reject' THEN 'rejected'
@@ -532,6 +552,7 @@ export class AdminRepository {
         student_name,
         submission_id,
         submission_title,
+        submission_submitted_at,
         action,
         created_at
       FROM base

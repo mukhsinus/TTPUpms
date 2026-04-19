@@ -115,6 +115,7 @@ export interface AdminRecentActivityItem {
   studentName: string | null;
   submissionId: string | null;
   submissionTitle: string | null;
+  submissionSubmittedAt: string | null;
   createdAt: string;
 }
 

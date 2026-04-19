@@ -157,7 +157,9 @@ export function DashboardPage(): ReactElement {
         r.adminName,
         r.studentId ?? "",
         r.studentName ?? "",
-        `${(r.submissionTitle?.trim() || (r.studentId ? `Submission #${r.studentId}` : "Submission")).trim()} — ${formatDateTime(r.createdAt)}`,
+        `${(r.submissionTitle?.trim() || (r.studentId ? `Submission #${r.studentId}` : "Submission")).trim()} — ${formatDateTime(
+          r.submissionSubmittedAt ?? r.createdAt,
+        )}`,
         formatDateTime(r.createdAt),
       ]);
       const csv = [header, ...rows]
