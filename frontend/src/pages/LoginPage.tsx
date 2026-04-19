@@ -10,7 +10,7 @@ import { useToast } from "../contexts/ToastContext";
 
 type AuthTab = "login" | "register";
 
-const PASSWORD_MIN_LENGTH = 10;
+const PASSWORD_MIN_LENGTH = 6;
 
 export function LoginPage(): ReactElement {
   const [activeTab, setActiveTab] = useState<AuthTab>("login");
@@ -89,7 +89,7 @@ export function LoginPage(): ReactElement {
         email: registerEmail,
         password: registerPassword,
       });
-      toast.success("Account created successfully. You can now sign in.");
+      toast.success("Account created successfully");
       setActiveTab("login");
       setLoginEmail(registerEmail.trim());
       setLoginPassword("");
@@ -221,7 +221,7 @@ export function LoginPage(): ReactElement {
                   <input
                     className="ui-input auth-password-input"
                     type={showRegisterPassword ? "text" : "password"}
-                    placeholder="Minimum 10 characters"
+                    placeholder="Minimum 6 characters"
                     value={registerPassword}
                     onChange={(event) => setRegisterPassword(event.target.value)}
                     required
@@ -237,7 +237,7 @@ export function LoginPage(): ReactElement {
                 </div>
               </label>
               <Button type="submit" disabled={registerLoading || !registerValid}>
-                {registerLoading ? "Creating account..." : "Create Account"}
+                {registerLoading ? "Creating..." : "Create Account"}
               </Button>
               <p className="auth-switch-note">
                 Already have account?{" "}

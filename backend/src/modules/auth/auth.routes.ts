@@ -16,10 +16,14 @@ import { AdminProfileService } from "../admin/admin-profile.service";
 import { ServiceError } from "../../utils/service-error";
 
 const ADMIN_EMAIL_SET = parseAdminEmailSet(env.ADMIN_EMAILS);
+const REGISTER_PASSWORD_MIN = 6;
 const registerAdminSchema = z.object({
   full_name: z.string().trim().min(2).max(200),
   email: z.string().trim().email(),
-  password: z.string().min(10).max(200),
+  password: z
+    .string()
+    .min(REGISTER_PASSWORD_MIN, `Password must be at least ${REGISTER_PASSWORD_MIN} characters`)
+    .max(200),
 });
 
 function readAdminPanelLoginHeader(request: FastifyRequest): boolean {
@@ -51,6 +55,21 @@ function readUserAgent(request: FastifyRequest): string | null {
   return raw ?? null;
 }
 
+function toClientRegisterErrorMessage(error: unknown): string {
+  if (!error || typeof error !== "object") {
+    return "Unexpected server error";
+  }
+  const code = "code" in error ? String((error as { code?: unknown }).code ?? "") : "";
+  const message = "message" in error ? String((error as { message?: unknown }).message ?? "") : "";
+  if (code === "23505") {
+    return "Email already registered";
+  }
+  if (message.toLowerCase().includes("password")) {
+    return `Password must be at least ${REGISTER_PASSWORD_MIN} characters`;
+  }
+  return "Unexpected server error";
+}
+
 export async function authRoutes(app: FastifyInstance): Promise<void> {
   const notifications = new NotificationService(app);
   const audit = new AuditLogRepository(app);
@@ -73,6 +92,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         });
         reply.status(201).send(success({ ok: true }));
       } catch (error) {
+        request.log.error({ err: error }, "Admin registration failed");
         if (error instanceof z.ZodError) {
           const first = error.issues[0];
           reply.status(400).send(failure(first?.message ?? "Validation error", "VALIDATION_ERROR", {}));
@@ -82,7 +102,10 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
           reply.status(error.statusCode).send(failure(error.message, error.clientCode ?? "ERROR", {}));
           return;
         }
-        reply.status(500).send(failure("Internal Server Error", "INTERNAL_SERVER_ERROR", {}));
+        const message = toClientRegisterErrorMessage(error);
+        const statusCode =
+          message === "Email already registered" ? 409 : message === "Unexpected server error" ? 500 : 400;
+        reply.status(statusCode).send(failure(message, statusCode === 500 ? "INTERNAL_SERVER_ERROR" : "VALIDATION_ERROR", {}));
       }
     },
   );
@@ -103,6 +126,9 @@ async function registerAdminAccount(
     const msg = error?.message?.toLowerCase() ?? "";
     if (msg.includes("already") || msg.includes("registered") || msg.includes("exists")) {
       throw new ServiceError(409, "Email already registered", "CONFLICT");
+    }
+    if (msg.includes("password")) {
+      throw new ServiceError(400, `Password must be at least ${REGISTER_PASSWORD_MIN} characters`, "VALIDATION_ERROR");
     }
     throw new ServiceError(502, error?.message ?? "Failed to create auth user", "AUTH_CREATE_FAILED");
   }
@@ -129,12 +155,12 @@ async function registerAdminAccount(
     await client.query(
       `
       INSERT INTO public.admin_users (id, email, role, created_at)
-      VALUES ($1::uuid, $2::citext, 'admin'::public.user_role, NOW())
+      VALUES ($1::uuid, $2::citext, 'admin', NOW())
       ON CONFLICT (id) DO UPDATE SET
         email = EXCLUDED.email,
         role = CASE
           WHEN public.admin_users.role::text = 'superadmin' THEN public.admin_users.role
-          ELSE 'admin'::public.user_role
+          ELSE 'admin'
         END
       `,
       [userId, input.email],
