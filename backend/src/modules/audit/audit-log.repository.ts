@@ -9,6 +9,9 @@ export class AuditLogRepository {
     entityTable: string;
     entityId: string;
     action: string;
+    metadata?: Record<string, unknown> | null;
+    requestIp?: string | null;
+    userAgent?: string | null;
     newValues?: Record<string, unknown> | null;
     oldValues?: Record<string, unknown> | null;
   }): Promise<void> {
@@ -22,10 +25,13 @@ export class AuditLogRepository {
         target_user_id,
         old_values,
         new_values,
+        metadata,
+        request_ip,
+        user_agent,
         created_at,
         updated_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, NOW(), NOW())
+      VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9, $10, NOW(), NOW())
       `,
       [
         input.actorUserId,
@@ -35,6 +41,9 @@ export class AuditLogRepository {
         input.targetUserId ?? null,
         JSON.stringify(input.oldValues ?? {}),
         JSON.stringify(input.newValues ?? {}),
+        JSON.stringify(input.metadata ?? {}),
+        input.requestIp ?? null,
+        input.userAgent ?? null,
       ],
     );
   }

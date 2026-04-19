@@ -7,6 +7,7 @@ const API_BASE_URL = import.meta.env.VITE_API_URL ?? import.meta.env.VITE_API_BA
 const AUTH_TOKEN_KEY = "upms_admin_token";
 /** Server `public.users.role` after login — source of truth (JWT app_metadata is ignored for RBAC UI). */
 const AUTH_ROLE_KEY = "upms_session_role";
+const ADMIN_SESSION_ID_KEY = "upms_admin_session_id";
 
 /** Treat JWT as expired this many ms before `exp` to avoid edge 401s from clock skew. */
 const JWT_EXPIRY_SKEW_MS = 60_000;
@@ -20,10 +21,19 @@ let adminDashboardCache:
       data: AdminDashboardPayload;
     }
   | null = null;
+let adminProfileCache:
+  | {
+      key: string;
+      expiresAt: number;
+      data: AdminProfilePayload;
+    }
+  | null = null;
 
 interface RequestResultOptions {
   /** When true, a 401 does not clear storage or navigate (e.g. login probe before token is stored). */
   skipUnauthorizedRedirect?: boolean;
+  /** Attach `x-admin-session-id` for admin-panel auth bootstrap. */
+  forceAdminSessionHeader?: boolean;
 }
 
 export { ApiError };
@@ -84,6 +94,70 @@ export interface AdminSubmissionsListPayload {
   pendingCount: number;
   page: number;
   pageSize: number;
+}
+
+export interface AdminProfilePayload {
+  identity: {
+    fullName: string;
+    email: string | null;
+    role: "admin" | "superadmin";
+    adminCode: string;
+    joinedAt: string | null;
+    lastLoginAt: string | null;
+    lastLoginIp: string | null;
+    lastLoginUserAgent: string | null;
+  };
+  permissions: {
+    approveSubmissions: boolean;
+    rejectSubmissions: boolean;
+    exportCsv: boolean;
+    manageAdmins: boolean;
+    viewGlobalAuditLogs: boolean;
+    securityApprovals: boolean;
+  };
+  stats: {
+    approvals: number;
+    rejects: number;
+    avgReviewMinutes: number;
+    actions7d: number;
+  };
+  recentActions: Array<{
+    id: string;
+    action: "approved" | "rejected" | "edited_score" | "reopened" | "login";
+    studentId: string | null;
+    submissionId: string | null;
+    submissionTitle: string | null;
+    createdAt: string;
+  }>;
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+    hasPrev: boolean;
+    hasNext: boolean;
+  };
+  security: {
+    currentSessionActive: boolean;
+    activeSessionsCount: number;
+    logoutOtherSessionsRestricted: boolean;
+    restrictionReason: string | null;
+    pendingSecurityEvents: Array<{
+      id: string;
+      type: "new_device_login" | "logout_others_request" | "admin_registration";
+      status: "pending" | "approved" | "rejected";
+      createdAt: string;
+    }>;
+    sessions: Array<{
+      id: string;
+      isCurrent: boolean;
+      deviceName: string;
+      ip: string | null;
+      lastSeenAt: string;
+      createdAt: string;
+      isRevoked: boolean;
+    }>;
+  };
 }
 
 export interface AdminDashboardMetrics {
@@ -288,6 +362,23 @@ function clearSessionRole(): void {
   }
 }
 
+function getOrCreateAdminSessionId(): string {
+  try {
+    const existing = localStorage.getItem(ADMIN_SESSION_ID_KEY);
+    if (existing && existing.trim().length > 0) {
+      return existing.trim();
+    }
+    const generated =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `adm-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    localStorage.setItem(ADMIN_SESSION_ID_KEY, generated);
+    return generated;
+  } catch {
+    return `adm-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+}
+
 function getStoredServerRole(): AppRole | null {
   try {
     const raw = localStorage.getItem(AUTH_ROLE_KEY);
@@ -329,6 +420,7 @@ function invalidateSessionAndRedirect(): void {
   try {
     localStorage.removeItem(AUTH_TOKEN_KEY);
     localStorage.removeItem(AUTH_ROLE_KEY);
+    localStorage.removeItem(ADMIN_SESSION_ID_KEY);
   } catch {
     /* ignore */
   }
@@ -374,6 +466,13 @@ async function requestResult<T>(
   }
   if (authToken) {
     headers.set("Authorization", `Bearer ${authToken}`);
+  }
+  const role = getStoredServerRole();
+  const shouldAttachAdminSession =
+    Boolean(authToken) &&
+    (options?.forceAdminSessionHeader || path.startsWith("/api/admin") || role === "admin" || role === "superadmin");
+  if (shouldAttachAdminSession) {
+    headers.set("x-admin-session-id", getOrCreateAdminSessionId());
   }
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -437,7 +536,13 @@ export const api = {
     sessionRedirectInProgress = false;
     localStorage.removeItem(AUTH_TOKEN_KEY);
     clearSessionRole();
+    try {
+      localStorage.removeItem(ADMIN_SESSION_ID_KEY);
+    } catch {
+      /* ignore */
+    }
     adminDashboardCache = null;
+    adminProfileCache = null;
   },
 
   getSessionUser(): SessionUser | null {
@@ -509,7 +614,7 @@ export const api = {
       "/api/auth/me",
       { method: "GET", headers },
       token,
-      { skipUnauthorizedRedirect: true },
+      { skipUnauthorizedRedirect: true, forceAdminSessionHeader: options?.authSource === "admin_panel" },
     );
     if (me.error) {
       throw new ApiError(me.error, me.statusCode);
@@ -521,6 +626,7 @@ export const api = {
     setAuthToken(token);
     setSessionRoleFromServer(me.data.role);
     adminDashboardCache = null;
+    adminProfileCache = null;
   },
 
   async getDashboardStats(): Promise<{
@@ -678,6 +784,53 @@ export const api = {
       };
       return data;
     });
+  },
+
+  getAdminProfile(params?: { page?: number; pageSize?: number; forceRefresh?: boolean }): Promise<AdminProfilePayload> {
+    const page = params?.page ?? 1;
+    const pageSize = params?.pageSize ?? 10;
+    const cacheKey = `${page}:${pageSize}`;
+    const now = Date.now();
+    if (!params?.forceRefresh && adminProfileCache && adminProfileCache.key === cacheKey && adminProfileCache.expiresAt > now) {
+      return Promise.resolve(adminProfileCache.data);
+    }
+    const q = new URLSearchParams({
+      page: String(page),
+      pageSize: String(pageSize),
+    });
+    return request<AdminProfilePayload>(`/api/admin/profile?${q.toString()}`).then((data) => {
+      adminProfileCache = {
+        key: cacheKey,
+        expiresAt: Date.now() + 10_000,
+        data,
+      };
+      return data;
+    });
+  },
+
+  async logoutCurrentAdminSession(): Promise<void> {
+    await request<{ ok: boolean }>("/api/admin/profile/logout-current", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    adminProfileCache = null;
+  },
+
+  async logoutOtherAdminSessions(): Promise<{ revokedCount: number; restricted: boolean }> {
+    const data = await request<{ revokedCount: number; restricted: boolean }>("/api/admin/profile/logout-others", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    adminProfileCache = null;
+    return data;
+  },
+
+  async approveAdminSecurityEvent(eventId: string): Promise<void> {
+    await request<{ ok: boolean }>(`/api/admin/profile/security-events/${eventId}/approve`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    adminProfileCache = null;
   },
 
   getAdminActivityProfile(

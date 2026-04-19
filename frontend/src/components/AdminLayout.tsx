@@ -1,4 +1,4 @@
-import { ClipboardList, LayoutDashboard, LogOut, X } from "lucide-react";
+import { ClipboardList, LayoutDashboard, LogOut, UserCircle2, X } from "lucide-react";
 import { useMemo, useState, type PropsWithChildren, type ReactElement } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { api } from "../lib/api";
@@ -17,6 +17,7 @@ export function AdminLayout({ children, onLogout }: AdminLayoutProps): ReactElem
   const role = normalizeRole(user?.role ?? "student");
 
   const pageTitle = useMemo(() => {
+    if (location.pathname.startsWith("/profile")) return "Profile";
     if (location.pathname.startsWith("/submissions/")) return "Submission detail";
     if (location.pathname.startsWith("/submissions")) return "Submissions";
     return "Dashboard";
@@ -40,6 +41,10 @@ export function AdminLayout({ children, onLogout }: AdminLayoutProps): ReactElem
           <NavLink to="/submissions" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             <ClipboardList size={16} />
             Submissions
+          </NavLink>
+          <NavLink to="/profile" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+            <UserCircle2 size={16} />
+            Profile
           </NavLink>
         </nav>
         <div className="sidebar-user">

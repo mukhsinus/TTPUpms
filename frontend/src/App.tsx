@@ -42,6 +42,10 @@ const UsersPage = lazy(async () => {
   const m = await import("./pages/UsersPage");
   return { default: m.UsersPage };
 });
+const ProfilePage = lazy(async () => {
+  const m = await import("./pages/ProfilePage");
+  return { default: m.ProfilePage };
+});
 
 function SubmissionsEntry(): ReactElement {
   return isAdminPanelRole(api.getSessionUser()) ? <AdminSubmissionsPage /> : <SubmissionsPage />;
@@ -91,6 +95,14 @@ export default function App(): ReactElement {
               }
             />
             <Route path="/submissions/:submissionId" element={<SubmissionDetailEntry />} />
+            <Route
+              path="/profile"
+              element={
+                <RoleGuard allow={["admin", "superadmin"]} redirectTo="/dashboard">
+                  <ProfilePage />
+                </RoleGuard>
+              }
+            />
             <Route
               path="/analytics"
               element={

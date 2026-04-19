@@ -1462,6 +1462,120 @@ body {
   gap: var(--space-2);
 }
 
+.profile-page {
+  gap: var(--space-4);
+}
+
+.profile-top-grid {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.profile-identity,
+.profile-permissions,
+.profile-security-stack,
+.profile-activity-list {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.profile-identity-name {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.profile-kv {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  color: #334155;
+}
+
+.profile-kv span {
+  color: #64748b;
+}
+
+.profile-permission-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #0f172a;
+}
+
+.profile-stats-grid {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.profile-stat-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 12px;
+  display: grid;
+  gap: 6px;
+  background: #fff;
+}
+
+.profile-stat-card span {
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.profile-stat-card strong {
+  font-size: 1.2rem;
+  color: #0f172a;
+}
+
+.profile-activity-row {
+  width: 100%;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #fff;
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  text-align: left;
+  cursor: pointer;
+}
+
+.profile-activity-row:hover {
+  border-color: #bfdbfe;
+  background: #f8fbff;
+}
+
+.profile-security-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.profile-security-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.profile-security-approvals,
+.profile-sessions-list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.profile-security-approval-row,
+.profile-session-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  align-items: center;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
 @media (max-width: 900px) {
   .ops-main-grid {
     grid-template-columns: 1fr;
@@ -1472,6 +1586,10 @@ body {
   }
 
   .moderation-queue-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-top-grid {
     grid-template-columns: 1fr;
   }
 }

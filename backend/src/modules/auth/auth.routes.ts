@@ -9,6 +9,9 @@ import { env } from "../../config/env";
 import { authMiddleware } from "../../middleware/auth.middleware";
 import type { AppRole } from "../../types/auth-user";
 import { failure, success } from "../../utils/http-response";
+import { AuditLogRepository } from "../audit/audit-log.repository";
+import { NotificationService } from "../notifications/notification.service";
+import { AdminProfileService } from "../admin/admin-profile.service";
 
 const ADMIN_EMAIL_SET = parseAdminEmailSet(env.ADMIN_EMAILS);
 
@@ -33,13 +36,30 @@ function toRole(value: unknown): AppRole | null {
   return null;
 }
 
+function readUserAgent(request: FastifyRequest): string | null {
+  const raw = request.headers["user-agent"];
+  if (Array.isArray(raw)) {
+    return raw[0] ?? null;
+  }
+  return raw ?? null;
+}
+
 export async function authRoutes(app: FastifyInstance): Promise<void> {
+  const notifications = new NotificationService(app);
+  const audit = new AuditLogRepository(app);
+  const profileService = new AdminProfileService(app, notifications, audit);
+
   app.get("/me", { preHandler: authMiddleware }, async (request, reply): Promise<void> => {
-    await handleMe(app, request, reply);
+    await handleMe(app, request, reply, profileService);
   });
 }
 
-async function handleMe(app: FastifyInstance, request: FastifyRequest, reply: FastifyReply): Promise<void> {
+async function handleMe(
+  app: FastifyInstance,
+  request: FastifyRequest,
+  reply: FastifyReply,
+  profileService: AdminProfileService,
+): Promise<void> {
   if (!request.user || !request.authIdentity) {
     reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED", {}));
     return;
@@ -73,6 +93,17 @@ async function handleMe(app: FastifyInstance, request: FastifyRequest, reply: Fa
   }
 
   const role = toRole(roleText) ?? request.user.role;
+
+  if (adminPanelLogin && (role === "admin" || role === "superadmin")) {
+    const rawSessionToken = request.headers["x-admin-session-id"];
+    const sessionToken = Array.isArray(rawSessionToken) ? rawSessionToken[0] : rawSessionToken;
+    await profileService.recordAdminPanelLogin({
+      adminId: id,
+      sessionToken: (sessionToken ?? request.id).trim(),
+      requestIp: request.ip,
+      userAgent: readUserAgent(request),
+    });
+  }
 
   reply.send(
     success({

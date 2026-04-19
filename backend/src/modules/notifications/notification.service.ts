@@ -15,6 +15,10 @@ interface TelegramUserRow {
   telegram_id: string | null;
 }
 
+interface SuperadminTelegramRow {
+  telegram_id: string | null;
+}
+
 export class NotificationService {
   private queue: Promise<void> = Promise.resolve();
 
@@ -52,6 +56,21 @@ export class NotificationService {
     this.notifyUser(input.userId, text);
   }
 
+  /** Sends a security alert to all superadmins that have Telegram linked. */
+  notifySuperadminsSecurityAlert(text: string): void {
+    this.enqueue(async () => {
+      const chatIds = await this.getSuperadminChatIds();
+      if (chatIds.length === 0) {
+        return;
+      }
+      await Promise.all(
+        chatIds.map(async (chatId) => {
+          await this.sendTelegramMessage(chatId, text);
+        }),
+      );
+    });
+  }
+
   private notifyUser(userId: string, text: string): void {
     this.enqueue(async () => {
       const chatId = await this.getTelegramChatIdByUserId(userId);
@@ -84,6 +103,20 @@ export class NotificationService {
 
     const chatId = result.rows[0]?.telegram_id;
     return chatId ?? null;
+  }
+
+  private async getSuperadminChatIds(): Promise<string[]> {
+    const result = await this.app.db.query<SuperadminTelegramRow>(
+      `
+      SELECT DISTINCT u.telegram_id
+      FROM public.admin_users au
+      INNER JOIN public.users u ON u.id = au.id
+      WHERE au.role::text = 'superadmin'
+        AND u.telegram_id IS NOT NULL
+        AND BTRIM(u.telegram_id) <> ''
+      `,
+    );
+    return result.rows.map((row) => row.telegram_id).filter((value): value is string => Boolean(value));
   }
 
   private async sendTelegramMessage(chatId: string, text: string): Promise<void> {

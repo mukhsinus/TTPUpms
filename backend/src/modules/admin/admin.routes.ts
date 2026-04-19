@@ -6,6 +6,8 @@ import { NotificationService } from "../notifications/notification.service";
 import { AdminOverrideController } from "./admin-override.controller";
 import { AdminOverrideRepository } from "./admin-override.repository";
 import { AdminOverrideService } from "./admin-override.service";
+import { AdminProfileController } from "./admin-profile.controller";
+import { AdminProfileService } from "./admin-profile.service";
 import { AdminController } from "./admin.controller";
 import { AdminRepository } from "./admin.repository";
 import { AdminService } from "./admin.service";
@@ -17,6 +19,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   const moderationRepository = new AdminRepository(app);
   const moderationService = new AdminService(app, moderationRepository, audit, notifications);
   const moderationController = new AdminController(moderationService);
+  const profileService = new AdminProfileService(app, notifications, audit);
+  const profileController = new AdminProfileController(profileService);
 
   const overrideRepository = new AdminOverrideRepository(app);
   const overrideService = new AdminOverrideService(overrideRepository, notifications);
@@ -42,6 +46,30 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       "/dashboard/admins/:adminId",
       { config: { rateLimit: { max: 120, timeWindow: "1 minute" } } },
       moderationController.getAdminActivityProfile,
+    );
+
+    r.get(
+      "/profile",
+      { config: { rateLimit: { max: 120, timeWindow: "1 minute" } } },
+      profileController.getProfile,
+    );
+
+    r.post(
+      "/profile/logout-current",
+      { config: { rateLimit: { max: 120, timeWindow: "1 minute" } } },
+      profileController.logoutCurrentSession,
+    );
+
+    r.post(
+      "/profile/logout-others",
+      { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } },
+      profileController.logoutOtherSessions,
+    );
+
+    r.post(
+      "/profile/security-events/:eventId/approve",
+      { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } },
+      profileController.approveSecurityEvent,
     );
 
     r.get(
