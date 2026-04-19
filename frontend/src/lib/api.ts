@@ -4,7 +4,26 @@ import { ApiError } from "./api-error";
 import { isAdminPanelRole, normalizeRole, type AppRole } from "./rbac";
 import { getSupabaseBrowserEnv } from "./supabase-env";
 
-const API_BASE_URL = import.meta.env.VITE_API_URL ?? import.meta.env.VITE_API_BASE_URL ?? "";
+function normalizeApiBaseUrl(rawValue: string | undefined): string {
+  const trimmed = (rawValue ?? "").trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  const withoutTrailingSlash = trimmed.replace(/\/+$/, "");
+  if (/^https?:\/\//i.test(withoutTrailingSlash)) {
+    return withoutTrailingSlash;
+  }
+
+  // Common deployment mistake: host without scheme in VITE_API_URL.
+  if (/^[a-zA-Z0-9.-]+(?::\d+)?$/.test(withoutTrailingSlash)) {
+    return `https://${withoutTrailingSlash}`;
+  }
+
+  return withoutTrailingSlash;
+}
+
+const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_URL ?? import.meta.env.VITE_API_BASE_URL ?? "");
 const AUTH_TOKEN_KEY = "upms_admin_token";
 /** Server `public.users.role` after login — source of truth (JWT app_metadata is ignored for RBAC UI). */
 const AUTH_ROLE_KEY = "upms_session_role";
