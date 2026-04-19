@@ -112,7 +112,9 @@ export interface AdminRecentActivityItem {
   adminName: string;
   adminEmail: string | null;
   studentId: string | null;
+  studentName: string | null;
   submissionId: string | null;
+  submissionTitle: string | null;
   createdAt: string;
 }
 

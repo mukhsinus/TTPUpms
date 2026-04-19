@@ -100,7 +100,9 @@ export interface AdminActivityRow {
   admin_name: string;
   admin_email: string | null;
   student_id: string | null;
+  student_name: string | null;
   submission_id: string | null;
+  submission_title: string | null;
   action: "approved" | "rejected" | "edited_score" | "reopened" | "login";
   created_at: string;
 }
@@ -333,6 +335,7 @@ export class AdminRepository {
           ) AS admin_name,
           au.email::text AS admin_email,
           su.student_id::text AS student_id,
+          COALESCE(NULLIF(BTRIM(su.student_full_name), ''), NULLIF(BTRIM(su.full_name), '')) AS student_name,
           COALESCE(
             CASE
               WHEN al.entity_table = 'submissions'
@@ -342,6 +345,16 @@ export class AdminRepository {
             END,
             s.id::text
           ) AS submission_id,
+          COALESCE(
+            NULLIF(BTRIM(s.title), ''),
+            (
+              SELECT NULLIF(BTRIM(si.title), '')
+              FROM public.submission_items si
+              WHERE si.submission_id = s.id
+              ORDER BY si.created_at ASC
+              LIMIT 1
+            )
+          ) AS submission_title,
           CASE
             WHEN al.action = 'admin_moderation_approve' THEN 'approved'
             WHEN al.action = 'admin_moderation_reject' THEN 'rejected'
@@ -373,7 +386,9 @@ export class AdminRepository {
         admin_name,
         admin_email,
         student_id,
+        student_name,
         submission_id,
+        submission_title,
         action,
         created_at
       FROM base
@@ -462,6 +477,7 @@ export class AdminRepository {
           ) AS admin_name,
           au.email::text AS admin_email,
           su.student_id::text AS student_id,
+          COALESCE(NULLIF(BTRIM(su.student_full_name), ''), NULLIF(BTRIM(su.full_name), '')) AS student_name,
           COALESCE(
             CASE
               WHEN al.entity_table = 'submissions'
@@ -471,6 +487,16 @@ export class AdminRepository {
             END,
             s.id::text
           ) AS submission_id,
+          COALESCE(
+            NULLIF(BTRIM(s.title), ''),
+            (
+              SELECT NULLIF(BTRIM(si.title), '')
+              FROM public.submission_items si
+              WHERE si.submission_id = s.id
+              ORDER BY si.created_at ASC
+              LIMIT 1
+            )
+          ) AS submission_title,
           CASE
             WHEN al.action = 'admin_moderation_approve' THEN 'approved'
             WHEN al.action = 'admin_moderation_reject' THEN 'rejected'
@@ -503,7 +529,9 @@ export class AdminRepository {
         admin_name,
         admin_email,
         student_id,
+        student_name,
         submission_id,
+        submission_title,
         action,
         created_at
       FROM base

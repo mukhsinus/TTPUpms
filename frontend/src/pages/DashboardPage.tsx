@@ -16,6 +16,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import { api, type AdminDashboardPayload, type AdminRecentActivityItem } from "../lib/api";
 import { isAdminPanelRole, normalizeRole } from "../lib/rbac";
+import { useToast } from "../contexts/ToastContext";
 import { EmptyState } from "../components/ui/EmptyState";
 import { DashboardStatsSkeleton, TableSkeleton } from "../components/ui/PageSkeletons";
 import { StatusBadge } from "../components/ui/Badge";
@@ -44,6 +45,17 @@ function formatActivityAction(action: AdminRecentActivityItem["action"]): string
   return "Login";
 }
 
+function formatDateTime(value: string): string {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const yy = String(d.getFullYear());
+  return `${hh}:${mm} ${dd}/${mo}/${yy}`;
+}
+
 function reasonLabel(reason: AdminDashboardPayload["needsAttention"][number]["reason"]): string {
   if (reason === "missing_proof_file") return "Missing proof file";
   if (reason === "waiting_over_24h") return "Waiting > 24h";
@@ -53,10 +65,13 @@ function reasonLabel(reason: AdminDashboardPayload["needsAttention"][number]["re
 
 export function DashboardPage(): ReactElement {
   const navigate = useNavigate();
+  const toast = useToast();
   const [submissions, setSubmissions] = useState<Awaited<ReturnType<typeof api.getSubmissions>>>([]);
   const [adminDashboard, setAdminDashboard] = useState<AdminDashboardPayload | null>(null);
   const [activityPage, setActivityPage] = useState(1);
   const [drawerAdminId, setDrawerAdminId] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [kpiPulse, setKpiPulse] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -136,13 +151,14 @@ export function DashboardPage(): ReactElement {
           : `Overloaded (${adminDashboard.pendingCount} pending)`;
 
     const exportCsv = (): void => {
-      const header = ["Action", "Admin", "Student", "Submission", "Time"];
+      const header = ["Action", "Admin", "Student ID", "Student Name", "Submission", "Time"];
       const rows = adminDashboard.recentActivity.map((r) => [
         formatActivityAction(r.action),
         r.adminName,
         r.studentId ?? "",
-        r.submissionId ?? "",
-        r.createdAt,
+        r.studentName ?? "",
+        `${(r.submissionTitle?.trim() || (r.studentId ? `Submission #${r.studentId}` : "Submission")).trim()} — ${formatDateTime(r.createdAt)}`,
+        formatDateTime(r.createdAt),
       ]);
       const csv = [header, ...rows]
         .map((cols) => cols.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","))
@@ -162,6 +178,20 @@ export function DashboardPage(): ReactElement {
       navigate(`/submissions?search=${encodeURIComponent(studentId.trim())}`);
     };
 
+    const handleRefresh = async (): Promise<void> => {
+      try {
+        setIsRefreshing(true);
+        setKpiPulse(true);
+        await loadAdminDashboard(activityPage, true);
+        toast.success("Dashboard updated");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to refresh dashboard");
+      } finally {
+        window.setTimeout(() => setKpiPulse(false), 520);
+        setIsRefreshing(false);
+      }
+    };
+
     return (
       <section className="dashboard-stack ops-dashboard">
         <Card className="ops-header-card">
@@ -169,7 +199,7 @@ export function DashboardPage(): ReactElement {
           <p className="ops-subtitle">Moderation Operations Center</p>
         </Card>
 
-        <div className="stats-grid stats-grid-four ops-kpis">
+        <div className={`stats-grid stats-grid-four ops-kpis ${kpiPulse ? "kpi-refresh-pulse" : ""}`}>
           <Card className="stat-card stat-card-primary">
             <div className="stat-card-header">
               <p className="stat-card-label">Pending Queue</p>
@@ -244,8 +274,15 @@ export function DashboardPage(): ReactElement {
               <Button type="button" variant="secondary" onClick={exportCsv}>
                 <Download size={16} /> Export CSV
               </Button>
-              <Button type="button" variant="secondary" onClick={() => void loadAdminDashboard(activityPage, true)}>
-                <RefreshCw size={16} /> Refresh
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => void handleRefresh()}
+                disabled={isRefreshing}
+                aria-busy={isRefreshing}
+              >
+                <RefreshCw size={16} className={isRefreshing ? "spin" : ""} />
+                {isRefreshing ? "Refreshing..." : "Refresh"}
               </Button>
             </div>
           </Card>
