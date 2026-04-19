@@ -112,6 +112,7 @@ export function AdminSubmissionsPage(): ReactElement {
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -163,8 +164,13 @@ export function AdminSubmissionsPage(): ReactElement {
   const load = useCallback(async (): Promise<void> => {
     const runId = requestSeq.current + 1;
     requestSeq.current = runId;
+    const hasPreviousData = items.length > 0 || total > 0;
     try {
-      setLoading(true);
+      if (hasPreviousData) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
       setError(null);
       const data = await api.getAdminSubmissions({
         page,
@@ -188,9 +194,10 @@ export function AdminSubmissionsPage(): ReactElement {
     } finally {
       if (requestSeq.current === runId) {
         setLoading(false);
+        setRefreshing(false);
       }
     }
-  }, [page, status, category, debouncedSearch, dateRange.dateFrom, dateRange.dateTo]);
+  }, [page, status, category, debouncedSearch, dateRange.dateFrom, dateRange.dateTo, items.length, total]);
 
   useEffect(() => {
     void load();
@@ -285,6 +292,7 @@ export function AdminSubmissionsPage(): ReactElement {
         </div>
         <div className="moderation-queue-kpi-line muted" aria-live="polite">
           {t("kpiLine", { pendingCount, total, showing })}
+          {refreshing ? " · " + t("loading") : ""}
         </div>
         {error ? (
           <div className="submissions-inline-error">

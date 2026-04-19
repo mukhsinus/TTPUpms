@@ -799,7 +799,7 @@ export class AdminRepository {
       SELECT
         si.id,
         si.submission_id,
-        (SELECT s.user_id::text FROM public.submissions s WHERE s.id = si.submission_id LIMIT 1) AS submission_user_id,
+        s.user_id::text AS submission_user_id,
         si.title,
         si.description,
         si.proof_file_url,
@@ -818,6 +818,7 @@ export class AdminRepository {
         si.created_at,
         si.updated_at
       FROM public.submission_items si
+      LEFT JOIN public.submissions s ON s.id = si.submission_id
       LEFT JOIN public.categories c ON c.id = si.category_id
       LEFT JOIN public.category_subcategories cs ON cs.id = si.subcategory_id
       WHERE si.submission_id = $1

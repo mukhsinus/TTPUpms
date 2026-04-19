@@ -57,12 +57,35 @@ function queueHealthFromPending(pendingCount: number): DashboardQueueHealth {
 }
 
 export class AdminService {
+  private dashboardCache = new Map<
+    string,
+    {
+      expiresAt: number;
+      data: Awaited<ReturnType<AdminService["buildDashboard"]>>;
+    }
+  >();
+  private submissionsCache = new Map<
+    string,
+    {
+      expiresAt: number;
+      data: Awaited<ReturnType<AdminService["buildSubmissionsList"]>>;
+    }
+  >();
+
+  private readonly dashboardCacheTtlMs = 20_000;
+  private readonly submissionsCacheTtlMs = 12_000;
+
   constructor(
     private readonly app: FastifyInstance,
     private readonly repository: AdminRepository,
     private readonly audit: AuditLogRepository,
     private readonly notifications: NotificationService,
   ) {}
+
+  private invalidateReadCaches(): void {
+    this.dashboardCache.clear();
+    this.submissionsCache.clear();
+  }
 
   async getMetrics(): Promise<{
     pendingCount: number;
@@ -80,6 +103,64 @@ export class AdminService {
   }
 
   async getDashboard(query: AdminDashboardQuery): Promise<{
+    pendingCount: number;
+    avgReviewTimeHours: number;
+    oldestPendingHours: number;
+    processed7d: number;
+    queueHealth: DashboardQueueHealth;
+    needsAttention: Array<{
+      submissionId: string;
+      label: string;
+      studentId: string | null;
+      studentName: string | null;
+      title: string;
+      waitingHours: number;
+      missingProofFile: boolean;
+      waitingOver24h: boolean;
+      needsManualScore: boolean;
+      reason: "missing_proof_file" | "waiting_over_24h" | "manual_scoring_needed" | "oldest_pending";
+    }>;
+    recentActivity: Array<{
+      id: string;
+      action: "approved" | "rejected" | "edited_score" | "reopened" | "login";
+      adminId: string;
+      adminName: string;
+      adminEmail: string | null;
+      studentId: string | null;
+      studentName: string | null;
+      submissionId: string | null;
+      submissionTitle: string | null;
+      submissionSubmittedAt: string | null;
+      createdAt: string;
+    }>;
+    pagination: {
+      page: number;
+      pageSize: number;
+      total: number;
+      totalPages: number;
+      hasPrev: boolean;
+      hasNext: boolean;
+    };
+  }> {
+    if (!query.forceRefresh) {
+      const key = `${query.page}:${query.pageSize}`;
+      const cached = this.dashboardCache.get(key);
+      if (cached && cached.expiresAt > Date.now()) {
+        return cached.data;
+      }
+    }
+    const data = await this.buildDashboard(query);
+    if (!query.forceRefresh) {
+      const key = `${query.page}:${query.pageSize}`;
+      this.dashboardCache.set(key, {
+        expiresAt: Date.now() + this.dashboardCacheTtlMs,
+        data,
+      });
+    }
+    return data;
+  }
+
+  private async buildDashboard(query: AdminDashboardQuery): Promise<{
     pendingCount: number;
     avgReviewTimeHours: number;
     oldestPendingHours: number;
@@ -204,6 +285,40 @@ export class AdminService {
   }
 
   async listSubmissions(query: AdminSubmissionsQuery): Promise<{
+    items: ReturnType<AdminService["mapListRow"]>[];
+    total: number;
+    pendingCount: number;
+    page: number;
+    pageSize: number;
+  }> {
+    const cacheKey = JSON.stringify({
+      page: query.page,
+      pageSize: query.pageSize,
+      status: query.status ?? "",
+      category: query.category ?? "",
+      search: query.search ?? "",
+      dateFrom: query.dateFrom ?? "",
+      dateTo: query.dateTo ?? "",
+      sort: query.sort,
+      order: query.order,
+    });
+    if (!query.forceRefresh) {
+      const cached = this.submissionsCache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        return cached.data;
+      }
+    }
+    const data = await this.buildSubmissionsList(query);
+    if (!query.forceRefresh) {
+      this.submissionsCache.set(cacheKey, {
+        expiresAt: Date.now() + this.submissionsCacheTtlMs,
+        data,
+      });
+    }
+    return data;
+  }
+
+  private async buildSubmissionsList(query: AdminSubmissionsQuery): Promise<{
     items: ReturnType<AdminService["mapListRow"]>[];
     total: number;
     pendingCount: number;
@@ -418,6 +533,7 @@ export class AdminService {
       });
 
       await client.query("COMMIT");
+      this.invalidateReadCaches();
     } catch (error) {
       await client.query("ROLLBACK");
       this.app.log.error({ err: error, submissionId }, "approveSubmission failed");
@@ -545,6 +661,7 @@ export class AdminService {
       });
 
       await client.query("COMMIT");
+      this.invalidateReadCaches();
     } catch (error) {
       await client.query("ROLLBACK");
       this.app.log.error({ err: error, submissionId }, "rejectSubmission failed");

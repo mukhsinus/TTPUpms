@@ -1,5 +1,5 @@
 import type { TFunction } from "i18next";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import {
   AlertCircle,
   Award,
@@ -87,6 +87,7 @@ export function DashboardPage(): ReactElement {
   const [kpiPulse, setKpiPulse] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const didInitialLoadRef = useRef(false);
 
   const sessionUser = api.getSessionUser();
   const role = normalizeRole(sessionUser?.role ?? "student");
@@ -113,7 +114,9 @@ export function DashboardPage(): ReactElement {
   useEffect(() => {
     void (async () => {
       try {
-        setLoading(true);
+        if (!didInitialLoadRef.current) {
+          setLoading(true);
+        }
         if (isAdmin) {
           if (isSuperadmin) {
             const data = await api.getSuperadminDashboard();
@@ -128,6 +131,7 @@ export function DashboardPage(): ReactElement {
           err instanceof Error ? err.message : i18nInstance.t("errorLoadDashboard", { ns: "dashboard" }),
         );
       } finally {
+        didInitialLoadRef.current = true;
         setLoading(false);
       }
     })();

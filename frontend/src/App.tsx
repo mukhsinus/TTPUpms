@@ -13,6 +13,10 @@ import { LoginPage } from "./pages/LoginPage";
 const loadDashboardPage = async () => import("./pages/DashboardPage");
 const loadAdminSubmissionsPage = async () => import("./pages/AdminSubmissionsPage");
 const loadProfilePage = async () => import("./pages/ProfilePage");
+const loadAdminsPage = async () => import("./pages/AdminsPage");
+const loadAuditLogsPage = async () => import("./pages/AuditLogsPage");
+const loadSecurityCenterPage = async () => import("./pages/SecurityCenterPage");
+const loadReportsPage = async () => import("./pages/ReportsPage");
 
 const DashboardPage = lazy(async () => {
   const m = await loadDashboardPage();
@@ -51,19 +55,19 @@ const ProfilePage = lazy(async () => {
   return { default: m.ProfilePage };
 });
 const AdminsPage = lazy(async () => {
-  const m = await import("./pages/AdminsPage");
+  const m = await loadAdminsPage();
   return { default: m.AdminsPage };
 });
 const AuditLogsPage = lazy(async () => {
-  const m = await import("./pages/AuditLogsPage");
+  const m = await loadAuditLogsPage();
   return { default: m.AuditLogsPage };
 });
 const SecurityCenterPage = lazy(async () => {
-  const m = await import("./pages/SecurityCenterPage");
+  const m = await loadSecurityCenterPage();
   return { default: m.SecurityCenterPage };
 });
 const ReportsPage = lazy(async () => {
-  const m = await import("./pages/ReportsPage");
+  const m = await loadReportsPage();
   return { default: m.ReportsPage };
 });
 
@@ -85,6 +89,12 @@ function AuthenticatedShell({ onLogout }: { onLogout: () => void }): ReactElemen
       void loadDashboardPage();
       void loadAdminSubmissionsPage();
       void loadProfilePage();
+      if (user?.role === "superadmin") {
+        void loadAdminsPage();
+        void loadAuditLogsPage();
+        void loadSecurityCenterPage();
+        void loadReportsPage();
+      }
       void api.getAdminDashboard({ page: 1, pageSize: 12 }).catch(() => undefined);
       void api.getAdminSubmissions({ page: 1, pageSize: 20 }).catch(() => undefined);
       void api.getAdminProfile({ page: 1, pageSize: 10 }).catch(() => undefined);

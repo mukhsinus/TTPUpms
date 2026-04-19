@@ -41,6 +41,12 @@ let adminDashboardCache:
       data: AdminDashboardPayload;
     }
   | null = null;
+let adminDashboardInFlight:
+  | {
+      key: string;
+      promise: Promise<AdminDashboardPayload>;
+    }
+  | null = null;
 let adminSubmissionsCache = new Map<
   string,
   {
@@ -48,6 +54,7 @@ let adminSubmissionsCache = new Map<
     data: AdminSubmissionsListPayload;
   }
 >();
+let adminSubmissionsInFlight = new Map<string, Promise<AdminSubmissionsListPayload>>();
 let adminSubmissionDetailCache = new Map<
   string,
   {
@@ -55,11 +62,18 @@ let adminSubmissionDetailCache = new Map<
     data: AdminSubmissionDetailPayload;
   }
 >();
+let adminSubmissionDetailInFlight = new Map<string, Promise<AdminSubmissionDetailPayload>>();
 let adminProfileCache:
   | {
       key: string;
       expiresAt: number;
       data: AdminProfilePayload;
+    }
+  | null = null;
+let adminProfileInFlight:
+  | {
+      key: string;
+      promise: Promise<AdminProfilePayload>;
     }
   | null = null;
 
@@ -745,9 +759,13 @@ export const api = {
       /* ignore */
     }
     adminDashboardCache = null;
+    adminDashboardInFlight = null;
     adminProfileCache = null;
+    adminProfileInFlight = null;
     adminSubmissionsCache.clear();
+    adminSubmissionsInFlight.clear();
     adminSubmissionDetailCache.clear();
+    adminSubmissionDetailInFlight.clear();
   },
 
   getSessionUser(): SessionUser | null {
@@ -776,7 +794,7 @@ export const api = {
   },
 
   /** Fetches `public.users.role` from the API and stores it for `getSessionUser` / RequireRole. */
-  async syncSessionRoleFromServer(): Promise<void> {
+  async syncSessionRoleFromServer(options?: { authSource?: "admin_panel"; token?: string }): Promise<void> {
     if (!sessionIsValid()) {
       return;
     }
@@ -785,11 +803,18 @@ export const api = {
     }
     syncSessionRoleInFlight = (async () => {
       try {
+        const headers = new Headers();
+        if (options?.authSource === "admin_panel") {
+          headers.set("X-Upms-Auth-Source", "admin_panel");
+        }
         const result = await requestResult<AuthMePayload>(
           "/api/auth/me",
-          { method: "GET" },
-          undefined,
-          { skipUnauthorizedRedirect: true },
+          { method: "GET", headers },
+          options?.token,
+          {
+            skipUnauthorizedRedirect: true,
+            forceAdminSessionHeader: options?.authSource === "admin_panel",
+          },
         );
         if (result.data?.role) {
           setSessionRoleFromServer(result.data.role);
@@ -811,29 +836,19 @@ export const api = {
     options?: { authSource?: "admin_panel" },
   ): Promise<void> {
     const token = await signInWithSupabasePassword(email, password);
-    const headers = new Headers();
-    if (options?.authSource === "admin_panel") {
-      headers.set("X-Upms-Auth-Source", "admin_panel");
-    }
-    const me = await requestResult<AuthMePayload>(
-      "/api/auth/me",
-      { method: "GET", headers },
-      token,
-      { skipUnauthorizedRedirect: true, forceAdminSessionHeader: options?.authSource === "admin_panel" },
-    );
-    if (me.error) {
-      throw new ApiError(me.error, me.statusCode);
-    }
-    if (!me.data?.role) {
-      throw new ApiError("Invalid auth profile response", 500);
-    }
-
     setAuthToken(token);
-    setSessionRoleFromServer(me.data.role);
+    const payload = decodeJwtPayload(token);
+    const provisionalRole = (payload?.app_metadata as Record<string, unknown> | undefined)?.role;
+    setSessionRoleFromServer(typeof provisionalRole === "string" ? provisionalRole : "student");
     adminDashboardCache = null;
+    adminDashboardInFlight = null;
     adminProfileCache = null;
+    adminProfileInFlight = null;
     adminSubmissionsCache.clear();
+    adminSubmissionsInFlight.clear();
     adminSubmissionDetailCache.clear();
+    adminSubmissionDetailInFlight.clear();
+    void this.syncSessionRoleFromServer({ authSource: options?.authSource, token }).catch(() => undefined);
   },
 
   async registerAdminAccount(input: {
@@ -979,8 +994,11 @@ export const api = {
       }),
     }).then((data) => {
       adminSubmissionDetailCache.delete(input.submissionId);
+      adminSubmissionDetailInFlight.delete(input.submissionId);
       adminSubmissionsCache.clear();
+      adminSubmissionsInFlight.clear();
       adminDashboardCache = null;
+      adminDashboardInFlight = null;
       return data;
     });
   },
@@ -994,8 +1012,11 @@ export const api = {
       }),
     }).then((data) => {
       adminSubmissionDetailCache.delete(input.submissionId);
+      adminSubmissionDetailInFlight.delete(input.submissionId);
       adminSubmissionsCache.clear();
+      adminSubmissionsInFlight.clear();
       adminDashboardCache = null;
+      adminDashboardInFlight = null;
       return data;
     });
   },
@@ -1012,18 +1033,34 @@ export const api = {
     if (!params?.forceRefresh && adminDashboardCache && adminDashboardCache.key === cacheKey && adminDashboardCache.expiresAt > now) {
       return Promise.resolve(adminDashboardCache.data);
     }
+    if (!params?.forceRefresh && adminDashboardInFlight?.key === cacheKey) {
+      return adminDashboardInFlight.promise;
+    }
     const q = new URLSearchParams({
       page: String(page),
       pageSize: String(pageSize),
     });
-    return request<AdminDashboardPayload>(`/api/admin/dashboard?${q.toString()}`).then((data) => {
-      adminDashboardCache = {
-        key: cacheKey,
-        expiresAt: Date.now() + 10_000,
-        data,
-      };
-      return data;
-    });
+    if (params?.forceRefresh) {
+      q.set("forceRefresh", "true");
+    }
+    const promise = request<AdminDashboardPayload>(`/api/admin/dashboard?${q.toString()}`)
+      .then((data) => {
+        adminDashboardCache = {
+          key: cacheKey,
+          expiresAt: Date.now() + 10_000,
+          data,
+        };
+        return data;
+      })
+      .finally(() => {
+        if (adminDashboardInFlight?.key === cacheKey) {
+          adminDashboardInFlight = null;
+        }
+      });
+    if (!params?.forceRefresh) {
+      adminDashboardInFlight = { key: cacheKey, promise };
+    }
+    return promise;
   },
 
   getSuperadminDashboard(): Promise<SuperadminDashboardPayload> {
@@ -1038,18 +1075,31 @@ export const api = {
     if (!params?.forceRefresh && adminProfileCache && adminProfileCache.key === cacheKey && adminProfileCache.expiresAt > now) {
       return Promise.resolve(adminProfileCache.data);
     }
+    if (!params?.forceRefresh && adminProfileInFlight?.key === cacheKey) {
+      return adminProfileInFlight.promise;
+    }
     const q = new URLSearchParams({
       page: String(page),
       pageSize: String(pageSize),
     });
-    return request<AdminProfilePayload>(`/api/admin/profile?${q.toString()}`).then((data) => {
-      adminProfileCache = {
-        key: cacheKey,
-        expiresAt: Date.now() + 10_000,
-        data,
-      };
-      return data;
-    });
+    const promise = request<AdminProfilePayload>(`/api/admin/profile?${q.toString()}`)
+      .then((data) => {
+        adminProfileCache = {
+          key: cacheKey,
+          expiresAt: Date.now() + 10_000,
+          data,
+        };
+        return data;
+      })
+      .finally(() => {
+        if (adminProfileInFlight?.key === cacheKey) {
+          adminProfileInFlight = null;
+        }
+      });
+    if (!params?.forceRefresh) {
+      adminProfileInFlight = { key: cacheKey, promise };
+    }
+    return promise;
   },
 
   async updateAdminIdentity(input: {
@@ -1080,6 +1130,7 @@ export const api = {
       }),
     });
     adminProfileCache = null;
+    adminProfileInFlight = null;
   },
 
   async changeAdminPassword(input: {
@@ -1105,6 +1156,7 @@ export const api = {
       body: JSON.stringify({}),
     });
     adminProfileCache = null;
+    adminProfileInFlight = null;
   },
 
   async logoutOtherAdminSessions(): Promise<{ revokedCount: number; restricted: boolean }> {
@@ -1113,6 +1165,7 @@ export const api = {
       body: JSON.stringify({}),
     });
     adminProfileCache = null;
+    adminProfileInFlight = null;
     return data;
   },
 
@@ -1122,6 +1175,7 @@ export const api = {
       body: JSON.stringify({}),
     });
     adminProfileCache = null;
+    adminProfileInFlight = null;
   },
 
   getAdminActivityProfile(
@@ -1291,6 +1345,12 @@ export const api = {
     if (!params.forceRefresh && cached && cached.expiresAt > now) {
       return Promise.resolve(cached.data);
     }
+    if (!params.forceRefresh) {
+      const inflight = adminSubmissionsInFlight.get(cacheKey);
+      if (inflight) {
+        return inflight;
+      }
+    }
 
     const q = new URLSearchParams();
     if (params.page !== undefined) {
@@ -1314,14 +1374,25 @@ export const api = {
     if (params.dateTo) {
       q.set("dateTo", params.dateTo);
     }
+    if (params.forceRefresh) {
+      q.set("forceRefresh", "true");
+    }
     const suffix = q.toString() ? `?${q.toString()}` : "";
-    return request<AdminSubmissionsListPayload>(`/api/admin/submissions${suffix}`).then((data) => {
-      adminSubmissionsCache.set(cacheKey, {
-        expiresAt: Date.now() + ADMIN_LIST_CACHE_TTL_MS,
-        data,
+    const promise = request<AdminSubmissionsListPayload>(`/api/admin/submissions${suffix}`)
+      .then((data) => {
+        adminSubmissionsCache.set(cacheKey, {
+          expiresAt: Date.now() + ADMIN_LIST_CACHE_TTL_MS,
+          data,
+        });
+        return data;
+      })
+      .finally(() => {
+        adminSubmissionsInFlight.delete(cacheKey);
       });
-      return data;
-    });
+    if (!params.forceRefresh) {
+      adminSubmissionsInFlight.set(cacheKey, promise);
+    }
+    return promise;
   },
 
   getAdminSubmissionDetail(submissionId: string, options?: { forceRefresh?: boolean }): Promise<AdminSubmissionDetailPayload> {
@@ -1331,13 +1402,27 @@ export const api = {
     if (!options?.forceRefresh && cached && cached.expiresAt > now) {
       return Promise.resolve(cached.data);
     }
-    return request<AdminSubmissionDetailPayload>(`/api/admin/submissions/${submissionId}`).then((data) => {
-      adminSubmissionDetailCache.set(key, {
-        expiresAt: Date.now() + ADMIN_DETAIL_CACHE_TTL_MS,
-        data,
+    if (!options?.forceRefresh) {
+      const inflight = adminSubmissionDetailInFlight.get(key);
+      if (inflight) {
+        return inflight;
+      }
+    }
+    const promise = request<AdminSubmissionDetailPayload>(`/api/admin/submissions/${submissionId}`)
+      .then((data) => {
+        adminSubmissionDetailCache.set(key, {
+          expiresAt: Date.now() + ADMIN_DETAIL_CACHE_TTL_MS,
+          data,
+        });
+        return data;
+      })
+      .finally(() => {
+        adminSubmissionDetailInFlight.delete(key);
       });
-      return data;
-    });
+    if (!options?.forceRefresh) {
+      adminSubmissionDetailInFlight.set(key, promise);
+    }
+    return promise;
   },
 
   adminApproveSubmission(submissionId: string, body: { score?: number }): Promise<AdminSubmissionDetailPayload["submission"]> {
@@ -1346,9 +1431,13 @@ export const api = {
       body: JSON.stringify(body),
     }).then((data) => {
       adminSubmissionDetailCache.delete(submissionId);
+      adminSubmissionDetailInFlight.delete(submissionId);
       adminSubmissionsCache.clear();
+      adminSubmissionsInFlight.clear();
       adminDashboardCache = null;
+      adminDashboardInFlight = null;
       adminProfileCache = null;
+      adminProfileInFlight = null;
       return data;
     });
   },
@@ -1362,9 +1451,13 @@ export const api = {
       body: JSON.stringify(body),
     }).then((data) => {
       adminSubmissionDetailCache.delete(submissionId);
+      adminSubmissionDetailInFlight.delete(submissionId);
       adminSubmissionsCache.clear();
+      adminSubmissionsInFlight.clear();
       adminDashboardCache = null;
+      adminDashboardInFlight = null;
       adminProfileCache = null;
+      adminProfileInFlight = null;
       return data;
     });
   },

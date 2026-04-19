@@ -10,6 +10,7 @@ export const adminSubmissionIdParamsSchema = z.object({
 export const adminDashboardQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  forceRefresh: z.coerce.boolean().optional().default(false),
 });
 
 export const adminDashboardAdminParamsSchema = z.object({
@@ -19,6 +20,7 @@ export const adminDashboardAdminParamsSchema = z.object({
 export const adminSubmissionsQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  forceRefresh: z.coerce.boolean().optional().default(false),
   status: adminModerationStatusSchema.optional(),
   category: z.string().trim().min(1).max(128).optional(),
   /** Title / student name search (server-side; uses trigram indexes when present). */
