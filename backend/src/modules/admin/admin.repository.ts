@@ -6,10 +6,12 @@ import type { AdminModerationStatus, AdminSubmissionsQuery } from "./admin.schem
 export interface AdminSubmissionListRow {
   id: string;
   user_id: string;
+  student_id: string | null;
   title: string;
   db_status: string;
   created_at: string;
-  proposed_score: string | null;
+  submitted_at: string;
+  score: string | null;
   category_code: string | null;
   category_title: string | null;
   subcategory_slug: string | null;
@@ -129,19 +131,6 @@ function moderationStatusFilterSql(status: AdminModerationStatus): { clause: str
   return { clause: `s.status = 'rejected'`, params: [] };
 }
 
-function sortColumn(sort: AdminSubmissionsQuery["sort"]): string {
-  if (sort === "title") {
-    return "s.title";
-  }
-  if (sort === "status") {
-    return "s.status";
-  }
-  if (sort === "score") {
-    return "proposed_score_sort";
-  }
-  return "s.created_at";
-}
-
 const SUBMISSION_ID_UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -163,19 +152,24 @@ function buildAdminSubmissionFilters(query: AdminSubmissionsQuery): { whereSql: 
       EXISTS (
         SELECT 1 FROM public.submission_items si2
         INNER JOIN public.categories c2 ON c2.id = si2.category_id
-        WHERE si2.submission_id = s.id AND c2.code = $${p}
+        WHERE si2.submission_id = s.id
+          AND (
+            c2.code = $${p}
+            OR lower(c2.name) = lower($${p})
+            OR lower(COALESCE(c2.title, '')) = lower($${p})
+          )
       )
     `);
     params.push(query.category);
     p += 1;
   }
   if (query.dateFrom) {
-    conditions.push(`s.created_at >= $${p}::timestamptz`);
+    conditions.push(`COALESCE(s.submitted_at, s.created_at) >= $${p}::timestamptz`);
     params.push(query.dateFrom);
     p += 1;
   }
   if (query.dateTo) {
-    conditions.push(`s.created_at <= $${p}::timestamptz`);
+    conditions.push(`COALESCE(s.submitted_at, s.created_at) <= $${p}::timestamptz`);
     params.push(query.dateTo);
     p += 1;
   }
@@ -189,7 +183,7 @@ function buildAdminSubmissionFilters(query: AdminSubmissionsQuery): { whereSql: 
       const escaped = raw.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
       const pattern = `%${escaped}%`;
       conditions.push(
-        `(s.title ILIKE $${p} ESCAPE '\\' OR COALESCE(u.student_full_name::text, u.full_name::text, '') ILIKE $${p} ESCAPE '\\')`,
+        `(s.title ILIKE $${p} ESCAPE '\\' OR COALESCE(u.student_full_name::text, u.full_name::text, '') ILIKE $${p} ESCAPE '\\' OR COALESCE(u.student_id::text, '') ILIKE $${p} ESCAPE '\\')`,
       );
       params.push(pattern);
       p += 1;
@@ -655,8 +649,6 @@ export class AdminRepository {
 
   async listSubmissions(query: AdminSubmissionsQuery): Promise<AdminSubmissionListRow[]> {
     const { whereSql, params } = buildAdminSubmissionFilters(query);
-    const orderCol = sortColumn(query.sort);
-    const orderDir = query.order === "asc" ? "ASC" : "DESC";
     const offset = (query.page - 1) * query.pageSize;
 
     const limitParam = params.length + 1;
@@ -668,20 +660,23 @@ export class AdminRepository {
       SELECT
         s.id,
         s.user_id,
+        u.student_id,
         s.title,
         s.status::text AS db_status,
         s.created_at,
-        first_item.proposed_score::text AS proposed_score,
+        COALESCE(s.submitted_at, s.created_at) AS submitted_at,
+        CASE
+          WHEN s.status IN ('approved', 'rejected') THEN s.total_score::text
+          ELSE NULL
+        END AS score,
         first_item.category_code,
         first_item.category_title,
         first_item.subcategory_slug,
-        u.student_full_name AS owner_name,
-        COALESCE(first_item.proposed_score, 0) AS proposed_score_sort
+        COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), '')) AS owner_name
       FROM public.submissions s
       LEFT JOIN public.users u ON u.id = s.user_id
       LEFT JOIN LATERAL (
         SELECT
-          si.proposed_score,
           c.code AS category_code,
           cs.slug AS subcategory_slug,
           COALESCE(
@@ -696,7 +691,22 @@ export class AdminRepository {
         LIMIT 1
       ) first_item ON true
       ${whereSql}
-      ORDER BY ${orderCol} ${orderDir}, s.id ASC
+      ORDER BY
+        CASE
+          WHEN s.status IN ('submitted', 'review', 'needs_revision') THEN 0
+          WHEN s.status = 'approved' THEN 1
+          WHEN s.status = 'rejected' THEN 2
+          ELSE 3
+        END ASC,
+        CASE
+          WHEN s.status IN ('submitted', 'review', 'needs_revision') THEN COALESCE(s.submitted_at, s.created_at)
+          ELSE NULL
+        END ASC NULLS LAST,
+        CASE
+          WHEN s.status NOT IN ('submitted', 'review', 'needs_revision') THEN COALESCE(s.reviewed_at, s.updated_at, s.created_at)
+          ELSE NULL
+        END DESC NULLS LAST,
+        s.id ASC
       LIMIT $${limitParam}::int OFFSET $${offsetParam}::int
       `,
       params,

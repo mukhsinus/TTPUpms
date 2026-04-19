@@ -65,6 +65,7 @@ export type AdminModerationStatus = "pending" | "approved" | "rejected";
 export interface AdminSubmissionListItem {
   id: string;
   userId: string;
+  studentId: string | null;
   categoryCode: string | null;
   /** Human-readable label from DB (`categories.title`) or derived from `categories.name`. */
   categoryTitle: string | null;
@@ -72,13 +73,15 @@ export interface AdminSubmissionListItem {
   title: string;
   status: AdminModerationStatus;
   createdAt: string;
-  proposedScore: number | null;
+  submittedAt: string;
+  score: number | null;
   ownerName: string | null;
 }
 
 export interface AdminSubmissionsListPayload {
   items: AdminSubmissionListItem[];
   total: number;
+  pendingCount: number;
   page: number;
   pageSize: number;
 }
@@ -698,8 +701,6 @@ export const api = {
     search?: string;
     dateFrom?: string;
     dateTo?: string;
-    sort?: "created_at" | "title" | "status" | "score";
-    order?: "asc" | "desc";
   }): Promise<AdminSubmissionsListPayload> {
     const q = new URLSearchParams();
     if (params.page !== undefined) {
@@ -722,12 +723,6 @@ export const api = {
     }
     if (params.dateTo) {
       q.set("dateTo", params.dateTo);
-    }
-    if (params.sort) {
-      q.set("sort", params.sort);
-    }
-    if (params.order) {
-      q.set("order", params.order);
     }
     const suffix = q.toString() ? `?${q.toString()}` : "";
     return request<AdminSubmissionsListPayload>(`/api/admin/submissions${suffix}`);

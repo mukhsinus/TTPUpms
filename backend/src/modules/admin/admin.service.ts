@@ -206,17 +206,22 @@ export class AdminService {
   async listSubmissions(query: AdminSubmissionsQuery): Promise<{
     items: ReturnType<AdminService["mapListRow"]>[];
     total: number;
+    pendingCount: number;
     page: number;
     pageSize: number;
   }> {
-    const [total, rows] = await Promise.all([
+    const pendingQuery: AdminSubmissionsQuery | null =
+      query.status && query.status !== "pending" ? null : { ...query, status: "pending" };
+    const [total, rows, pendingCount] = await Promise.all([
       this.repository.countSubmissions(query),
       this.repository.listSubmissions(query),
+      pendingQuery ? this.repository.countSubmissions(pendingQuery) : Promise.resolve(0),
     ]);
 
     return {
       items: rows.map((r) => this.mapListRow(r)),
       total,
+      pendingCount,
       page: query.page,
       pageSize: query.pageSize,
     };
@@ -226,13 +231,15 @@ export class AdminService {
     return {
       id: row.id,
       userId: row.user_id,
+      studentId: row.student_id,
       categoryCode: row.category_code,
       categoryTitle: row.category_title,
       subcategorySlug: row.subcategory_slug,
       title: row.title,
       status: toModerationStatus(row.db_status),
       createdAt: row.created_at,
-      proposedScore: numOrNull(row.proposed_score),
+      submittedAt: row.submitted_at,
+      score: numOrNull(row.score),
       ownerName: row.owner_name,
     };
   }
