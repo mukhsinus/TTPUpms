@@ -44,6 +44,16 @@ function actionLabel(action: AdminProfilePayload["recentActions"][number]["actio
   return "Login";
 }
 
+function deviceFromUserAgent(userAgent: string | null | undefined): string {
+  const text = userAgent?.trim();
+  if (!text) return "Browser";
+  if (text.includes("Mac OS")) return "Mac";
+  if (text.includes("Windows")) return "Windows";
+  if (text.includes("iPhone") || text.includes("iPad")) return "iPhone";
+  if (text.includes("Android")) return "Android";
+  return "Browser";
+}
+
 export function ProfilePage(): ReactElement {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
@@ -84,6 +94,23 @@ export function ProfilePage(): ReactElement {
       { label: "Security approvals", enabled: permissions.securityApprovals },
     ];
   }, [payload?.permissions]);
+
+  const currentSession = useMemo(() => {
+    return payload?.security.sessions.find((session) => session.isCurrent) ?? null;
+  }, [payload?.security.sessions]);
+
+  const currentDevice = useMemo(() => {
+    const userAgent = currentSession?.deviceName ? null : (payload?.identity.lastLoginUserAgent ?? null);
+    if (currentSession?.deviceName) {
+      const normalized = currentSession.deviceName.toLowerCase();
+      if (normalized.includes("mac")) return "Mac";
+      if (normalized.includes("windows")) return "Windows";
+      if (normalized.includes("ios")) return "iPhone";
+      if (normalized.includes("android")) return "Android";
+      return "Browser";
+    }
+    return deviceFromUserAgent(userAgent);
+  }, [currentSession?.deviceName, payload?.identity.lastLoginUserAgent]);
 
   if (loading && !payload) {
     return (
@@ -196,9 +223,16 @@ export function ProfilePage(): ReactElement {
             <ShieldCheck size={16} />
             <span>Current Session Active: {payload.security.currentSessionActive ? "Yes" : "No"}</span>
           </div>
+          <div className="profile-security-line muted">Current Device: {currentDevice}</div>
           <div className="profile-security-line muted">
-            Last login IP: {payload.identity.lastLoginIp ?? "Not available"}
+            Current IP: {currentSession?.ip ?? payload.identity.lastLoginIp ?? "Not available"}
           </div>
+          <div className="profile-security-line muted">
+            Last Login: {formatDateTime(payload.identity.lastLoginAt)}
+          </div>
+          {payload.security.activeSessionsCount > 1 ? (
+            <div className="profile-security-line muted">{payload.security.activeSessionsCount} active sessions</div>
+          ) : null}
           <div className="profile-security-actions">
             <Button
               type="button"
@@ -219,68 +253,31 @@ export function ProfilePage(): ReactElement {
             >
               {busy === "logout-current" ? "Logging out..." : "Logout Current Session"}
             </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={busy !== null || payload.security.logoutOtherSessionsRestricted}
-              title={payload.security.restrictionReason ?? undefined}
-              onClick={async () => {
-                try {
-                  setBusy("logout-others");
-                  const result = await api.logoutOtherAdminSessions();
-                  if (result.restricted) {
-                    setNotice("For security reasons, logout of other devices is temporarily restricted.");
-                  } else {
-                    setNotice(`Logged out ${result.revokedCount} other session(s).`);
+            {payload.security.activeSessionsCount > 1 ? (
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={busy !== null}
+                onClick={async () => {
+                  try {
+                    setBusy("logout-others");
+                    const result = await api.logoutOtherAdminSessions();
+                    if (result.restricted) {
+                      setNotice("Logout other sessions is temporarily restricted.");
+                    } else {
+                      setNotice(`Logged out ${result.revokedCount} other session(s).`);
+                    }
+                    await load(true);
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : "Failed to logout other sessions.");
+                  } finally {
+                    setBusy(null);
                   }
-                  await load(true);
-                } catch (err) {
-                  setError(err instanceof Error ? err.message : "Failed to logout other sessions.");
-                } finally {
-                  setBusy(null);
-                }
-              }}
-            >
-              {busy === "logout-others" ? "Processing..." : "Logout Other Sessions"}
-            </Button>
-          </div>
-          {payload.security.logoutOtherSessionsRestricted ? (
-            <p className="error">{payload.security.restrictionReason}</p>
-          ) : null}
-          {payload.identity.role === "superadmin" && payload.security.pendingSecurityEvents.length > 0 ? (
-            <div className="profile-security-approvals">
-              <strong>Pending Security Approvals</strong>
-              {payload.security.pendingSecurityEvents.map((eventRow) => (
-                <div key={eventRow.id} className="profile-security-approval-row">
-                  <span className="muted">{eventRow.type.replace(/_/g, " ")} • {formatDateTime(eventRow.createdAt)}</span>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={async () => {
-                      try {
-                        await api.approveAdminSecurityEvent(eventRow.id);
-                        await load(true);
-                      } catch (err) {
-                        setError(err instanceof Error ? err.message : "Failed to approve security event.");
-                      }
-                    }}
-                  >
-                    Approve
-                  </Button>
-                </div>
-              ))}
-            </div>
-          ) : null}
-          <div className="profile-sessions-list">
-            <strong>Device Sessions</strong>
-            {payload.security.sessions.map((session) => (
-              <div key={session.id} className="profile-session-row">
-                <span>{session.deviceName}{session.isCurrent ? " (current)" : ""}</span>
-                <span className="muted">
-                  {session.ip ?? "No IP"} • Last seen {formatDateTime(session.lastSeenAt)}
-                </span>
-              </div>
-            ))}
+                }}
+              >
+                {busy === "logout-others" ? "Processing..." : "Logout Other Sessions"}
+              </Button>
+            ) : null}
           </div>
         </div>
       </Card>
