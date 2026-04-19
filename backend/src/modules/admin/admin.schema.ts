@@ -7,6 +7,15 @@ export const adminSubmissionIdParamsSchema = z.object({
   id: z.string().uuid(),
 });
 
+export const adminDashboardQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+export const adminDashboardAdminParamsSchema = z.object({
+  adminId: z.string().uuid(),
+});
+
 export const adminSubmissionsQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
@@ -34,6 +43,7 @@ export const adminRejectBodySchema = z
   .strict();
 
 export type AdminModerationStatus = z.infer<typeof adminModerationStatusSchema>;
+export type AdminDashboardQuery = z.infer<typeof adminDashboardQuerySchema>;
 export type AdminSubmissionsQuery = z.infer<typeof adminSubmissionsQuerySchema>;
 export type AdminApproveBody = z.infer<typeof adminApproveBodySchema>;
 export type AdminRejectBody = z.infer<typeof adminRejectBodySchema>;

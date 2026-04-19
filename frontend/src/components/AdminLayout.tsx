@@ -12,14 +12,6 @@ interface AdminLayoutProps extends PropsWithChildren {
 /** Shell for admin / superadmin — moderation UI only (no student copy). */
 export function AdminLayout({ children, onLogout }: AdminLayoutProps): ReactElement {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [headerDateLabel] = useState(() =>
-    new Date().toLocaleDateString("en-US", {
-      weekday: "long",
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    }),
-  );
   const location = useLocation();
   const user = api.getSessionUser();
   const role = normalizeRole(user?.role ?? "student");
@@ -73,7 +65,6 @@ export function AdminLayout({ children, onLogout }: AdminLayoutProps): ReactElem
             </Button>
             <div>
               <h1>{pageTitle}</h1>
-              <p>{headerDateLabel}</p>
             </div>
           </div>
         </header>

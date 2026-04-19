@@ -9,8 +9,12 @@ import {
 } from "../files/proof-reference";
 import { ServiceError } from "../../utils/service-error";
 import type {
+  AdminActivityRow,
+  AdminActivitySummaryRow,
+  AdminDashboardSummaryRow,
   AdminFileRow,
   AdminItemRow,
+  AdminNeedsAttentionRow,
   AdminSubmissionDetailRow,
   AdminSubmissionListRow,
   AdminUserRow,
@@ -18,6 +22,7 @@ import type {
 import { AdminRepository } from "./admin.repository";
 import type {
   AdminApproveBody,
+  AdminDashboardQuery,
   AdminModerationStatus,
   AdminRejectBody,
   AdminSubmissionsQuery,
@@ -43,6 +48,14 @@ function numOrNull(v: string | null | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+type DashboardQueueHealth = "healthy" | "moderate" | "overloaded";
+
+function queueHealthFromPending(pendingCount: number): DashboardQueueHealth {
+  if (pendingCount <= 5) return "healthy";
+  if (pendingCount <= 20) return "moderate";
+  return "overloaded";
+}
+
 export class AdminService {
   constructor(
     private readonly app: FastifyInstance,
@@ -63,6 +76,124 @@ export class AdminService {
       approvedToday: Number(row.approved_today),
       rejectedToday: Number(row.rejected_today),
       totalProcessed: Number(row.total_processed),
+    };
+  }
+
+  async getDashboard(query: AdminDashboardQuery): Promise<{
+    pendingCount: number;
+    avgReviewTimeHours: number;
+    oldestPendingHours: number;
+    processed7d: number;
+    queueHealth: DashboardQueueHealth;
+    needsAttention: Array<{
+      submissionId: string;
+      label: string;
+      studentId: string | null;
+      studentName: string | null;
+      title: string;
+      waitingHours: number;
+      missingProofFile: boolean;
+      waitingOver24h: boolean;
+      needsManualScore: boolean;
+      reason: "missing_proof_file" | "waiting_over_24h" | "manual_scoring_needed" | "oldest_pending";
+    }>;
+    recentActivity: Array<{
+      id: string;
+      action: "approved" | "rejected" | "edited_score" | "reopened" | "login";
+      adminId: string;
+      adminName: string;
+      adminEmail: string | null;
+      studentId: string | null;
+      submissionId: string | null;
+      createdAt: string;
+    }>;
+    pagination: {
+      page: number;
+      pageSize: number;
+      total: number;
+      totalPages: number;
+      hasPrev: boolean;
+      hasNext: boolean;
+    };
+  }> {
+    const [summary, needsAttentionRows, activityRows, totalActivity] = await Promise.all([
+      this.repository.getDashboardSummary(),
+      this.repository.listNeedsAttention(5),
+      this.repository.listRecentActivity(query.page, query.pageSize),
+      this.repository.countRecentActivity(),
+    ]);
+
+    const pendingCount = Number(summary.pending_count ?? "0");
+    const totalPages = Math.max(1, Math.ceil(totalActivity / query.pageSize));
+
+    return {
+      pendingCount,
+      avgReviewTimeHours: Number(summary.avg_review_time_hours ?? "0"),
+      oldestPendingHours: Number(summary.oldest_pending_hours ?? "0"),
+      processed7d: Number(summary.processed_7d ?? "0"),
+      queueHealth: queueHealthFromPending(pendingCount),
+      needsAttention: needsAttentionRows.map((row) => this.mapNeedsAttentionRow(row)),
+      recentActivity: activityRows.map((row) => this.mapActivityRow(row)),
+      pagination: {
+        page: query.page,
+        pageSize: query.pageSize,
+        total: totalActivity,
+        totalPages,
+        hasPrev: query.page > 1,
+        hasNext: query.page < totalPages,
+      },
+    };
+  }
+
+  async getAdminActivityProfile(
+    adminId: string,
+    query: AdminDashboardQuery,
+  ): Promise<{
+    admin: { id: string; name: string; email: string | null };
+    totals: { totalActions: number; approvals: number; rejects: number };
+    recentActivity: Array<{
+      id: string;
+      action: "approved" | "rejected" | "edited_score" | "reopened" | "login";
+      adminId: string;
+      adminName: string;
+      adminEmail: string | null;
+      studentId: string | null;
+      submissionId: string | null;
+      createdAt: string;
+    }>;
+    pagination: {
+      page: number;
+      pageSize: number;
+      total: number;
+      totalPages: number;
+      hasPrev: boolean;
+      hasNext: boolean;
+    };
+  }> {
+    const [admin, summary, rows, total] = await Promise.all([
+      this.repository.findAdminUserById(adminId),
+      this.repository.getAdminActivitySummary(adminId),
+      this.repository.listRecentActivityByAdmin(adminId, query.page, query.pageSize),
+      this.repository.countRecentActivityByAdmin(adminId),
+    ]);
+
+    if (!admin) {
+      throw new ServiceError(404, "Admin user not found");
+    }
+
+    const totalPages = Math.max(1, Math.ceil(total / query.pageSize));
+    return {
+      admin,
+      totals: this.mapActivitySummary(summary),
+      recentActivity: rows.map((row) => this.mapActivityRow(row)),
+      pagination: {
+        page: query.page,
+        pageSize: query.pageSize,
+        total,
+        totalPages,
+        hasPrev: query.page > 1,
+        hasNext: query.page < totalPages,
+      },
     };
   }
 
@@ -97,6 +228,79 @@ export class AdminService {
       createdAt: row.created_at,
       proposedScore: numOrNull(row.proposed_score),
       ownerName: row.owner_name,
+    };
+  }
+
+  private mapNeedsAttentionRow(row: AdminNeedsAttentionRow): {
+    submissionId: string;
+    label: string;
+    studentId: string | null;
+    studentName: string | null;
+    title: string;
+    waitingHours: number;
+    missingProofFile: boolean;
+    waitingOver24h: boolean;
+    needsManualScore: boolean;
+    reason: "missing_proof_file" | "waiting_over_24h" | "manual_scoring_needed" | "oldest_pending";
+  } {
+    const waitingHours = Number(row.waiting_hours ?? "0");
+    const waitingOver24h = waitingHours >= 24;
+    let reason: "missing_proof_file" | "waiting_over_24h" | "manual_scoring_needed" | "oldest_pending" =
+      "oldest_pending";
+    if (row.missing_proof_file) {
+      reason = "missing_proof_file";
+    } else if (waitingOver24h) {
+      reason = "waiting_over_24h";
+    } else if (row.needs_manual_score) {
+      reason = "manual_scoring_needed";
+    }
+
+    const identity = row.student_id?.trim() || row.student_name?.trim() || "Student";
+    return {
+      submissionId: row.submission_id,
+      label: `${identity} • ${row.submission_title}`,
+      studentId: row.student_id,
+      studentName: row.student_name,
+      title: row.submission_title,
+      waitingHours,
+      missingProofFile: row.missing_proof_file,
+      waitingOver24h,
+      needsManualScore: row.needs_manual_score,
+      reason,
+    };
+  }
+
+  private mapActivitySummary(row: AdminActivitySummaryRow): {
+    totalActions: number;
+    approvals: number;
+    rejects: number;
+  } {
+    return {
+      totalActions: Number(row.total_actions ?? "0"),
+      approvals: Number(row.approvals ?? "0"),
+      rejects: Number(row.rejects ?? "0"),
+    };
+  }
+
+  private mapActivityRow(row: AdminActivityRow): {
+    id: string;
+    action: "approved" | "rejected" | "edited_score" | "reopened" | "login";
+    adminId: string;
+    adminName: string;
+    adminEmail: string | null;
+    studentId: string | null;
+    submissionId: string | null;
+    createdAt: string;
+  } {
+    return {
+      id: row.activity_id,
+      action: row.action,
+      adminId: row.admin_id,
+      adminName: row.admin_name,
+      adminEmail: row.admin_email,
+      studentId: row.student_id,
+      submissionId: row.submission_id,
+      createdAt: row.created_at,
     };
   }
 

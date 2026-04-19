@@ -5,6 +5,8 @@ import { ServiceError } from "../../utils/service-error";
 import type { AdminService } from "./admin.service";
 import {
   adminApproveBodySchema,
+  adminDashboardAdminParamsSchema,
+  adminDashboardQuerySchema,
   adminRejectBodySchema,
   adminSubmissionIdParamsSchema,
   adminSubmissionsQuerySchema,
@@ -20,6 +22,35 @@ export class AdminController {
     }
     try {
       const data = await this.service.getMetrics();
+      reply.send(success(data));
+    } catch (error) {
+      this.handleError(reply, error);
+    }
+  };
+
+  getDashboard = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!request.user) {
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
+      return;
+    }
+    try {
+      const query = adminDashboardQuerySchema.parse(request.query);
+      const data = await this.service.getDashboard(query);
+      reply.send(success(data));
+    } catch (error) {
+      this.handleError(reply, error);
+    }
+  };
+
+  getAdminActivityProfile = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!request.user) {
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
+      return;
+    }
+    try {
+      const params = adminDashboardAdminParamsSchema.parse(request.params);
+      const query = adminDashboardQuerySchema.parse(request.query);
+      const data = await this.service.getAdminActivityProfile(params.adminId, query);
       reply.send(success(data));
     } catch (error) {
       this.handleError(reply, error);

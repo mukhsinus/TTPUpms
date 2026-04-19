@@ -13,6 +13,13 @@ const JWT_EXPIRY_SKEW_MS = 60_000;
 
 let sessionRedirectInProgress = false;
 let syncSessionRoleInFlight: Promise<void> | null = null;
+let adminDashboardCache:
+  | {
+      key: string;
+      expiresAt: number;
+      data: AdminDashboardPayload;
+    }
+  | null = null;
 
 interface RequestResultOptions {
   /** When true, a 401 does not clear storage or navigate (e.g. login probe before token is stored). */
@@ -81,6 +88,72 @@ export interface AdminDashboardMetrics {
   approvedToday: number;
   rejectedToday: number;
   totalProcessed: number;
+}
+
+export type DashboardQueueHealth = "healthy" | "moderate" | "overloaded";
+
+export interface AdminNeedsAttentionItem {
+  submissionId: string;
+  label: string;
+  studentId: string | null;
+  studentName: string | null;
+  title: string;
+  waitingHours: number;
+  missingProofFile: boolean;
+  waitingOver24h: boolean;
+  needsManualScore: boolean;
+  reason: "missing_proof_file" | "waiting_over_24h" | "manual_scoring_needed" | "oldest_pending";
+}
+
+export interface AdminRecentActivityItem {
+  id: string;
+  action: "approved" | "rejected" | "edited_score" | "reopened" | "login";
+  adminId: string;
+  adminName: string;
+  adminEmail: string | null;
+  studentId: string | null;
+  submissionId: string | null;
+  createdAt: string;
+}
+
+export interface AdminDashboardPayload {
+  pendingCount: number;
+  avgReviewTimeHours: number;
+  oldestPendingHours: number;
+  processed7d: number;
+  queueHealth: DashboardQueueHealth;
+  needsAttention: AdminNeedsAttentionItem[];
+  recentActivity: AdminRecentActivityItem[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+    hasPrev: boolean;
+    hasNext: boolean;
+  };
+}
+
+export interface AdminActivityProfilePayload {
+  admin: {
+    id: string;
+    name: string;
+    email: string | null;
+  };
+  totals: {
+    totalActions: number;
+    approvals: number;
+    rejects: number;
+  };
+  recentActivity: AdminRecentActivityItem[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+    hasPrev: boolean;
+    hasNext: boolean;
+  };
 }
 
 export interface AdminSubmissionDetailPayload {
@@ -358,6 +431,7 @@ export const api = {
     sessionRedirectInProgress = false;
     localStorage.removeItem(AUTH_TOKEN_KEY);
     clearSessionRole();
+    adminDashboardCache = null;
   },
 
   getSessionUser(): SessionUser | null {
@@ -440,6 +514,7 @@ export const api = {
 
     setAuthToken(token);
     setSessionRoleFromServer(me.data.role);
+    adminDashboardCache = null;
   },
 
   async getDashboardStats(): Promise<{
@@ -575,6 +650,41 @@ export const api = {
 
   getAdminMetrics(): Promise<AdminDashboardMetrics> {
     return request<AdminDashboardMetrics>("/api/admin/metrics");
+  },
+
+  getAdminDashboard(params?: { page?: number; pageSize?: number; forceRefresh?: boolean }): Promise<AdminDashboardPayload> {
+    const page = params?.page ?? 1;
+    const pageSize = params?.pageSize ?? 20;
+    const cacheKey = `${page}:${pageSize}`;
+    const now = Date.now();
+    if (!params?.forceRefresh && adminDashboardCache && adminDashboardCache.key === cacheKey && adminDashboardCache.expiresAt > now) {
+      return Promise.resolve(adminDashboardCache.data);
+    }
+    const q = new URLSearchParams({
+      page: String(page),
+      pageSize: String(pageSize),
+    });
+    return request<AdminDashboardPayload>(`/api/admin/dashboard?${q.toString()}`).then((data) => {
+      adminDashboardCache = {
+        key: cacheKey,
+        expiresAt: Date.now() + 10_000,
+        data,
+      };
+      return data;
+    });
+  },
+
+  getAdminActivityProfile(
+    adminId: string,
+    params?: { page?: number; pageSize?: number },
+  ): Promise<AdminActivityProfilePayload> {
+    const page = params?.page ?? 1;
+    const pageSize = params?.pageSize ?? 10;
+    const q = new URLSearchParams({
+      page: String(page),
+      pageSize: String(pageSize),
+    });
+    return request<AdminActivityProfilePayload>(`/api/admin/dashboard/admins/${adminId}?${q.toString()}`);
   },
 
   getAdminSubmissions(params: {

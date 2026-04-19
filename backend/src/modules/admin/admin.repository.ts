@@ -77,6 +77,40 @@ export interface AdminMetricsRow {
   total_processed: string;
 }
 
+export interface AdminDashboardSummaryRow {
+  pending_count: string;
+  avg_review_time_hours: string | null;
+  oldest_pending_hours: string | null;
+  processed_7d: string;
+}
+
+export interface AdminNeedsAttentionRow {
+  submission_id: string;
+  submission_title: string;
+  student_id: string | null;
+  student_name: string | null;
+  waiting_hours: string;
+  missing_proof_file: boolean;
+  needs_manual_score: boolean;
+}
+
+export interface AdminActivityRow {
+  activity_id: string;
+  admin_id: string;
+  admin_name: string;
+  admin_email: string | null;
+  student_id: string | null;
+  submission_id: string | null;
+  action: "approved" | "rejected" | "edited_score" | "reopened" | "login";
+  created_at: string;
+}
+
+export interface AdminActivitySummaryRow {
+  total_actions: string;
+  approvals: string;
+  rejects: string;
+}
+
 export type AdminDbExecutor = FastifyInstance["db"] | PoolClient;
 
 function moderationStatusFilterSql(status: AdminModerationStatus): { clause: string; params: unknown[] } {
@@ -164,6 +198,353 @@ function buildAdminSubmissionFilters(query: AdminSubmissionsQuery): { whereSql: 
 
 export class AdminRepository {
   constructor(private readonly app: FastifyInstance) {}
+
+  async getDashboardSummary(): Promise<AdminDashboardSummaryRow> {
+    const result = await this.app.db.query<AdminDashboardSummaryRow>(
+      `
+      WITH pending AS (
+        SELECT s.created_at
+        FROM public.submissions s
+        WHERE s.status IN ('submitted', 'review', 'needs_revision')
+      )
+      SELECT
+        (SELECT COUNT(*)::text FROM pending) AS pending_count,
+        (
+          SELECT ROUND(AVG(EXTRACT(EPOCH FROM (s.reviewed_at - s.created_at)) / 3600.0)::numeric, 2)::text
+          FROM public.submissions s
+          WHERE s.status IN ('approved', 'rejected')
+            AND s.reviewed_at IS NOT NULL
+        ) AS avg_review_time_hours,
+        (
+          SELECT ROUND(MAX(EXTRACT(EPOCH FROM (NOW() - p.created_at)) / 3600.0)::numeric, 2)::text
+          FROM pending p
+        ) AS oldest_pending_hours,
+        (
+          SELECT COUNT(*)::text
+          FROM public.submissions s
+          WHERE s.status IN ('approved', 'rejected')
+            AND s.reviewed_at >= NOW() - INTERVAL '7 days'
+        ) AS processed_7d
+      `,
+    );
+
+    return (
+      result.rows[0] ?? {
+        pending_count: "0",
+        avg_review_time_hours: "0",
+        oldest_pending_hours: "0",
+        processed_7d: "0",
+      }
+    );
+  }
+
+  async listNeedsAttention(limit = 5): Promise<AdminNeedsAttentionRow[]> {
+    const result = await this.app.db.query<AdminNeedsAttentionRow>(
+      `
+      WITH pending AS (
+        SELECT
+          s.id,
+          s.title,
+          s.user_id,
+          s.created_at,
+          ROUND(EXTRACT(EPOCH FROM (NOW() - s.created_at)) / 3600.0, 2)::text AS waiting_hours,
+          EXISTS (
+            SELECT 1
+            FROM public.submission_items si
+            WHERE si.submission_id = s.id
+              AND (si.proof_file_url IS NULL OR BTRIM(si.proof_file_url) = '')
+          ) AS missing_proof_file,
+          EXISTS (
+            SELECT 1
+            FROM public.submission_items si
+            LEFT JOIN public.categories c ON c.id = si.category_id
+            WHERE si.submission_id = s.id
+              AND (
+                c.type::text IN ('manual', 'expert')
+                OR si.proposed_score IS NULL
+              )
+          ) AS needs_manual_score
+        FROM public.submissions s
+        WHERE s.status IN ('submitted', 'review', 'needs_revision')
+      )
+      SELECT
+        p.id AS submission_id,
+        p.title AS submission_title,
+        u.student_id,
+        COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), '')) AS student_name,
+        p.waiting_hours,
+        p.missing_proof_file,
+        p.needs_manual_score
+      FROM pending p
+      LEFT JOIN public.users u ON u.id = p.user_id
+      ORDER BY
+        p.created_at ASC,
+        p.missing_proof_file DESC,
+        (p.created_at <= NOW() - INTERVAL '24 hours') DESC,
+        p.needs_manual_score DESC
+      LIMIT $1::int
+      `,
+      [limit],
+    );
+    return result.rows;
+  }
+
+  async countRecentActivity(): Promise<number> {
+    const result = await this.app.db.query<{ c: string }>(
+      `
+      WITH base AS (
+        SELECT
+          CASE
+            WHEN al.action = 'admin_moderation_approve' THEN 'approved'
+            WHEN al.action = 'admin_moderation_reject' THEN 'rejected'
+            WHEN al.action = 'admin_override_score' THEN 'edited_score'
+            WHEN al.action = 'admin_override_status'
+              AND COALESCE(al.new_values->>'status', '') IN ('submitted', 'review', 'needs_revision') THEN 'reopened'
+            WHEN al.action = 'admin_override_status'
+              AND COALESCE(al.new_values->>'status', '') = 'approved' THEN 'approved'
+            WHEN al.action = 'admin_override_status'
+              AND COALESCE(al.new_values->>'status', '') = 'rejected' THEN 'rejected'
+            WHEN al.action = 'login' THEN 'login'
+            ELSE NULL
+          END AS action
+        FROM public.audit_logs al
+      )
+      SELECT COUNT(*)::text AS c
+      FROM base
+      WHERE action IS NOT NULL
+      `,
+    );
+    return Number(result.rows[0]?.c ?? "0");
+  }
+
+  async listRecentActivity(page: number, pageSize: number): Promise<AdminActivityRow[]> {
+    const offset = (page - 1) * pageSize;
+    const result = await this.app.db.query<AdminActivityRow>(
+      `
+      WITH base AS (
+        SELECT
+          al.id::text AS activity_id,
+          al.user_id::text AS admin_id,
+          COALESCE(
+            NULLIF(BTRIM(au.student_full_name), ''),
+            NULLIF(BTRIM(au.full_name), ''),
+            NULLIF(BTRIM(au.email), ''),
+            'Admin'
+          ) AS admin_name,
+          au.email::text AS admin_email,
+          su.student_id::text AS student_id,
+          COALESCE(
+            CASE
+              WHEN al.entity_table = 'submissions'
+                AND al.entity_id::text ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+              THEN al.entity_id::text
+              ELSE NULL
+            END,
+            s.id::text
+          ) AS submission_id,
+          CASE
+            WHEN al.action = 'admin_moderation_approve' THEN 'approved'
+            WHEN al.action = 'admin_moderation_reject' THEN 'rejected'
+            WHEN al.action = 'admin_override_score' THEN 'edited_score'
+            WHEN al.action = 'admin_override_status'
+              AND COALESCE(al.new_values->>'status', '') IN ('submitted', 'review', 'needs_revision') THEN 'reopened'
+            WHEN al.action = 'admin_override_status'
+              AND COALESCE(al.new_values->>'status', '') = 'approved' THEN 'approved'
+            WHEN al.action = 'admin_override_status'
+              AND COALESCE(al.new_values->>'status', '') = 'rejected' THEN 'rejected'
+            WHEN al.action = 'login' THEN 'login'
+            ELSE NULL
+          END AS action,
+          al.created_at
+        FROM public.audit_logs al
+        LEFT JOIN public.users au ON au.id = al.user_id
+        LEFT JOIN public.submissions s ON s.id =
+          CASE
+            WHEN al.entity_table = 'submissions'
+              AND al.entity_id::text ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+            THEN al.entity_id::text::uuid
+            ELSE NULL
+          END
+        LEFT JOIN public.users su ON su.id = COALESCE(al.target_user_id, s.user_id)
+      )
+      SELECT
+        activity_id,
+        admin_id,
+        admin_name,
+        admin_email,
+        student_id,
+        submission_id,
+        action,
+        created_at
+      FROM base
+      WHERE action IS NOT NULL
+      ORDER BY created_at DESC
+      LIMIT $1::int OFFSET $2::int
+      `,
+      [pageSize, offset],
+    );
+    return result.rows;
+  }
+
+  async getAdminActivitySummary(adminId: string): Promise<AdminActivitySummaryRow> {
+    const result = await this.app.db.query<AdminActivitySummaryRow>(
+      `
+      WITH base AS (
+        SELECT
+          CASE
+            WHEN al.action = 'admin_moderation_approve' THEN 'approved'
+            WHEN al.action = 'admin_moderation_reject' THEN 'rejected'
+            WHEN al.action = 'admin_override_score' THEN 'edited_score'
+            WHEN al.action = 'admin_override_status'
+              AND COALESCE(al.new_values->>'status', '') IN ('submitted', 'review', 'needs_revision') THEN 'reopened'
+            WHEN al.action = 'admin_override_status'
+              AND COALESCE(al.new_values->>'status', '') = 'approved' THEN 'approved'
+            WHEN al.action = 'admin_override_status'
+              AND COALESCE(al.new_values->>'status', '') = 'rejected' THEN 'rejected'
+            WHEN al.action = 'login' THEN 'login'
+            ELSE NULL
+          END AS action
+        FROM public.audit_logs al
+        WHERE al.user_id = $1::uuid
+      )
+      SELECT
+        COUNT(*)::text AS total_actions,
+        COUNT(*) FILTER (WHERE action = 'approved')::text AS approvals,
+        COUNT(*) FILTER (WHERE action = 'rejected')::text AS rejects
+      FROM base
+      WHERE action IS NOT NULL
+      `,
+      [adminId],
+    );
+    return (
+      result.rows[0] ?? {
+        total_actions: "0",
+        approvals: "0",
+        rejects: "0",
+      }
+    );
+  }
+
+  async findAdminUserById(adminId: string): Promise<{ id: string; email: string | null; name: string } | null> {
+    const result = await this.app.db.query<{ id: string; email: string | null; name: string }>(
+      `
+      SELECT
+        u.id::text AS id,
+        u.email::text AS email,
+        COALESCE(
+          NULLIF(BTRIM(u.student_full_name), ''),
+          NULLIF(BTRIM(u.full_name), ''),
+          NULLIF(BTRIM(u.email), ''),
+          'Admin'
+        ) AS name
+      FROM public.users u
+      WHERE u.id = $1::uuid
+      LIMIT 1
+      `,
+      [adminId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async listRecentActivityByAdmin(adminId: string, page: number, pageSize: number): Promise<AdminActivityRow[]> {
+    const offset = (page - 1) * pageSize;
+    const result = await this.app.db.query<AdminActivityRow>(
+      `
+      WITH base AS (
+        SELECT
+          al.id::text AS activity_id,
+          al.user_id::text AS admin_id,
+          COALESCE(
+            NULLIF(BTRIM(au.student_full_name), ''),
+            NULLIF(BTRIM(au.full_name), ''),
+            NULLIF(BTRIM(au.email), ''),
+            'Admin'
+          ) AS admin_name,
+          au.email::text AS admin_email,
+          su.student_id::text AS student_id,
+          COALESCE(
+            CASE
+              WHEN al.entity_table = 'submissions'
+                AND al.entity_id::text ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+              THEN al.entity_id::text
+              ELSE NULL
+            END,
+            s.id::text
+          ) AS submission_id,
+          CASE
+            WHEN al.action = 'admin_moderation_approve' THEN 'approved'
+            WHEN al.action = 'admin_moderation_reject' THEN 'rejected'
+            WHEN al.action = 'admin_override_score' THEN 'edited_score'
+            WHEN al.action = 'admin_override_status'
+              AND COALESCE(al.new_values->>'status', '') IN ('submitted', 'review', 'needs_revision') THEN 'reopened'
+            WHEN al.action = 'admin_override_status'
+              AND COALESCE(al.new_values->>'status', '') = 'approved' THEN 'approved'
+            WHEN al.action = 'admin_override_status'
+              AND COALESCE(al.new_values->>'status', '') = 'rejected' THEN 'rejected'
+            WHEN al.action = 'login' THEN 'login'
+            ELSE NULL
+          END AS action,
+          al.created_at
+        FROM public.audit_logs al
+        LEFT JOIN public.users au ON au.id = al.user_id
+        LEFT JOIN public.submissions s ON s.id =
+          CASE
+            WHEN al.entity_table = 'submissions'
+              AND al.entity_id::text ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+            THEN al.entity_id::text::uuid
+            ELSE NULL
+          END
+        LEFT JOIN public.users su ON su.id = COALESCE(al.target_user_id, s.user_id)
+        WHERE al.user_id = $1::uuid
+      )
+      SELECT
+        activity_id,
+        admin_id,
+        admin_name,
+        admin_email,
+        student_id,
+        submission_id,
+        action,
+        created_at
+      FROM base
+      WHERE action IS NOT NULL
+      ORDER BY created_at DESC
+      LIMIT $2::int OFFSET $3::int
+      `,
+      [adminId, pageSize, offset],
+    );
+    return result.rows;
+  }
+
+  async countRecentActivityByAdmin(adminId: string): Promise<number> {
+    const result = await this.app.db.query<{ c: string }>(
+      `
+      WITH base AS (
+        SELECT
+          CASE
+            WHEN al.action = 'admin_moderation_approve' THEN 'approved'
+            WHEN al.action = 'admin_moderation_reject' THEN 'rejected'
+            WHEN al.action = 'admin_override_score' THEN 'edited_score'
+            WHEN al.action = 'admin_override_status'
+              AND COALESCE(al.new_values->>'status', '') IN ('submitted', 'review', 'needs_revision') THEN 'reopened'
+            WHEN al.action = 'admin_override_status'
+              AND COALESCE(al.new_values->>'status', '') = 'approved' THEN 'approved'
+            WHEN al.action = 'admin_override_status'
+              AND COALESCE(al.new_values->>'status', '') = 'rejected' THEN 'rejected'
+            WHEN al.action = 'login' THEN 'login'
+            ELSE NULL
+          END AS action
+        FROM public.audit_logs al
+        WHERE al.user_id = $1::uuid
+      )
+      SELECT COUNT(*)::text AS c
+      FROM base
+      WHERE action IS NOT NULL
+      `,
+      [adminId],
+    );
+    return Number(result.rows[0]?.c ?? "0");
+  }
 
   async getMetrics(): Promise<AdminMetricsRow> {
     const result = await this.app.db.query<AdminMetricsRow>(
