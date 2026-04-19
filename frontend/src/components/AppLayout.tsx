@@ -1,8 +1,9 @@
 import { BarChart3, ClipboardList, LayoutDashboard, LogOut, Search, ShieldCheck, X } from "lucide-react";
-import { useMemo, useState, type PropsWithChildren, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useState, type PropsWithChildren, type ReactElement } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { api } from "../lib/api";
 import { canAccessReviewerRoutes, normalizeRole } from "../lib/rbac";
+import { useSidebarDrawer } from "../hooks/useSidebarDrawer";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
@@ -19,6 +20,19 @@ export function AppLayout({ children, onLogout }: AppLayoutProps): ReactElement 
   const role = normalizeRole(user?.role ?? "student");
   const canAccessReviewerFeatures = canAccessReviewerRoutes(user);
 
+  const closeDrawer = useCallback(() => setSidebarOpen(false), []);
+  const drawer = useSidebarDrawer(sidebarOpen, closeDrawer);
+
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!drawer.isMobileDrawer) {
+      setSidebarOpen(false);
+    }
+  }, [drawer.isMobileDrawer]);
+
   const brandTitle = role === "reviewer" ? "PMS Reviewer" : "Student Portal";
   const brandSubtitle = role === "student" ? "My achievements" : "Review & analytics";
 
@@ -32,33 +46,60 @@ export function AppLayout({ children, onLogout }: AppLayoutProps): ReactElement 
     return "Dashboard";
   }, [location.pathname]);
 
+  const navClose = drawer.isMobileDrawer ? closeDrawer : undefined;
+
   return (
     <div className="dashboard-shell">
-      <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}>
+      {drawer.isMobileDrawer ? (
+        <button
+          type="button"
+          className={`sidebar-drawer-backdrop${sidebarOpen ? " sidebar-drawer-backdrop--open" : ""}`}
+          aria-label="Close navigation menu"
+          tabIndex={-1}
+          onClick={closeDrawer}
+        />
+      ) : null}
+      <aside
+        ref={drawer.asideRef}
+        className={`sidebar${sidebarOpen ? " sidebar-open" : ""}`}
+        aria-hidden={drawer.isMobileDrawer ? !sidebarOpen : undefined}
+        aria-modal={drawer.isMobileDrawer && sidebarOpen ? true : undefined}
+        role={drawer.isMobileDrawer && sidebarOpen ? "dialog" : undefined}
+        aria-label={drawer.isMobileDrawer && sidebarOpen ? "Main navigation" : undefined}
+        inert={drawer.isMobileDrawer && !sidebarOpen ? true : undefined}
+        {...(drawer.isMobileDrawer ? drawer.touchHandlers : {})}
+      >
         <div className="sidebar-brand">
-          <div className="brand-logo">TTPU</div>
-          <div>
-            <strong>{brandTitle}</strong>
-            <p>{brandSubtitle}</p>
+          <div className="sidebar-brand-text">
+            <div className="brand-logo">TTPU</div>
+            <div>
+              <strong>{brandTitle}</strong>
+              <p>{brandSubtitle}</p>
+            </div>
           </div>
+          {drawer.isMobileDrawer ? (
+            <button type="button" className="sidebar-drawer-close" aria-label="Close menu" onClick={closeDrawer}>
+              <X size={20} strokeWidth={2.25} />
+            </button>
+          ) : null}
         </div>
-        <nav className="sidebar-nav">
-          <NavLink to="/dashboard" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+        <nav id="app-sidebar-nav" className="sidebar-nav">
+          <NavLink to="/dashboard" onClick={navClose} className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             <LayoutDashboard size={16} />
             Dashboard
           </NavLink>
-          <NavLink to="/submissions" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+          <NavLink to="/submissions" onClick={navClose} className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             <ClipboardList size={16} />
             Submissions
           </NavLink>
           {canAccessReviewerFeatures ? (
-            <NavLink to="/reviews" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+            <NavLink to="/reviews" onClick={navClose} className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
               <ShieldCheck size={16} />
               Reviews
             </NavLink>
           ) : null}
           {canAccessReviewerFeatures ? (
-            <NavLink to="/analytics" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+            <NavLink to="/analytics" onClick={navClose} className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
               <BarChart3 size={16} />
               Analytics
             </NavLink>
@@ -67,7 +108,15 @@ export function AppLayout({ children, onLogout }: AppLayoutProps): ReactElement 
         <div className="sidebar-user">
           <p className="user-name">{user?.fullName ?? user?.email ?? "User"}</p>
           <p className="user-role">{role}</p>
-          <Button type="button" variant="ghost" className="logout-button" onClick={onLogout}>
+          <Button
+            type="button"
+            variant="ghost"
+            className="logout-button"
+            onClick={() => {
+              navClose?.();
+              onLogout();
+            }}
+          >
             <LogOut size={16} />
             Logout
           </Button>
@@ -81,6 +130,8 @@ export function AppLayout({ children, onLogout }: AppLayoutProps): ReactElement 
               type="button"
               variant="ghost"
               className="mobile-menu-button"
+              aria-expanded={drawer.isMobileDrawer ? sidebarOpen : undefined}
+              aria-controls={drawer.isMobileDrawer ? "app-sidebar-nav" : undefined}
               onClick={() => setSidebarOpen((value) => !value)}
             >
               {sidebarOpen ? <X size={18} /> : <LayoutDashboard size={18} />}
