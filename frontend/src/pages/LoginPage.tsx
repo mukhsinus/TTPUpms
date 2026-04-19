@@ -1,22 +1,49 @@
-import { useEffect, useState, type FormEvent, type ReactElement } from "react";
+import { Eye, EyeOff } from "lucide-react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactElement } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, ApiError } from "../lib/api";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Input } from "../components/ui/Input";
 import { validateSupabaseEnvForUi } from "../lib/supabase-env";
+import { useToast } from "../contexts/ToastContext";
+
+type AuthTab = "login" | "register";
+
+const PASSWORD_MIN_LENGTH = 10;
 
 export function LoginPage(): ReactElement {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<AuthTab>("login");
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [registerName, setRegisterName] = useState("");
+  const [registerEmail, setRegisterEmail] = useState("");
+  const [registerPassword, setRegisterPassword] = useState("");
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [showRegisterPassword, setShowRegisterPassword] = useState(false);
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [registerLoading, setRegisterLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const supabaseEnv = validateSupabaseEnvForUi();
+  const toast = useToast();
 
   const adminPanelLogin =
     searchParams.get("panel") === "admin" || searchParams.get("source") === "admin_panel";
+  const emailPattern = useMemo(() => /^[^\s@]+@[^\s@]+\.[^\s@]+$/, []);
+
+  const loginValid = useMemo(
+    () => emailPattern.test(loginEmail.trim()) && loginPassword.length >= PASSWORD_MIN_LENGTH,
+    [emailPattern, loginEmail, loginPassword],
+  );
+  const registerValid = useMemo(
+    () =>
+      registerName.trim().length >= 2 &&
+      emailPattern.test(registerEmail.trim()) &&
+      registerPassword.length >= PASSWORD_MIN_LENGTH,
+    [emailPattern, registerEmail, registerName, registerPassword],
+  );
 
   useEffect(() => {
     if (api.isSessionValid()) {
@@ -24,30 +51,60 @@ export function LoginPage(): ReactElement {
     }
   }, [navigate]);
 
-  const onSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+  const onLoginSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
     setError(null);
 
     try {
-      setLoading(true);
-      if (import.meta.env.DEV) {
-        console.log("[upms:auth] login submit", { email: `${email.slice(0, 2)}***` });
-      }
-      await api.loginWithCredentials(email, password, adminPanelLogin ? { authSource: "admin_panel" } : undefined);
+      setLoginLoading(true);
+      await api.loginWithCredentials(
+        loginEmail.trim(),
+        loginPassword,
+        adminPanelLogin ? { authSource: "admin_panel" } : undefined,
+      );
+      toast.success("Welcome back.");
       navigate("/dashboard", { replace: true });
     } catch (err) {
-      if (import.meta.env.DEV) {
-        console.error("[upms:auth] login failed", err);
-      }
       const message =
         err instanceof ApiError
           ? err.message
           : err instanceof Error
             ? err.message
-            : "Login failed";
+            : "Invalid credentials";
       setError(message);
+      toast.error(message);
     } finally {
-      setLoading(false);
+      setLoginLoading(false);
+    }
+  };
+
+  const onRegisterSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault();
+    setError(null);
+
+    try {
+      setRegisterLoading(true);
+      await api.registerAdminAccount({
+        fullName: registerName,
+        email: registerEmail,
+        password: registerPassword,
+      });
+      toast.success("Account created successfully. You can now sign in.");
+      setActiveTab("login");
+      setLoginEmail(registerEmail.trim());
+      setLoginPassword("");
+      setRegisterPassword("");
+    } catch (err) {
+      const message =
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Account creation failed";
+      setError(message);
+      toast.error(message);
+    } finally {
+      setRegisterLoading(false);
     }
   };
 
@@ -66,31 +123,131 @@ export function LoginPage(): ReactElement {
             ? "Admin panel — only allowlisted operator accounts can access moderation."
             : "Sign in with your university account"}
         </p>
-        <form className="auth-form" onSubmit={(event) => void onSubmit(event)}>
-          <label>
-            <span>Email</span>
-            <Input
-              type="email"
-              placeholder="name@university.edu"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              required
-            />
-          </label>
-          <label>
-            <span>Password</span>
-            <Input
-              type="password"
-              placeholder="••••••••"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-            />
-          </label>
-          <Button type="submit" disabled={loading}>
-            {loading ? "Signing in..." : "Login"}
-          </Button>
-        </form>
+        <div className="auth-tabs" role="tablist" aria-label="Authentication mode">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "login"}
+            className={`auth-tab-btn ${activeTab === "login" ? "active" : ""}`.trim()}
+            onClick={() => {
+              setActiveTab("login");
+              setError(null);
+            }}
+          >
+            Login
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "register"}
+            className={`auth-tab-btn ${activeTab === "register" ? "active" : ""}`.trim()}
+            onClick={() => {
+              setActiveTab("register");
+              setError(null);
+            }}
+          >
+            Register
+          </button>
+        </div>
+        <div className={`auth-panel auth-panel-${activeTab}`}>
+          {activeTab === "login" ? (
+            <form className="auth-form" onSubmit={(event) => void onLoginSubmit(event)}>
+              <label>
+                <span>Email</span>
+                <Input
+                  type="email"
+                  placeholder="name@university.edu"
+                  value={loginEmail}
+                  onChange={(event) => setLoginEmail(event.target.value)}
+                  required
+                />
+              </label>
+              <label>
+                <span>Password</span>
+                <div className="auth-password-wrap">
+                  <input
+                    className="ui-input auth-password-input"
+                    type={showLoginPassword ? "text" : "password"}
+                    placeholder="••••••••••"
+                    value={loginPassword}
+                    onChange={(event) => setLoginPassword(event.target.value)}
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="auth-password-toggle"
+                    onClick={() => setShowLoginPassword((prev) => !prev)}
+                    aria-label={showLoginPassword ? "Hide password" : "Show password"}
+                  >
+                    {showLoginPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </label>
+              <Button type="submit" disabled={loginLoading || !loginValid}>
+                {loginLoading ? "Signing in..." : "Sign In"}
+              </Button>
+              <p className="auth-switch-note">
+                Need an account?{" "}
+                <button type="button" onClick={() => setActiveTab("register")}>
+                  Register
+                </button>
+              </p>
+            </form>
+          ) : (
+            <form className="auth-form" onSubmit={(event) => void onRegisterSubmit(event)}>
+              <label>
+                <span>Full Name</span>
+                <Input
+                  type="text"
+                  placeholder="Mukhsin Kamolov"
+                  value={registerName}
+                  onChange={(event) => setRegisterName(event.target.value)}
+                  required
+                />
+              </label>
+              <label>
+                <span>Email</span>
+                <Input
+                  type="email"
+                  placeholder="name@university.edu"
+                  value={registerEmail}
+                  onChange={(event) => setRegisterEmail(event.target.value)}
+                  required
+                />
+              </label>
+              <label>
+                <span>Password</span>
+                <div className="auth-password-wrap">
+                  <input
+                    className="ui-input auth-password-input"
+                    type={showRegisterPassword ? "text" : "password"}
+                    placeholder="Minimum 10 characters"
+                    value={registerPassword}
+                    onChange={(event) => setRegisterPassword(event.target.value)}
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="auth-password-toggle"
+                    onClick={() => setShowRegisterPassword((prev) => !prev)}
+                    aria-label={showRegisterPassword ? "Hide password" : "Show password"}
+                  >
+                    {showRegisterPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </label>
+              <Button type="submit" disabled={registerLoading || !registerValid}>
+                {registerLoading ? "Creating account..." : "Create Account"}
+              </Button>
+              <p className="auth-switch-note">
+                Already have account?{" "}
+                <button type="button" onClick={() => setActiveTab("login")}>
+                  Login
+                </button>
+              </p>
+            </form>
+          )}
+        </div>
         {error ? <p className="error">{error}</p> : null}
         {!supabaseEnv.ok ? (
           <p className="muted">

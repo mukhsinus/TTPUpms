@@ -817,6 +817,29 @@ export const api = {
     adminSubmissionDetailCache.clear();
   },
 
+  async registerAdminAccount(input: {
+    fullName: string;
+    email: string;
+    password: string;
+  }): Promise<void> {
+    const result = await requestResult<{ ok: boolean }>(
+      "/api/auth/register",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          full_name: input.fullName.trim(),
+          email: input.email.trim().toLowerCase(),
+          password: input.password,
+        }),
+      },
+      undefined,
+      { skipUnauthorizedRedirect: true },
+    );
+    if (result.error) {
+      throw new ApiError(result.error, result.statusCode);
+    }
+  },
+
   async getDashboardStats(): Promise<{
     totalSubmissions: number;
     pendingReview: number;
