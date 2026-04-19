@@ -99,23 +99,23 @@ export function ProfilePage(): ReactElement {
   }, [load]);
 
   const permissionRows = useMemo(() => {
-    const permissions = payload?.permissions;
-    if (!permissions) {
+    if (!payload) {
       return [];
     }
-    return [
-      { label: "Approve submissions", enabled: permissions.approveSubmissions },
-      { label: "Reject submissions", enabled: permissions.rejectSubmissions },
-      { label: "Export CSV", enabled: permissions.exportCsv },
-      ...(permissions.manageAdmins
-        ? [
-            { label: "Manage admins", enabled: true },
-            { label: "View audit logs", enabled: true },
-            { label: "Security approvals", enabled: true },
-          ]
-        : []),
+    const base = [
+      { label: "Approve submissions", enabled: true },
+      { label: "Reject submissions", enabled: true },
+      { label: "Export CSV", enabled: true },
     ];
-  }, [payload?.permissions]);
+    return payload.identity.role === "superadmin"
+      ? [
+          ...base,
+          { label: "Manage admins", enabled: true },
+          { label: "View audit logs", enabled: true },
+          { label: "Security approvals", enabled: true },
+        ]
+      : base;
+  }, [payload]);
 
   const emailChanged = useMemo(() => {
     const current = payload?.identity.email?.trim().toLowerCase() ?? "";
