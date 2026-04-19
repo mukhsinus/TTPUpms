@@ -1,7 +1,10 @@
+import type { TFunction } from "i18next";
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { ShieldCheck, UserCircle2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { api, type AdminProfilePayload } from "../lib/api";
+import i18nInstance from "../i18n";
 import { useToast } from "../contexts/ToastContext";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -11,52 +14,60 @@ import { TableSkeleton } from "../components/ui/PageSkeletons";
 
 const PAGE_SIZE = 5;
 
-function formatDateTime(value: string | null | undefined): string {
-  if (!value) {
-    return "—";
+type ProfT = TFunction<"profile">;
+
+const PERMISSION_KEYS_BASE = ["approveSubmissions", "rejectSubmissions", "exportCsv"] as const;
+const PERMISSION_KEYS_SUPER = [
+  ...PERMISSION_KEYS_BASE,
+  "manageAdmins",
+  "viewAuditLogs",
+  "securityApprovals",
+] as const;
+
+function formatJoinDate(iso: string | null | undefined, lang: string, emDash: string): string {
+  if (!iso) {
+    return emDash;
   }
-  const date = new Date(value);
+  const date = new Date(iso);
   if (Number.isNaN(date.getTime())) {
-    return "—";
+    return emDash;
   }
-  const hh = String(date.getHours()).padStart(2, "0");
-  const mm = String(date.getMinutes()).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  const mo = String(date.getMonth() + 1).padStart(2, "0");
-  const yyyy = date.getFullYear();
-  return `${hh}:${mm} ${dd}/${mo}/${yyyy}`;
+  const base = lang.split("-")[0] ?? "en";
+  if (base === "ru") {
+    return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", year: "numeric" }).format(date);
+  }
+  if (base === "uz") {
+    return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" }).format(date);
+  }
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(date);
 }
 
-function relativeTime(value: string): string {
+function relativeTime(value: string, t: ProfT): string {
   const deltaMs = Date.now() - new Date(value).getTime();
-  if (deltaMs < 60_000) return "just now";
+  if (deltaMs < 60_000) return t("justNow");
   const min = Math.floor(deltaMs / 60_000);
-  if (min < 60) return `${min} min ago`;
+  if (min < 60) return t("minutesAgo", { count: min });
   const hours = Math.floor(min / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return t("hoursAgo", { count: hours });
   const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+  return t("daysAgo", { count: days });
 }
 
-function actionLabel(action: AdminProfilePayload["recentActions"][number]["action"]): string {
-  if (action === "approved") return "Approved";
-  if (action === "rejected") return "Rejected";
-  if (action === "edited_score") return "Edited score";
-  if (action === "reopened") return "Reopened";
-  return "Login";
+function actionLabel(action: AdminProfilePayload["recentActions"][number]["action"], t: ProfT): string {
+  if (action === "approved") return t("actionApproved");
+  if (action === "rejected") return t("actionRejected");
+  if (action === "edited_score") return t("actionEditedScore");
+  if (action === "reopened") return t("actionReopened");
+  return t("actionLogin");
 }
 
-function deviceFromUserAgent(userAgent: string | null | undefined): string {
-  const text = userAgent?.trim();
-  if (!text) return "Browser";
-  if (text.includes("Mac OS")) return "Mac";
-  if (text.includes("Windows")) return "Windows";
-  if (text.includes("iPhone") || text.includes("iPad")) return "iPhone";
-  if (text.includes("Android")) return "Android";
-  return "Browser";
+function roleLabel(role: string, t: ProfT): string {
+  const key = `role_${role}` as const;
+  return t(key, { defaultValue: role });
 }
 
 export function ProfilePage(): ReactElement {
+  const { t, i18n } = useTranslation("profile");
   const navigate = useNavigate();
   const toast = useToast();
   const [loading, setLoading] = useState(true);
@@ -88,7 +99,7 @@ export function ProfilePage(): ReactElement {
         currentPasswordForEmail: "",
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load profile.");
+      setError(err instanceof Error ? err.message : i18nInstance.t("errorLoad", { ns: "profile" }));
     } finally {
       setLoading(false);
     }
@@ -98,23 +109,11 @@ export function ProfilePage(): ReactElement {
     void load(false);
   }, [load]);
 
-  const permissionRows = useMemo(() => {
+  const permissionKeys = useMemo(() => {
     if (!payload) {
       return [];
     }
-    const base = [
-      { label: "Approve submissions", enabled: true },
-      { label: "Reject submissions", enabled: true },
-      { label: "Export CSV", enabled: true },
-    ];
-    return payload.identity.role === "superadmin"
-      ? [
-          ...base,
-          { label: "Manage admins", enabled: true },
-          { label: "View audit logs", enabled: true },
-          { label: "Security approvals", enabled: true },
-        ]
-      : base;
+    return payload.identity.role === "superadmin" ? [...PERMISSION_KEYS_SUPER] : [...PERMISSION_KEYS_BASE];
   }, [payload]);
 
   const emailChanged = useMemo(() => {
@@ -131,12 +130,15 @@ export function ProfilePage(): ReactElement {
 
   const emailValid = useMemo(() => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identityForm.email.trim()), [identityForm.email]);
 
-  const canSaveIdentity = dirty && emailValid && (!emailChanged || identityForm.currentPasswordForEmail.trim().length > 0) && !saveBusy;
+  const canSaveIdentity =
+    dirty && emailValid && (!emailChanged || identityForm.currentPasswordForEmail.trim().length > 0) && !saveBusy;
+
+  const em = t("emDash");
 
   if (loading && !payload) {
     return (
-      <section className="dashboard-stack">
-        <Card title="Profile" subtitle="Your operator account">
+      <section className="dashboard-stack profile-page">
+        <Card title={t("title")} subtitle={t("subtitle")}>
           <TableSkeleton rows={8} cols={2} />
         </Card>
       </section>
@@ -145,9 +147,13 @@ export function ProfilePage(): ReactElement {
 
   if (error && !payload) {
     return (
-      <section className="dashboard-stack">
-        <Card title="Profile" subtitle="Your operator account">
-          <EmptyState tone="danger" title="Could not load profile" description={error} />
+      <section className="dashboard-stack profile-page">
+        <Card title={t("title")} subtitle={t("subtitle")}>
+          <EmptyState tone="danger" title={t("couldNotLoadProfile")} description={error}>
+            <Button type="button" variant="primary" onClick={() => void load(false)}>
+              {t("retry")}
+            </Button>
+          </EmptyState>
         </Card>
       </section>
     );
@@ -155,9 +161,13 @@ export function ProfilePage(): ReactElement {
 
   if (!payload) {
     return (
-      <section className="dashboard-stack">
-        <Card title="Profile" subtitle="Your operator account">
-          <EmptyState tone="danger" title="Profile not available" description="Try refreshing the page." />
+      <section className="dashboard-stack profile-page">
+        <Card title={t("title")} subtitle={t("subtitle")}>
+          <EmptyState tone="danger" title={t("profileUnavailableTitle")} description={t("profileUnavailableSubtitle")}>
+            <Button type="button" variant="primary" onClick={() => void load(false)}>
+              {t("retry")}
+            </Button>
+          </EmptyState>
         </Card>
       </section>
     );
@@ -165,48 +175,67 @@ export function ProfilePage(): ReactElement {
 
   return (
     <section className="dashboard-stack profile-page">
-      <Card title="Profile" subtitle="Your operator account">
-        {error ? <p className="error">{error}</p> : null}
+      <Card title={t("title")} subtitle={t("subtitle")}>
+        {error ? (
+          <div className="profile-inline-error">
+            <p className="error">{error}</p>
+            <Button type="button" variant="secondary" onClick={() => void load(true)}>
+              {t("retry")}
+            </Button>
+          </div>
+        ) : null}
       </Card>
 
       <div className="profile-top-grid">
-        <Card title="Identity">
+        <Card title={t("identity")}>
           <div className="profile-identity">
             <label className="item-review-field">
-              <span>Full Name</span>
+              <span>{t("fullName")}</span>
               <Input
                 value={identityForm.fullName}
                 onChange={(e) => setIdentityForm((prev) => ({ ...prev, fullName: e.target.value }))}
-                placeholder="Enter full name (optional)"
+                placeholder={t("placeholderFullName")}
+                aria-label={t("fullName")}
               />
             </label>
             <label className="item-review-field">
-              <span>Email</span>
+              <span>{t("email")}</span>
               <Input
                 value={identityForm.email}
                 onChange={(e) => setIdentityForm((prev) => ({ ...prev, email: e.target.value }))}
-                placeholder="name@example.com"
+                placeholder={t("placeholderEmail")}
+                aria-label={t("email")}
               />
             </label>
-            {!emailValid ? <p className="error">Enter a valid email address.</p> : null}
+            {!emailValid ? <p className="error">{t("emailInvalid")}</p> : null}
             {emailChanged ? (
               <label className="item-review-field">
-                <span>Current Password (required for email change)</span>
+                <span>{t("currentPasswordForEmail")}</span>
                 <Input
                   type="password"
                   value={identityForm.currentPasswordForEmail}
                   onChange={(e) => setIdentityForm((prev) => ({ ...prev, currentPasswordForEmail: e.target.value }))}
-                  placeholder="Confirm with current password"
+                  placeholder={t("placeholderConfirmEmailPassword")}
+                  autoComplete="current-password"
                 />
               </label>
             ) : null}
             <div className="profile-kv">
-              <span>Role</span>
-              <strong className="status-chip status-chip-resolved">{payload.identity.role}</strong>
+              <span>{t("role")}</span>
+              <strong className="status-chip status-chip-resolved">{roleLabel(payload.identity.role, t)}</strong>
             </div>
-            <div className="profile-kv"><span>Internal ID</span><strong>{payload.identity.adminCode}</strong></div>
-            <div className="profile-kv"><span>Joined</span><strong>{formatDateTime(payload.identity.joinedAt)}</strong></div>
-            <div className="profile-kv"><span>Last login</span><strong>{formatDateTime(payload.identity.lastLoginAt)}</strong></div>
+            <div className="profile-kv">
+              <span>{t("internalId")}</span>
+              <strong>{payload.identity.adminCode}</strong>
+            </div>
+            <div className="profile-kv">
+              <span>{t("joined")}</span>
+              <strong>{formatJoinDate(payload.identity.joinedAt, i18n.language, em)}</strong>
+            </div>
+            <div className="profile-kv">
+              <span>{t("lastLogin")}</span>
+              <strong>{formatJoinDate(payload.identity.lastLoginAt, i18n.language, em)}</strong>
+            </div>
             <div className="profile-security-actions">
               <Button
                 type="button"
@@ -222,9 +251,9 @@ export function ProfilePage(): ReactElement {
                       currentPassword: identityForm.currentPasswordForEmail,
                     });
                     await load(true);
-                    toast.success("Profile updated successfully");
+                    toast.success(t("savedSuccess"));
                   } catch (err) {
-                    const msg = err instanceof Error ? err.message : "Failed to update profile";
+                    const msg = err instanceof Error ? err.message : t("saveError");
                     setError(msg);
                     toast.error(msg);
                   } finally {
@@ -232,7 +261,7 @@ export function ProfilePage(): ReactElement {
                   }
                 }}
               >
-                {saveBusy ? "Saving..." : "Save Changes"}
+                {saveBusy ? t("saving") : t("saveChanges")}
               </Button>
               {dirty ? (
                 <Button
@@ -246,51 +275,68 @@ export function ProfilePage(): ReactElement {
                     })
                   }
                 >
-                  Cancel
+                  {t("cancel")}
                 </Button>
               ) : null}
             </div>
           </div>
         </Card>
 
-        <Card title="Security">
+        <Card title={t("security")}>
           <div className="profile-security-stack">
             <div className="profile-kv">
-              <span>Password</span>
-              <strong>••••••••••••</strong>
+              <span>{t("password")}</span>
+              <strong>{t("passwordMasked")}</strong>
             </div>
             <Button type="button" variant="primary" onClick={() => setShowPasswordModal(true)}>
-              Change Password
+              {t("changePassword")}
             </Button>
           </div>
         </Card>
       </div>
 
       <div className="profile-top-grid">
-        <Card title="Permissions">
+        <Card title={t("permissions")}>
           <div className="profile-permissions">
-            {permissionRows.map((row) => (
-              <div className="profile-permission-row" key={row.label}>
-                <span>{row.enabled ? "✅" : "❌"}</span>
-                <span>{row.label}</span>
+            {permissionKeys.map((key) => (
+              <div className="profile-permission-row" key={key}>
+                <span aria-label={t("yesMark")}>✅</span>
+                <span>{t(key)}</span>
               </div>
             ))}
           </div>
         </Card>
       </div>
 
-      <Card title="Performance Stats">
+      <Card title={t("performanceStats")}>
         <div className="profile-stats-grid">
-          <div className="profile-stat-card"><span>Approvals</span><strong>{payload.stats.approvals}</strong></div>
-          <div className="profile-stat-card"><span>Rejects</span><strong>{payload.stats.rejects}</strong></div>
-          <div className="profile-stat-card"><span>Avg Review</span><strong>{Math.round(payload.stats.avgReviewMinutes)}m</strong></div>
-          <div className="profile-stat-card"><span>Actions (7d)</span><strong>{payload.stats.actions7d}</strong></div>
+          <div className="profile-stat-card">
+            <span>{t("approvals")}</span>
+            <strong>{payload.stats.approvals}</strong>
+          </div>
+          <div className="profile-stat-card">
+            <span>{t("rejects")}</span>
+            <strong>{payload.stats.rejects}</strong>
+          </div>
+          <div className="profile-stat-card">
+            <span>{t("avgReview")}</span>
+            <strong>{t("avgReviewMinutes", { count: Math.round(payload.stats.avgReviewMinutes) })}</strong>
+          </div>
+          <div className="profile-stat-card">
+            <span>{t("actions7d")}</span>
+            <strong>{payload.stats.actions7d}</strong>
+          </div>
         </div>
       </Card>
 
-      <Card title="Recent Actions">
+      <Card title={t("recentActions")}>
         {payload.recentActions.length === 0 ? (
-          <EmptyState icon={UserCircle2} tone="muted" title="No recent actions yet." description="No recent actions yet." />
+          <EmptyState
+            icon={UserCircle2}
+            tone="muted"
+            title={t("noRecentActions")}
+            description={t("noRecentActionsSubtitle")}
+          />
         ) : (
           <div className="profile-activity-list">
             {payload.recentActions.slice(0, 5).map((row) => (
@@ -301,11 +347,11 @@ export function ProfilePage(): ReactElement {
                 onClick={() => row.submissionId && navigate(`/submissions/${row.submissionId}`)}
               >
                 <div>
-                  <strong>{actionLabel(row.action)}</strong>{" "}
-                  {row.studentId ? <span className="muted">Student {row.studentId}</span> : null}
+                  <strong>{actionLabel(row.action, t)}</strong>{" "}
+                  {row.studentId ? <span className="muted">{t("studentWithId", { id: row.studentId })}</span> : null}
                   {row.submissionTitle ? <span className="muted"> — {row.submissionTitle}</span> : null}
                 </div>
-                <span className="muted">{relativeTime(row.createdAt)}</span>
+                <span className="muted">{relativeTime(row.createdAt, t)}</span>
               </button>
             ))}
           </div>
@@ -313,39 +359,42 @@ export function ProfilePage(): ReactElement {
       </Card>
       {showPasswordModal ? (
         <div className="modal-backdrop" role="presentation" onClick={() => !pwdBusy && setShowPasswordModal(false)}>
-          <div className="modal-panel" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-            <h3>Change Password</h3>
+          <div className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="profile-pwd-title" onClick={(e) => e.stopPropagation()}>
+            <h3 id="profile-pwd-title">{t("modalChangePasswordTitle")}</h3>
             <label className="item-review-field">
-              <span>Current Password</span>
+              <span>{t("currentPassword")}</span>
               <Input
                 type="password"
                 value={passwordForm.currentPassword}
                 onChange={(e) => setPasswordForm((prev) => ({ ...prev, currentPassword: e.target.value }))}
+                autoComplete="current-password"
               />
             </label>
             <label className="item-review-field">
-              <span>New Password</span>
+              <span>{t("newPassword")}</span>
               <Input
                 type="password"
                 value={passwordForm.newPassword}
                 onChange={(e) => setPasswordForm((prev) => ({ ...prev, newPassword: e.target.value }))}
+                autoComplete="new-password"
               />
             </label>
             <label className="item-review-field">
-              <span>Confirm Password</span>
+              <span>{t("confirmPassword")}</span>
               <Input
                 type="password"
                 value={passwordForm.confirmPassword}
                 onChange={(e) => setPasswordForm((prev) => ({ ...prev, confirmPassword: e.target.value }))}
+                autoComplete="new-password"
               />
             </label>
             <div className="profile-security-line muted">
-              <ShieldCheck size={14} />
-              <span>Use at least 10 characters with mixed letters, numbers, and symbols.</span>
+              <ShieldCheck size={14} aria-hidden />
+              <span>{t("passwordHintLine")}</span>
             </div>
-            <div className="modal-actions">
+            <div className="modal-actions profile-modal-actions">
               <Button type="button" variant="ghost" disabled={pwdBusy} onClick={() => setShowPasswordModal(false)}>
-                Cancel
+                {t("cancel")}
               </Button>
               <Button
                 type="button"
@@ -354,11 +403,11 @@ export function ProfilePage(): ReactElement {
                 onClick={async () => {
                   const strong = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{10,}$/.test(passwordForm.newPassword);
                   if (!strong) {
-                    toast.error("New password is too weak.");
+                    toast.error(t("passwordTooWeak"));
                     return;
                   }
                   if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-                    toast.error("Password confirmation does not match.");
+                    toast.error(t("passwordMismatch"));
                     return;
                   }
                   try {
@@ -370,15 +419,15 @@ export function ProfilePage(): ReactElement {
                     });
                     setShowPasswordModal(false);
                     setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
-                    toast.success("Password updated successfully");
+                    toast.success(t("passwordUpdated"));
                   } catch (err) {
-                    toast.error(err instanceof Error ? err.message : "Failed to update password");
+                    toast.error(err instanceof Error ? err.message : t("passwordUpdateFailed"));
                   } finally {
                     setPwdBusy(false);
                   }
                 }}
               >
-                {pwdBusy ? "Updating..." : "Update Password"}
+                {pwdBusy ? t("updating") : t("updatePassword")}
               </Button>
             </div>
           </div>
