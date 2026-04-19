@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import {
   AlertCircle,
@@ -13,7 +14,9 @@ import {
   TrendingUp,
   XCircle,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import i18nInstance from "../i18n";
 import { api, type AdminDashboardPayload, type AdminRecentActivityItem, type SuperadminDashboardPayload } from "../lib/api";
 import { isAdminPanelRole, normalizeRole } from "../lib/rbac";
 import { useToast } from "../contexts/ToastContext";
@@ -26,28 +29,30 @@ import { Table } from "../components/ui/Table";
 
 const AdminActivityDrawer = lazy(async () => import("../components/admin/AdminActivityDrawer"));
 
-function formatRelativeTime(value: string): string {
+type DashT = TFunction<"dashboard">;
+
+function formatRelativeTime(value: string, t: DashT): string {
   const ms = Date.now() - new Date(value).getTime();
   const min = Math.floor(ms / 60_000);
-  if (min < 1) return "just now";
-  if (min < 60) return `${min} min ago`;
+  if (min < 1) return t("justNow");
+  if (min < 60) return t("minutesAgo", { count: min });
   const hours = Math.floor(min / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return t("hoursAgo", { count: hours });
   const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+  return t("daysAgo", { count: days });
 }
 
-function formatActivityAction(action: AdminRecentActivityItem["action"]): string {
-  if (action === "approved") return "Approved";
-  if (action === "rejected") return "Rejected";
-  if (action === "edited_score") return "Edited score";
-  if (action === "reopened") return "Reopened";
-  return "Login";
+function formatActivityAction(action: AdminRecentActivityItem["action"], t: DashT): string {
+  if (action === "approved") return t("activityApproved");
+  if (action === "rejected") return t("activityRejected");
+  if (action === "edited_score") return t("activityEditedScore");
+  if (action === "reopened") return t("activityReopened");
+  return t("activityLogin");
 }
 
-function formatDateTime(value: string): string {
+function formatDateTime(value: string, t: DashT): string {
   const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "—";
+  if (Number.isNaN(d.getTime())) return t("dateUnavailable");
   const hh = String(d.getHours()).padStart(2, "0");
   const mm = String(d.getMinutes()).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
@@ -56,14 +61,21 @@ function formatDateTime(value: string): string {
   return `${hh}:${mm} ${dd}/${mo}/${yy}`;
 }
 
-function reasonLabel(reason: AdminDashboardPayload["needsAttention"][number]["reason"]): string {
-  if (reason === "missing_proof_file") return "Missing proof file";
-  if (reason === "waiting_over_24h") return "Waiting > 24h";
-  if (reason === "manual_scoring_needed") return "Manual scoring needed";
-  return "Oldest pending";
+function reasonLabel(reason: AdminDashboardPayload["needsAttention"][number]["reason"], t: DashT): string {
+  if (reason === "missing_proof_file") return t("reasonMissingProofFile");
+  if (reason === "waiting_over_24h") return t("reasonWaitingOver24h");
+  if (reason === "manual_scoring_needed") return t("reasonManualScoringNeeded");
+  return t("reasonOldestPending");
+}
+
+function dateLocaleForUi(lang: string): string {
+  if (lang.startsWith("ru")) return "ru-RU";
+  if (lang.startsWith("uz")) return "uz-Latn-UZ";
+  return "en-US";
 }
 
 export function DashboardPage(): ReactElement {
+  const { t, i18n } = useTranslation("dashboard");
   const navigate = useNavigate();
   const toast = useToast();
   const [submissions, setSubmissions] = useState<Awaited<ReturnType<typeof api.getSubmissions>>>([]);
@@ -80,6 +92,8 @@ export function DashboardPage(): ReactElement {
   const role = normalizeRole(sessionUser?.role ?? "student");
   const isAdmin = isAdminPanelRole(sessionUser);
   const isSuperadmin = role === "superadmin";
+  const dateLocale = dateLocaleForUi(i18n.language);
+
   const activityCountByAdmin = useMemo(() => {
     const m = new Map<string, number>();
     for (const row of adminDashboard?.recentActivity ?? []) {
@@ -110,18 +124,20 @@ export function DashboardPage(): ReactElement {
           setSubmissions(await api.getSubmissions());
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load dashboard");
+        setError(
+          err instanceof Error ? err.message : i18nInstance.t("errorLoadDashboard", { ns: "dashboard" }),
+        );
       } finally {
         setLoading(false);
       }
     })();
-  }, [activityPage, isAdmin, loadAdminDashboard]);
+  }, [activityPage, isAdmin, isSuperadmin, loadAdminDashboard]);
 
   if (loading) {
     return (
       <section className="dashboard-stack">
         <DashboardStatsSkeleton />
-        <Card title={isAdmin ? "Moderation Operations Center" : "Recent submissions"}>
+        <Card title={isAdmin ? t("loadingCardModeration") : t("loadingCardRecentSubmissions")}>
           <TableSkeleton rows={6} cols={5} />
         </Card>
       </section>
@@ -135,11 +151,11 @@ export function DashboardPage(): ReactElement {
           <EmptyState
             icon={AlertCircle}
             tone="danger"
-            title="Couldn't load dashboard"
+            title={t("couldNotLoadDashboard")}
             description={error}
           >
             <Button type="button" variant="primary" onClick={() => window.location.reload()}>
-              Retry
+              {t("retry")}
             </Button>
           </EmptyState>
         </Card>
@@ -157,9 +173,9 @@ export function DashboardPage(): ReactElement {
         ]);
         setSuperDashboard(ops);
         setAdminDashboard(adminData);
-        toast.success("Superadmin dashboard updated");
+        toast.success(t("toastSuperadminUpdated"));
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to refresh");
+        toast.error(err instanceof Error ? err.message : t("toastRefreshFailed"));
       } finally {
         setIsRefreshing(false);
       }
@@ -168,33 +184,37 @@ export function DashboardPage(): ReactElement {
     return (
       <section className="dashboard-stack ops-dashboard">
         <Card className="ops-header-card">
-          <h2 className="ops-title">Dashboard</h2>
-          <p className="ops-subtitle">Superadmin Control Center</p>
+          <h2 className="ops-title">{t("title")}</h2>
+          <p className="ops-subtitle">{t("subtitleSuperadmin")}</p>
         </Card>
 
         <div className="stats-grid stats-grid-four ops-kpis">
           <Card className="stat-card stat-card-primary">
-            <p className="stat-card-label">Pending Queue</p>
+            <p className="stat-card-label">{t("pendingQueue")}</p>
             <h2 className="stat-card-value">{superDashboard.pendingQueue}</h2>
           </Card>
           <Card className="stat-card stat-card-success">
-            <p className="stat-card-label">Processed (7d)</p>
+            <p className="stat-card-label">{t("processed7d")}</p>
             <h2 className="stat-card-value">{superDashboard.processed7d}</h2>
           </Card>
           <Card className="stat-card stat-card-warn">
-            <p className="stat-card-label">Avg Review Time</p>
-            <h2 className="stat-card-value">{superDashboard.avgReviewMinutes.toFixed(2)} min</h2>
+            <p className="stat-card-label">{t("avgReviewTime")}</p>
+            <h2 className="stat-card-value">
+              {superDashboard.avgReviewMinutes.toFixed(2)}
+              {" "}
+              {t("minutesShort")}
+            </h2>
           </Card>
           <Card className="stat-card stat-card-accent">
-            <p className="stat-card-label">Active Admins Today</p>
+            <p className="stat-card-label">{t("activeAdminsToday")}</p>
             <h2 className="stat-card-value">{superDashboard.activeAdminsToday}</h2>
           </Card>
         </div>
 
-        <Card title="Security And Queue Signals">
+        <Card title={t("securityQueueSignals")}>
           <p className="muted">
-            Security alerts: <strong>{superDashboard.securityAlertsCount}</strong> · Queue overloaded:{" "}
-            <strong>{superDashboard.overloadedQueue ? "Yes" : "No"}</strong>
+            {t("securityAlertsLabel")} <strong>{superDashboard.securityAlertsCount}</strong> · {t("queueOverloadedLabel")}{" "}
+            <strong>{superDashboard.overloadedQueue ? t("yes") : t("no")}</strong>
           </p>
           <ul className="submission-timeline">
             {superDashboard.alerts.length > 0 ? (
@@ -206,29 +226,29 @@ export function DashboardPage(): ReactElement {
               ))
             ) : (
               <li>
-                <span className="submission-timeline-label">OK</span>
-                <span className="submission-timeline-value">No immediate system alerts.</span>
+                <span className="submission-timeline-label">{t("timelineOk")}</span>
+                <span className="submission-timeline-value">{t("noSystemAlerts")}</span>
               </li>
             )}
           </ul>
         </Card>
 
-        <Card title="Quick Actions">
+        <Card title={t("quickActions")}>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <Button type="button" variant="primary" onClick={() => navigate("/submissions")}>
-              Open Queue
+              {t("openQueue")}
             </Button>
             <Button type="button" variant="ghost" onClick={() => navigate("/admins")}>
-              Manage Admins
+              {t("manageAdmins")}
             </Button>
             <Button type="button" variant="ghost" onClick={() => navigate("/audit")}>
-              Open Audit Logs
+              {t("openAuditLogs")}
             </Button>
             <Button type="button" variant="ghost" onClick={() => navigate("/security")}>
-              Security Center
+              {t("securityCenter")}
             </Button>
             <Button type="button" variant="ghost" onClick={() => void handleSuperRefresh()} disabled={isRefreshing}>
-              {isRefreshing ? "Refreshing..." : "Refresh"}
+              {isRefreshing ? t("refreshing") : t("refresh")}
             </Button>
           </div>
         </Card>
@@ -240,22 +260,30 @@ export function DashboardPage(): ReactElement {
     const queuePercent = Math.max(0, Math.min((adminDashboard.pendingCount / 20) * 100, 100));
     const queueLabel =
       adminDashboard.queueHealth === "healthy"
-        ? `Healthy (${adminDashboard.pendingCount} pending)`
+        ? t("queueHealthHealthy", { count: adminDashboard.pendingCount })
         : adminDashboard.queueHealth === "moderate"
-          ? `Moderate (${adminDashboard.pendingCount} pending)`
-          : `Overloaded (${adminDashboard.pendingCount} pending)`;
+          ? t("queueHealthModerate", { count: adminDashboard.pendingCount })
+          : t("queueHealthOverloaded", { count: adminDashboard.pendingCount });
 
     const exportCsv = (): void => {
-      const header = ["Action", "Admin", "Student ID", "Student Name", "Submission", "Time"];
+      const header = [
+        t("csvAction"),
+        t("csvAdmin"),
+        t("csvStudentId"),
+        t("csvStudentName"),
+        t("csvSubmission"),
+        t("csvTime"),
+      ];
       const rows = adminDashboard.recentActivity.map((r) => [
-        formatActivityAction(r.action),
+        formatActivityAction(r.action, t),
         r.adminName,
         r.studentId ?? "",
         r.studentName ?? "",
-        `${(r.submissionTitle?.trim() || (r.studentId ? `Submission #${r.studentId}` : "Submission")).trim()} — ${formatDateTime(
-          r.submissionSubmittedAt ?? r.createdAt,
-        )}`,
-        formatDateTime(r.createdAt),
+        `${(
+          r.submissionTitle?.trim() ||
+          (r.studentId ? t("csvSubmissionNumbered", { id: r.studentId }) : t("csvSubmissionFallback"))
+        ).trim()} — ${formatDateTime(r.submissionSubmittedAt ?? r.createdAt, t)}`,
+        formatDateTime(r.createdAt, t),
       ]);
       const csv = [header, ...rows]
         .map((cols) => cols.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","))
@@ -270,7 +298,7 @@ export function DashboardPage(): ReactElement {
     };
 
     const openStudentSearch = (): void => {
-      const studentId = window.prompt("Search student ID");
+      const studentId = window.prompt(t("searchStudentPrompt"));
       if (!studentId?.trim()) return;
       navigate(`/submissions?search=${encodeURIComponent(studentId.trim())}`);
     };
@@ -280,9 +308,9 @@ export function DashboardPage(): ReactElement {
         setIsRefreshing(true);
         setKpiPulse(true);
         await loadAdminDashboard(activityPage, true);
-        toast.success("Dashboard updated");
+        toast.success(t("toastDashboardUpdated"));
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to refresh dashboard");
+        toast.error(err instanceof Error ? err.message : t("toastRefreshDashboardFailed"));
       } finally {
         window.setTimeout(() => setKpiPulse(false), 520);
         setIsRefreshing(false);
@@ -292,42 +320,50 @@ export function DashboardPage(): ReactElement {
     return (
       <section className="dashboard-stack ops-dashboard">
         <Card className="ops-header-card">
-          <h2 className="ops-title">Dashboard</h2>
-          <p className="ops-subtitle">Moderation Operations Center</p>
+          <h2 className="ops-title">{t("title")}</h2>
+          <p className="ops-subtitle">{t("subtitleModeration")}</p>
         </Card>
 
         <div className={`stats-grid stats-grid-four ops-kpis ${kpiPulse ? "kpi-refresh-pulse" : ""}`}>
           <Card className="stat-card stat-card-primary">
             <div className="stat-card-header">
-              <p className="stat-card-label">Pending Queue</p>
+              <p className="stat-card-label">{t("pendingQueue")}</p>
               <ClipboardList className="stat-card-icon" size={20} />
             </div>
             <h2 className="stat-card-value">{adminDashboard.pendingCount}</h2>
           </Card>
           <Card className="stat-card stat-card-success">
             <div className="stat-card-header">
-              <p className="stat-card-label">Avg Review Time</p>
+              <p className="stat-card-label">{t("avgReviewTime")}</p>
               <Timer className="stat-card-icon" size={20} />
             </div>
-            <h2 className="stat-card-value">{adminDashboard.avgReviewTimeHours.toFixed(1)}h</h2>
+            <h2 className="stat-card-value">
+              {adminDashboard.avgReviewTimeHours.toFixed(1)}
+              {" "}
+              {t("hoursShort")}
+            </h2>
           </Card>
           <Card className="stat-card stat-card-warn">
             <div className="stat-card-header">
-              <p className="stat-card-label">Oldest Pending</p>
+              <p className="stat-card-label">{t("oldestPending")}</p>
               <ShieldAlert className="stat-card-icon" size={20} />
             </div>
-            <h2 className="stat-card-value">{adminDashboard.oldestPendingHours.toFixed(1)}h</h2>
+            <h2 className="stat-card-value">
+              {adminDashboard.oldestPendingHours.toFixed(1)}
+              {" "}
+              {t("hoursShort")}
+            </h2>
           </Card>
           <Card className="stat-card stat-card-accent">
             <div className="stat-card-header">
-              <p className="stat-card-label">Processed (7d)</p>
+              <p className="stat-card-label">{t("processed7d")}</p>
               <TrendingUp className="stat-card-icon" size={20} />
             </div>
             <h2 className="stat-card-value">{adminDashboard.processed7d}</h2>
           </Card>
         </div>
 
-        <Card title="Queue Health">
+        <Card title={t("queueHealth")}>
           <div className="queue-health-row">
             <div className="queue-health-track">
               <div
@@ -340,9 +376,9 @@ export function DashboardPage(): ReactElement {
         </Card>
 
         <section className="ops-main-grid">
-          <Card title="Needs Attention Now">
+          <Card title={t("needsAttention")}>
             {adminDashboard.needsAttention.length === 0 ? (
-              <p className="muted">Queue is clear.</p>
+              <p className="muted">{t("queueClear")}</p>
             ) : (
               <div className="needs-attention-list">
                 {adminDashboard.needsAttention.map((row) => (
@@ -353,23 +389,23 @@ export function DashboardPage(): ReactElement {
                     onClick={() => navigate(`/submissions/${row.submissionId}`)}
                   >
                     <span>{row.label}</span>
-                    <small className="muted">{reasonLabel(row.reason)}</small>
+                    <small className="muted">{reasonLabel(row.reason, t)}</small>
                   </button>
                 ))}
               </div>
             )}
           </Card>
 
-          <Card title="Quick Actions">
+          <Card title={t("quickActions")}>
             <div className="ops-actions-grid">
               <Button type="button" variant="primary" onClick={() => navigate("/submissions")}>
-                <ClipboardList size={16} /> Open Queue
+                <ClipboardList size={16} /> {t("openQueue")}
               </Button>
               <Button type="button" variant="secondary" onClick={openStudentSearch}>
-                <Search size={16} /> Search Student
+                <Search size={16} /> {t("searchStudent")}
               </Button>
               <Button type="button" variant="secondary" onClick={exportCsv}>
-                <Download size={16} /> Export CSV
+                <Download size={16} /> {t("exportCsv")}
               </Button>
               <Button
                 type="button"
@@ -379,45 +415,48 @@ export function DashboardPage(): ReactElement {
                 aria-busy={isRefreshing}
               >
                 <RefreshCw size={16} className={isRefreshing ? "spin" : ""} />
-                {isRefreshing ? "Refreshing..." : "Refresh"}
+                {isRefreshing ? t("refreshing") : t("refresh")}
               </Button>
             </div>
           </Card>
         </section>
 
-        <Card title="Recent Activity">
+        <Card title={t("recentActivity")}>
           {adminDashboard.recentActivity.length === 0 ? (
-            <p className="muted">No activity yet.</p>
+            <p className="muted">{t("noActivity")}</p>
           ) : (
             <>
               <Table>
                 <thead>
                   <tr>
-                    <th>Action</th>
-                    <th>Admin</th>
-                    <th>Student</th>
-                    <th>Time</th>
+                    <th>{t("tableAction")}</th>
+                    <th>{t("tableAdmin")}</th>
+                    <th>{t("tableStudent")}</th>
+                    <th>{t("tableTime")}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {adminDashboard.recentActivity.map((row) => (
                     <tr key={row.id}>
-                      <td>{formatActivityAction(row.action)}</td>
+                      <td>{formatActivityAction(row.action, t)}</td>
                       <td>
                         <button type="button" className="admin-link-btn" onClick={() => setDrawerAdminId(row.adminId)}>
                           {row.adminName}
                         </button>
-                        <span className="muted"> · {activityCountByAdmin.get(row.adminId) ?? 0} actions</span>
+                        <span className="muted"> · {t("actionsCount", { count: activityCountByAdmin.get(row.adminId) ?? 0 })}</span>
                       </td>
                       <td>{row.studentId ?? "—"}</td>
-                      <td>{formatRelativeTime(row.createdAt)}</td>
+                      <td>{formatRelativeTime(row.createdAt, t)}</td>
                     </tr>
                   ))}
                 </tbody>
               </Table>
               <div className="pagination-bar">
                 <span className="muted">
-                  Page {adminDashboard.pagination.page} of {adminDashboard.pagination.totalPages}
+                  {t("paginationPage", {
+                    page: adminDashboard.pagination.page,
+                    total: adminDashboard.pagination.totalPages,
+                  })}
                 </span>
                 <div className="pagination-actions">
                   <Button
@@ -426,7 +465,7 @@ export function DashboardPage(): ReactElement {
                     disabled={!adminDashboard.pagination.hasPrev}
                     onClick={() => setActivityPage((p) => p - 1)}
                   >
-                    Previous
+                    {t("previous")}
                   </Button>
                   <Button
                     type="button"
@@ -434,7 +473,7 @@ export function DashboardPage(): ReactElement {
                     disabled={!adminDashboard.pagination.hasNext}
                     onClick={() => setActivityPage((p) => p + 1)}
                   >
-                    Next
+                    {t("next")}
                   </Button>
                 </div>
               </div>
@@ -465,10 +504,11 @@ export function DashboardPage(): ReactElement {
   const approvedCount = submissions.filter((s) => s.status === "approved").length;
   const totalPointsSum = submissions.reduce((sum, s) => sum + (Number(s.totalPoints) || 0), 0);
 
-  const totalLabel = role === "student" ? "Your submissions" : role === "reviewer" ? "Assigned submissions" : "Total submissions";
-  const approvedLabel = role === "student" ? "Approved (yours)" : "Approved submissions";
-  const pointsLabel = role === "student" ? "Your total points" : "Total points (sum)";
-  const ownerColumnLabel = role === "student" ? "Account" : "Student";
+  const totalLabel =
+    role === "student" ? t("statYourSubmissions") : role === "reviewer" ? t("statAssignedSubmissions") : t("statTotalSubmissions");
+  const approvedLabel = role === "student" ? t("statApprovedYours") : t("statApprovedSubmissions");
+  const pointsLabel = role === "student" ? t("statYourTotalPoints") : t("statTotalPointsSum");
+  const ownerColumnLabel = role === "student" ? t("tableAccount") : t("tableStudent");
 
   const recent = submissions.slice(0, 8);
 
@@ -495,19 +535,19 @@ export function DashboardPage(): ReactElement {
             <Award className="stat-card-icon" size={20} />
           </div>
           <h2 className="stat-card-value">{Number.isFinite(totalPointsSum) ? totalPointsSum.toFixed(2) : "0.00"}</h2>
-          <p className="muted stat-card-footnote">Sum of stored submission totals</p>
+          <p className="muted stat-card-footnote">{t("statCardFootnoteSum")}</p>
         </Card>
       </div>
 
-      <Card title={role === "student" ? "Your recent submissions" : "Recent submissions"}>
+      <Card title={role === "student" ? t("cardYourRecentSubmissions") : t("cardRecentSubmissions")}>
         <Table>
           <thead>
             <tr>
               <th>{ownerColumnLabel}</th>
-              <th>Title</th>
-              <th>Status</th>
-              <th>Total score</th>
-              <th>Date</th>
+              <th>{t("tableTitle")}</th>
+              <th>{t("tableStatus")}</th>
+              <th>{t("tableTotalScore")}</th>
+              <th>{t("tableDate")}</th>
             </tr>
           </thead>
           <tbody>
@@ -518,15 +558,13 @@ export function DashboardPage(): ReactElement {
                     <EmptyState
                       icon={ClipboardList}
                       tone="muted"
-                      title="No submissions yet"
+                      title={t("emptyNoSubmissionsTitle")}
                       description={
-                        role === "student"
-                          ? "When you add achievements, they will show up here."
-                          : "Nothing in this list yet. Check back after students submit work."
+                        role === "student" ? t("emptyNoSubmissionsStudentDesc") : t("emptyNoSubmissionsOtherDesc")
                       }
                     >
                       <Button type="button" variant="primary" onClick={() => navigate("/submissions")}>
-                        View all submissions
+                        {t("viewAllSubmissions")}
                       </Button>
                     </EmptyState>
                   </div>
@@ -545,7 +583,9 @@ export function DashboardPage(): ReactElement {
                     <StatusBadge status={submission.status} />
                   </td>
                   <td>{Number.isFinite(submission.totalPoints) ? submission.totalPoints.toFixed(2) : submission.totalPoints}</td>
-                  <td>{submission.createdAt ? new Date(submission.createdAt).toLocaleDateString("en-US") : "—"}</td>
+                  <td>
+                    {submission.createdAt ? new Date(submission.createdAt).toLocaleDateString(dateLocale) : t("dateUnavailable")}
+                  </td>
                 </tr>
               ))
             )}

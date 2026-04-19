@@ -1,7 +1,10 @@
+import type { TFunction } from "i18next";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { ClipboardList } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { api, type AdminModerationStatus, type AdminSubmissionListItem } from "../lib/api";
+import i18nInstance from "../i18n";
 import { EmptyState } from "../components/ui/EmptyState";
 import { ModerationStatusBadge } from "../components/ui/Badge";
 import { Card } from "../components/ui/Card";
@@ -15,13 +18,15 @@ const SEARCH_DEBOUNCE_MS = 320;
 
 type DatePreset = "today" | "last7" | "last30" | "custom";
 
-function formatDateTime(value: string | null | undefined): string {
+type SubT = TFunction<"submissions">;
+
+function formatDateTime(value: string | null | undefined, t: SubT): string {
   if (!value) {
-    return "—";
+    return t("emDash");
   }
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return "—";
+    return t("emDash");
   }
   const hh = String(date.getHours()).padStart(2, "0");
   const mm = String(date.getMinutes()).padStart(2, "0");
@@ -34,18 +39,31 @@ function formatDateTime(value: string | null | undefined): string {
 function humanizeCategoryLabel(raw: string | null | undefined): string {
   const value = raw?.trim();
   if (!value) {
-    return "—";
+    return "";
   }
   const normalized = value.replace(/[_-]+/g, " ");
   return normalized.replace(/\b\w/g, (ch) => ch.toUpperCase());
 }
 
-function formatUser(row: AdminSubmissionListItem): string {
+function categoryCellLabel(row: AdminSubmissionListItem, t: SubT): string {
+  const title = row.categoryTitle?.trim();
+  if (title) {
+    return title;
+  }
+  const code = row.categoryCode?.trim();
+  if (!code) {
+    return t("emDash");
+  }
+  const slug = code.replace(/[^a-zA-Z0-9]+/g, "_").toLowerCase();
+  return t(`category_${slug}`, { defaultValue: humanizeCategoryLabel(code) });
+}
+
+function formatUser(row: AdminSubmissionListItem, t: SubT): string {
   const name = row.ownerName?.trim();
   if (name) {
     return name;
   }
-  return "Student";
+  return t("student");
 }
 
 function deriveDateRange(
@@ -78,6 +96,7 @@ function deriveDateRange(
 }
 
 export function AdminSubmissionsPage(): ReactElement {
+  const { t } = useTranslation("submissions");
   const navigate = useNavigate();
   const requestSeq = useRef(0);
   const [items, setItems] = useState<AdminSubmissionListItem[]>([]);
@@ -96,7 +115,7 @@ export function AdminSubmissionsPage(): ReactElement {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const t = window.setTimeout(() => {
+    const timer = window.setTimeout(() => {
       const next = searchInput.trim();
       setDebouncedSearch((prev) => {
         if (next !== prev) {
@@ -105,7 +124,7 @@ export function AdminSubmissionsPage(): ReactElement {
         return next;
       });
     }, SEARCH_DEBOUNCE_MS);
-    return () => window.clearTimeout(t);
+    return () => window.clearTimeout(timer);
   }, [searchInput]);
 
   useEffect(() => {
@@ -164,7 +183,7 @@ export function AdminSubmissionsPage(): ReactElement {
       setPendingCount(data.pendingCount);
     } catch (err) {
       if (requestSeq.current === runId) {
-        setError(err instanceof Error ? err.message : "Failed to load submissions");
+        setError(err instanceof Error ? err.message : i18nInstance.t("errorLoad", { ns: "submissions" }));
       }
     } finally {
       if (requestSeq.current === runId) {
@@ -183,7 +202,7 @@ export function AdminSubmissionsPage(): ReactElement {
 
   return (
     <section className="dashboard-stack">
-      <Card title="Submissions" subtitle="Moderation queue for fast review and clear prioritization.">
+      <Card title={t("title")} subtitle={t("subtitleAdmin")}>
         <div className="table-toolbar moderation-queue-toolbar">
           <Input
             value={searchInput}
@@ -191,7 +210,8 @@ export function AdminSubmissionsPage(): ReactElement {
               setPage(1);
               setSearchInput(e.target.value);
             }}
-            placeholder="Search student, ID or title..."
+            placeholder={t("searchPlaceholderAdmin")}
+            aria-label={t("searchPlaceholderAdmin")}
           />
           <select
             className="ui-input"
@@ -200,11 +220,12 @@ export function AdminSubmissionsPage(): ReactElement {
               setPage(1);
               setStatus(e.target.value as "" | AdminModerationStatus);
             }}
+            aria-label={t("status")}
           >
-            <option value="">All</option>
-            <option value="pending">Pending</option>
-            <option value="approved">Approved</option>
-            <option value="rejected">Rejected</option>
+            <option value="">{t("adminFilterAllStatuses")}</option>
+            <option value="pending">{t("adminStatusPending")}</option>
+            <option value="approved">{t("adminStatusApproved")}</option>
+            <option value="rejected">{t("adminStatusRejected")}</option>
           </select>
           <select
             className="ui-input"
@@ -213,8 +234,9 @@ export function AdminSubmissionsPage(): ReactElement {
               setPage(1);
               setCategory(event.target.value);
             }}
+            aria-label={t("category")}
           >
-            <option value="">All categories</option>
+            <option value="">{t("allCategories")}</option>
             {categoryOptions.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
@@ -228,11 +250,12 @@ export function AdminSubmissionsPage(): ReactElement {
               setPage(1);
               setDatePreset(event.target.value as DatePreset);
             }}
+            aria-label={t("submittedDate")}
           >
-            <option value="today">Submitted Date: Today</option>
-            <option value="last7">Submitted Date: Last 7 days</option>
-            <option value="last30">Submitted Date: Last 30 days</option>
-            <option value="custom">Submitted Date: Custom Range</option>
+            <option value="today">{t("dateRangeOption_today")}</option>
+            <option value="last7">{t("dateRangeOption_last7")}</option>
+            <option value="last30">{t("dateRangeOption_last30")}</option>
+            <option value="custom">{t("dateRangeOption_custom")}</option>
           </select>
           {datePreset === "custom" ? (
             <>
@@ -243,6 +266,7 @@ export function AdminSubmissionsPage(): ReactElement {
                   setPage(1);
                   setCustomFrom(event.target.value);
                 }}
+                aria-label={t("customDateFrom")}
               />
               <Input
                 type="date"
@@ -251,20 +275,26 @@ export function AdminSubmissionsPage(): ReactElement {
                   setPage(1);
                   setCustomTo(event.target.value);
                 }}
+                aria-label={t("customDateTo")}
               />
             </>
           ) : null}
           <Button type="button" variant="secondary" onClick={clearFilters}>
-            Clear Filters
+            {t("clearFilters")}
           </Button>
         </div>
-        <div className="moderation-queue-kpi-line muted">
-          {pendingCount} pending • {total} total • Showing {showing} results
+        <div className="moderation-queue-kpi-line muted" aria-live="polite">
+          {t("kpiLine", { pendingCount, total, showing })}
         </div>
         {error ? (
-          <p className="error" role="alert">
-            {error}
-          </p>
+          <div className="submissions-inline-error">
+            <p className="error" role="alert">
+              {error}
+            </p>
+            <Button type="button" variant="secondary" onClick={() => void load()}>
+              {t("retry")}
+            </Button>
+          </div>
         ) : null}
       </Card>
 
@@ -272,12 +302,7 @@ export function AdminSubmissionsPage(): ReactElement {
         {loading ? (
           <TableSkeleton rows={10} cols={8} />
         ) : isFilteredEmpty ? (
-          <EmptyState
-            icon={ClipboardList}
-            tone="muted"
-            title="No submissions match filters."
-            description="Try adjusting the filters or clear them to return to the main queue."
-          >
+          <EmptyState icon={ClipboardList} tone="muted" title={t("emptyTitle")} description={t("emptySubtitle")}>
             <Button
               type="button"
               variant="secondary"
@@ -286,7 +311,7 @@ export function AdminSubmissionsPage(): ReactElement {
                 setPage(1);
               }}
             >
-              Clear Filters
+              {t("clearFilters")}
             </Button>
           </EmptyState>
         ) : (
@@ -294,14 +319,14 @@ export function AdminSubmissionsPage(): ReactElement {
             <Table>
               <thead>
                 <tr>
-                  <th>Student</th>
-                  <th>Student ID</th>
-                  <th>Category</th>
-                  <th>Title</th>
-                  <th>Status</th>
-                  <th>Submitted</th>
-                  <th>Score</th>
-                  <th>Action</th>
+                  <th>{t("student")}</th>
+                  <th>{t("studentId")}</th>
+                  <th>{t("category")}</th>
+                  <th>{t("titleCol")}</th>
+                  <th>{t("status")}</th>
+                  <th>{t("submittedAt")}</th>
+                  <th>{t("score")}</th>
+                  <th>{t("action")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -311,17 +336,17 @@ export function AdminSubmissionsPage(): ReactElement {
                     className="clickable-row"
                     onClick={() => navigate(`/submissions/${row.id}`)}
                   >
-                    <td>{formatUser(row)}</td>
-                    <td>{row.studentId?.trim() || "—"}</td>
-                    <td>{row.categoryTitle?.trim() || humanizeCategoryLabel(row.categoryCode)}</td>
+                    <td>{formatUser(row, t)}</td>
+                    <td>{row.studentId?.trim() || t("emDash")}</td>
+                    <td>{categoryCellLabel(row, t)}</td>
                     <td className="submission-title-cell">{row.title}</td>
                     <td>
                       <ModerationStatusBadge status={row.status} />
                     </td>
-                    <td className="date-cell">
-                      {formatDateTime(row.submittedAt)}
+                    <td className="date-cell">{formatDateTime(row.submittedAt, t)}</td>
+                    <td className="score-cell">
+                      {row.score !== null && Number.isFinite(row.score) ? row.score.toFixed(2) : t("emDash")}
                     </td>
-                    <td className="score-cell">{row.score !== null && Number.isFinite(row.score) ? row.score.toFixed(2) : "—"}</td>
                     <td>
                       <Button
                         type="button"
@@ -331,7 +356,7 @@ export function AdminSubmissionsPage(): ReactElement {
                           navigate(`/submissions/${row.id}`);
                         }}
                       >
-                        Review
+                        {t("review")}
                       </Button>
                     </td>
                   </tr>
@@ -339,10 +364,10 @@ export function AdminSubmissionsPage(): ReactElement {
               </tbody>
             </Table>
             <div className="pagination-bar">
-              <span className="muted">Page {page} of {totalPages}</span>
+              <span className="muted">{t("paginationPage", { page, total: totalPages })}</span>
               <div className="pagination-actions">
                 <Button type="button" variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-                  ← Previous
+                  {t("previous")}
                 </Button>
                 <Button
                   type="button"
@@ -350,7 +375,7 @@ export function AdminSubmissionsPage(): ReactElement {
                   disabled={page >= totalPages}
                   onClick={() => setPage((p) => p + 1)}
                 >
-                  Next →
+                  {t("next")}
                 </Button>
               </div>
             </div>

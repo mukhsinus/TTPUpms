@@ -1,17 +1,27 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { ChevronRight, ClipboardList, Search } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
+import i18nInstance from "../i18n";
 import { normalizeRole } from "../lib/rbac";
 import { EmptyState } from "../components/ui/EmptyState";
 import { TableSkeleton } from "../components/ui/PageSkeletons";
 import { StatusBadge } from "../components/ui/Badge";
+import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Input } from "../components/ui/Input";
 import { Table } from "../components/ui/Table";
-import type { Submission } from "../types";
+import type { Submission, SubmissionStatus } from "../types";
+
+function dateLocaleForUi(lang: string): string {
+  if (lang.startsWith("ru")) return "ru-RU";
+  if (lang.startsWith("uz")) return "uz-Latn-UZ";
+  return "en-US";
+}
 
 export function SubmissionsPage(): ReactElement {
+  const { t, i18n } = useTranslation("submissions");
   const navigate = useNavigate();
   const location = useLocation();
   const [submissions, setSubmissions] = useState<Submission[]>([]);
@@ -26,7 +36,7 @@ export function SubmissionsPage(): ReactElement {
         setLoading(true);
         setSubmissions(await api.getSubmissions());
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load submissions");
+        setError(err instanceof Error ? err.message : i18nInstance.t("errorLoad", { ns: "submissions" }));
       } finally {
         setLoading(false);
       }
@@ -47,27 +57,38 @@ export function SubmissionsPage(): ReactElement {
   const sessionUser = api.getSessionUser();
   const role = normalizeRole(sessionUser?.role ?? "student");
   const isReviewRoute = location.pathname.startsWith("/reviews");
+  const dateLocale = dateLocaleForUi(i18n.language);
 
   const listTitle =
     role === "student"
-      ? "My submissions"
+      ? t("listTitleMySubmissions")
       : isReviewRoute
-        ? "Review queue"
+        ? t("listTitleReviewQueue")
         : role === "reviewer"
-          ? "Assigned submissions"
-          : "All submissions";
+          ? t("listTitleAssignedSubmissions")
+          : t("listTitleAllSubmissions");
+
   const listSubtitle =
     role === "student"
-      ? "Create and track your achievement submissions"
+      ? t("listSubtitleStudent")
       : role === "reviewer"
         ? isReviewRoute
-          ? "Submissions assigned to you for review"
-          : "Submissions assigned to you"
-        : "Review and manage student submissions";
+          ? t("listSubtitleReviewerReviews")
+          : t("listSubtitleReviewerDefault")
+        : t("listSubtitleOther");
 
-  const ownerColumnLabel = role === "student" ? "You" : "Student";
-  const searchPlaceholder =
-    role === "student" ? "Search by title" : "Search by title or student ID";
+  const ownerColumnLabel = role === "student" ? t("columnYou") : t("columnStudent");
+  const searchPlaceholder = role === "student" ? t("searchPlaceholderStudent") : t("searchPlaceholderStaff");
+
+  const statusOptions: { value: string; status: SubmissionStatus | "" }[] = [
+    { value: "", status: "" },
+    { value: "submitted", status: "submitted" },
+    { value: "review", status: "review" },
+    { value: "approved", status: "approved" },
+    { value: "rejected", status: "rejected" },
+    { value: "needs_revision", status: "needs_revision" },
+    { value: "draft", status: "draft" },
+  ];
 
   if (loading) {
     return (
@@ -89,11 +110,11 @@ export function SubmissionsPage(): ReactElement {
     return (
       <section className="dashboard-stack">
         <Card title={listTitle} subtitle={listSubtitle}>
-          <EmptyState
-            tone="danger"
-            title="Couldn't load submissions"
-            description={error}
-          />
+          <EmptyState tone="danger" title={t("couldNotLoad")} description={error}>
+            <Button type="button" variant="primary" onClick={() => window.location.reload()}>
+              {t("retry")}
+            </Button>
+          </EmptyState>
         </Card>
       </section>
     );
@@ -110,21 +131,25 @@ export function SubmissionsPage(): ReactElement {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder={searchPlaceholder}
+            aria-label={searchPlaceholder}
           />
-          <select className="ui-input" value={status} onChange={(event) => setStatus(event.target.value)}>
-            <option value="">All statuses</option>
-            <option value="submitted">Submitted</option>
-            <option value="review">Under Review</option>
-            <option value="approved">Approved</option>
-            <option value="rejected">Rejected</option>
-            <option value="needs_revision">Needs Revision</option>
-            <option value="draft">Draft</option>
+          <select
+            className="ui-input"
+            value={status}
+            onChange={(event) => setStatus(event.target.value)}
+            aria-label={t("allStatuses")}
+          >
+            {statusOptions.map((opt) => (
+              <option key={opt.value || "all"} value={opt.value}>
+                {opt.status ? t(`submissionStatus_${opt.status}` as const) : t("allStatuses")}
+              </option>
+            ))}
           </select>
         </div>
         {showNoMatches ? (
           <p className="filter-empty-hint muted" role="status">
-            <Search size={14} style={{ verticalAlign: "-0.15em", marginRight: 6 }} />
-            No submissions match your filters. Try adjusting search or status.
+            <Search size={14} style={{ verticalAlign: "-0.15em", marginRight: 6 }} aria-hidden />
+            {t("noFilterMatches")}
           </p>
         ) : null}
       </Card>
@@ -134,13 +159,9 @@ export function SubmissionsPage(): ReactElement {
           <EmptyState
             icon={ClipboardList}
             tone="muted"
-            title="Nothing here yet"
+            title={t("emptyListTitle")}
             description={
-              role === "student"
-                ? "You have not created any submissions. Add items from your dashboard flow when ready."
-                : role === "reviewer"
-                  ? "No submissions are assigned to you right now."
-                  : "No submissions in the system yet."
+              role === "student" ? t("emptyListStudent") : role === "reviewer" ? t("emptyListReviewer") : t("emptyListOther")
             }
           />
         ) : (
@@ -148,11 +169,11 @@ export function SubmissionsPage(): ReactElement {
             <thead>
               <tr>
                 <th>{ownerColumnLabel}</th>
-                <th>Title</th>
-                <th>Status</th>
-                <th>Total score</th>
-                <th>Date</th>
-                <th />
+                <th>{t("titleCol")}</th>
+                <th>{t("status")}</th>
+                <th>{t("tableTotalScore")}</th>
+                <th>{t("tableDate")}</th>
+                <th aria-label={t("details")} />
               </tr>
             </thead>
             <tbody>
@@ -173,7 +194,7 @@ export function SubmissionsPage(): ReactElement {
                       <div className="student-info">
                         <strong>
                           {role === "student"
-                            ? sessionUser?.fullName ?? sessionUser?.email ?? "Your account"
+                            ? sessionUser?.fullName ?? sessionUser?.email ?? t("yourAccount")
                             : submission.userId}
                         </strong>
                       </div>
@@ -187,10 +208,10 @@ export function SubmissionsPage(): ReactElement {
                     {Number.isFinite(submission.totalPoints) ? submission.totalPoints.toFixed(2) : submission.totalPoints}
                   </td>
                   <td className="date-cell">
-                    {submission.createdAt ? new Date(submission.createdAt).toLocaleDateString("en-US") : "-"}
+                    {submission.createdAt ? new Date(submission.createdAt).toLocaleDateString(dateLocale) : t("emDash")}
                   </td>
                   <td className="row-indicator-cell">
-                    <ChevronRight size={16} className="row-indicator" />
+                    <ChevronRight size={16} className="row-indicator" aria-hidden />
                   </td>
                 </tr>
               ))}

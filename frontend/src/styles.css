@@ -187,6 +187,106 @@ body {
   font-weight: 700;
 }
 
+/* Compact header language switcher (reusable across layouts) */
+.language-switcher {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.language-switcher-trigger {
+  height: 36px;
+  min-width: 36px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition:
+    box-shadow 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.language-switcher-trigger:hover {
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+  border-color: #cbd5e1;
+}
+
+.language-switcher-trigger:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.language-switcher-globe {
+  display: none;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.language-switcher-chevron {
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.language-switcher-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  min-width: 148px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(15, 23, 42, 0.12);
+  z-index: 50;
+}
+
+.language-switcher-option {
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 0.9rem;
+  color: #0f172a;
+  cursor: pointer;
+}
+
+.language-switcher-option:hover {
+  background: #f1f5f9;
+}
+
+.language-switcher-option.is-active {
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+@media (max-width: 768px) {
+  .language-switcher-code,
+  .language-switcher-chevron {
+    display: none;
+  }
+
+  .language-switcher-globe {
+    display: inline;
+  }
+
+  .language-switcher-trigger {
+    padding: 0 8px;
+  }
+}
+
 .main-area {
   padding: var(--space-6);
   max-width: 1440px;
@@ -1348,6 +1448,21 @@ body {
 .moderation-queue-kpi-line {
   margin-top: var(--space-3);
   font-size: 0.92rem;
+  overflow-wrap: anywhere;
+}
+
+.moderation-queue-toolbar .ui-input,
+.moderation-queue-toolbar select.ui-input {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.submissions-inline-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
 }
 
 .ops-dashboard {

@@ -12,6 +12,7 @@ import { useMemo, useState, type PropsWithChildren, type ReactElement } from "re
 import { NavLink, useLocation } from "react-router-dom";
 import { api } from "../lib/api";
 import { normalizeRole } from "../lib/rbac";
+import { LanguageSwitcher } from "./LanguageSwitcher";
 import { Button } from "./ui/Button";
 
 interface AdminLayoutProps extends PropsWithChildren {
@@ -127,6 +128,9 @@ export function AdminLayout({ children, onLogout }: AdminLayoutProps): ReactElem
             <div>
               <h1>{pageTitle}</h1>
             </div>
+          </div>
+          <div className="top-header-right">
+            <LanguageSwitcher />
           </div>
         </header>
         <main className="main-area">{children}</main>

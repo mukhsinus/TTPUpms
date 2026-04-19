@@ -3,6 +3,7 @@ import { useMemo, useState, type PropsWithChildren, type ReactElement } from "re
 import { NavLink, useLocation } from "react-router-dom";
 import { api } from "../lib/api";
 import { canAccessReviewerRoutes, normalizeRole } from "../lib/rbac";
+import { LanguageSwitcher } from "./LanguageSwitcher";
 import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
 
@@ -97,6 +98,7 @@ export function AppLayout({ children, onLogout }: AppLayoutProps): ReactElement 
             </div>
           </div>
           <div className="top-header-right">
+            <LanguageSwitcher />
             <label className="search-shell">
               <Search size={16} />
               <Input placeholder="Quick search..." />
