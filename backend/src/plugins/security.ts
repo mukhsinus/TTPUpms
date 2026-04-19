@@ -6,9 +6,16 @@ import { env } from "../config/env";
 import { failure } from "../utils/http-response";
 
 export async function registerSecurityPlugins(app: FastifyInstance): Promise<void> {
-  const allowedOrigins = env.CORS_ORIGIN.split(",")
-    .map((origin) => origin.trim())
-    .filter((origin) => origin.length > 0);
+  const baselineAllowedOrigins = [
+    "https://ttp-upms-frontend.vercel.app",
+    "http://localhost:5173",
+    "http://localhost:3000",
+  ];
+  const allowedOrigins = new Set(
+    [...baselineAllowedOrigins, ...env.CORS_ORIGIN.split(",")]
+      .map((origin) => origin.trim())
+      .filter((origin) => origin.length > 0),
+  );
 
   await app.register(helmet, {
     global: true,
@@ -18,8 +25,24 @@ export async function registerSecurityPlugins(app: FastifyInstance): Promise<voi
   });
 
   await app.register(cors, {
-    origin: allowedOrigins,
+    origin: (origin, callback) => {
+      // Allow same-origin or non-browser clients (curl/server-to-server) with no Origin header.
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+      callback(null, allowedOrigins.has(origin));
+    },
     credentials: true,
+    methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: [
+      "Authorization",
+      "Content-Type",
+      "X-Upms-Auth-Source",
+      "x-admin-session-id",
+      "x-bot-api-key",
+      "idempotency-key",
+    ],
   });
 
   await app.register(rateLimit, {

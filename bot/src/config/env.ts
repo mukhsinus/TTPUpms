@@ -23,8 +23,20 @@ const envInput = {
 };
 
 const envSchema = z.object({
+  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   TELEGRAM_BOT_TOKEN: z.string().min(1, "TELEGRAM_BOT_TOKEN is required"),
   BACKEND_API_URL: z.string().url("BACKEND_API_URL must be a valid URL"),
+  PORT: z.coerce.number().int().positive().default(3000),
+  BOT_DELIVERY_MODE: z.enum(["polling", "webhook"]).default("polling"),
+  BOT_WEBHOOK_URL: z
+    .string()
+    .optional()
+    .transform((value) => {
+      if (!value) return undefined;
+      const trimmed = value.trim();
+      return trimmed.length > 0 ? trimmed : undefined;
+    })
+    .pipe(z.string().url("BOT_WEBHOOK_URL must be a valid URL").optional()),
   BOT_API_KEY: z
     .string()
     .min(
