@@ -62,6 +62,15 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       profileController.getProfile,
     );
 
+    r.patch(
+      "/profile",
+      {
+        preHandler: [requireActiveAdminForSensitiveAction],
+        config: { rateLimit: { max: 40, timeWindow: "1 minute" } },
+      },
+      profileController.updateIdentity,
+    );
+
     r.post(
       "/profile/logout-current",
       { config: { rateLimit: { max: 120, timeWindow: "1 minute" } } },

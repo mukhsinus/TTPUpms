@@ -13,4 +13,9 @@ export const approveSecurityEventParamsSchema = z.object({
   eventId: z.string().uuid(),
 });
 
+export const updateAdminIdentityBodySchema = z.object({
+  full_name: z.string().trim().max(200).optional(),
+  email: z.string().trim().email(),
+});
+
 export type AdminProfileQuery = z.infer<typeof adminProfileQuerySchema>;

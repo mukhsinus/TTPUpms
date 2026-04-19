@@ -59,6 +59,7 @@ export class AdminProfileService {
     userAgent: string | null;
   }): Promise<{
     identity: {
+      id: string;
       fullName: string;
       email: string | null;
       role: "admin" | "superadmin";
@@ -146,6 +147,7 @@ export class AdminProfileService {
 
     return {
       identity: {
+        id: identity.id,
         fullName: identity.full_name ?? identity.email ?? "Admin",
         email: identity.email,
         role: identity.role,
@@ -203,6 +205,45 @@ export class AdminProfileService {
         })),
       },
     };
+  }
+
+  async updateIdentity(input: {
+    adminId: string;
+    fullName: string | null;
+    email: string;
+    requestIp: string;
+    userAgent: string | null;
+  }): Promise<void> {
+    const current = await this.repository.findIdentity(input.adminId);
+    if (!current) {
+      throw new ServiceError(404, "Admin account not found");
+    }
+    const nextEmail = input.email.trim().toLowerCase();
+    if (!nextEmail) {
+      throw new ServiceError(400, "Email is required", "VALIDATION_ERROR");
+    }
+    const nextFullName = input.fullName?.trim() ? input.fullName.trim() : null;
+    await this.repository.updateIdentity(input.adminId, {
+      fullName: nextFullName,
+      email: nextEmail,
+    });
+    await this.audit.insert({
+      actorUserId: input.adminId,
+      targetUserId: input.adminId,
+      entityTable: "users",
+      entityId: input.adminId,
+      action: "admin_profile_updated",
+      oldValues: {
+        fullName: current.full_name,
+        email: current.email,
+      },
+      newValues: {
+        fullName: nextFullName,
+        email: nextEmail,
+      },
+      requestIp: readClientIp(input.requestIp),
+      userAgent: input.userAgent,
+    });
   }
 
   async logoutCurrentSession(input: {

@@ -1,7 +1,8 @@
 import type { Category, Submission, SubmissionItem, SubmissionStatus, User } from "../types";
-import { signInWithSupabasePassword } from "./auth-sign-in";
+import { signInWithPasswordViaFetch, signInWithSupabasePassword } from "./auth-sign-in";
 import { ApiError } from "./api-error";
 import { isAdminPanelRole, normalizeRole, type AppRole } from "./rbac";
+import { getSupabaseBrowserEnv } from "./supabase-env";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? import.meta.env.VITE_API_BASE_URL ?? "";
 const AUTH_TOKEN_KEY = "upms_admin_token";
@@ -115,6 +116,7 @@ export interface AdminSubmissionsListPayload {
 
 export interface AdminProfilePayload {
   identity: {
+    id: string;
     fullName: string;
     email: string | null;
     role: "admin" | "superadmin";
@@ -521,6 +523,23 @@ function getOrCreateAdminSessionId(): string {
     return generated;
   } catch {
     return `adm-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+}
+
+async function updateSupabaseUser(authToken: string, payload: Record<string, unknown>): Promise<void> {
+  const { url, anonKey } = getSupabaseBrowserEnv();
+  const response = await fetch(`${url}/auth/v1/user`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: anonKey,
+      Authorization: `Bearer ${authToken}`,
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new ApiError(text || `Supabase user update failed (${response.status})`, response.status);
   }
 }
 
@@ -989,6 +1008,53 @@ export const api = {
       };
       return data;
     });
+  },
+
+  async updateAdminIdentity(input: {
+    fullName: string;
+    email: string;
+    previousEmail: string | null;
+    currentPassword?: string;
+  }): Promise<void> {
+    const token = getAuthToken();
+    if (!token) {
+      throw new ApiError("Not authenticated", 401);
+    }
+    const nextEmail = input.email.trim().toLowerCase();
+    const prevEmail = input.previousEmail?.trim().toLowerCase() ?? null;
+    const emailChanged = Boolean(prevEmail && prevEmail !== nextEmail);
+    if (emailChanged) {
+      if (!input.currentPassword?.trim()) {
+        throw new ApiError("Current password is required to change email", 400);
+      }
+      await signInWithPasswordViaFetch(prevEmail as string, input.currentPassword.trim());
+      await updateSupabaseUser(token, { email: nextEmail });
+    }
+    await request<{ ok: boolean }>("/api/admin/profile", {
+      method: "PATCH",
+      body: JSON.stringify({
+        full_name: input.fullName.trim(),
+        email: nextEmail,
+      }),
+    });
+    adminProfileCache = null;
+  },
+
+  async changeAdminPassword(input: {
+    currentPassword: string;
+    newPassword: string;
+    email: string | null;
+  }): Promise<void> {
+    const token = getAuthToken();
+    if (!token) {
+      throw new ApiError("Not authenticated", 401);
+    }
+    const email = input.email?.trim().toLowerCase();
+    if (!email) {
+      throw new ApiError("Current email is not available for password verification", 400);
+    }
+    await signInWithPasswordViaFetch(email, input.currentPassword.trim());
+    await updateSupabaseUser(token, { password: input.newPassword });
   },
 
   async logoutCurrentAdminSession(): Promise<void> {

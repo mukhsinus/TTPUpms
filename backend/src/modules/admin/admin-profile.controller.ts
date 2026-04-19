@@ -7,6 +7,7 @@ import {
   adminProfileQuerySchema,
   adminSessionHeaderSchema,
   approveSecurityEventParamsSchema,
+  updateAdminIdentityBodySchema,
 } from "./admin-profile.schema";
 
 function readSessionToken(request: FastifyRequest): string {
@@ -108,6 +109,26 @@ export class AdminProfileController {
       await this.service.approveSecurityEvent({
         eventId: params.eventId,
         approvedByAdminId: request.user.id,
+      });
+      reply.send(success({ ok: true }));
+    } catch (error) {
+      this.handleError(reply, error);
+    }
+  };
+
+  updateIdentity = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!request.user) {
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
+      return;
+    }
+    try {
+      const body = updateAdminIdentityBodySchema.parse(request.body);
+      await this.service.updateIdentity({
+        adminId: request.user.id,
+        fullName: body.full_name ?? null,
+        email: body.email,
+        requestIp: request.ip,
+        userAgent: readUserAgent(request),
       });
       reply.send(success({ ok: true }));
     } catch (error) {

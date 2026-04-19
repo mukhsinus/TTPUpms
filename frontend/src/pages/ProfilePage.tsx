@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useState, type ReactElement } from "re
 import { ShieldCheck, UserCircle2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api, type AdminProfilePayload } from "../lib/api";
+import { useToast } from "../contexts/ToastContext";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { EmptyState } from "../components/ui/EmptyState";
+import { Input } from "../components/ui/Input";
 import { TableSkeleton } from "../components/ui/PageSkeletons";
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 5;
 
 function formatDateTime(value: string | null | undefined): string {
   if (!value) {
@@ -56,25 +58,41 @@ function deviceFromUserAgent(userAgent: string | null | undefined): string {
 
 export function ProfilePage(): ReactElement {
   const navigate = useNavigate();
+  const toast = useToast();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [page, setPage] = useState(1);
   const [payload, setPayload] = useState<AdminProfilePayload | null>(null);
-  const [busy, setBusy] = useState<null | "logout-current" | "logout-others">(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [pwdBusy, setPwdBusy] = useState(false);
+  const [identityForm, setIdentityForm] = useState({
+    fullName: "",
+    email: "",
+    currentPasswordForEmail: "",
+  });
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
 
   const load = useCallback(async (forceRefresh = false) => {
     try {
       setLoading(true);
       setError(null);
-      const data = await api.getAdminProfile({ page, pageSize: PAGE_SIZE, forceRefresh });
+      const data = await api.getAdminProfile({ page: 1, pageSize: PAGE_SIZE, forceRefresh });
       setPayload(data);
+      setIdentityForm({
+        fullName: data.identity.fullName ?? "",
+        email: data.identity.email ?? "",
+        currentPasswordForEmail: "",
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load profile.");
     } finally {
       setLoading(false);
     }
-  }, [page]);
+  }, []);
 
   useEffect(() => {
     void load(false);
@@ -89,28 +107,31 @@ export function ProfilePage(): ReactElement {
       { label: "Approve submissions", enabled: permissions.approveSubmissions },
       { label: "Reject submissions", enabled: permissions.rejectSubmissions },
       { label: "Export CSV", enabled: permissions.exportCsv },
-      { label: "Manage admins", enabled: permissions.manageAdmins },
-      { label: "View global audit logs", enabled: permissions.viewGlobalAuditLogs },
-      { label: "Security approvals", enabled: permissions.securityApprovals },
+      ...(permissions.manageAdmins
+        ? [
+            { label: "Manage admins", enabled: true },
+            { label: "View audit logs", enabled: true },
+            { label: "Security approvals", enabled: true },
+          ]
+        : []),
     ];
   }, [payload?.permissions]);
 
-  const currentSession = useMemo(() => {
-    return payload?.security.sessions.find((session) => session.isCurrent) ?? null;
-  }, [payload?.security.sessions]);
+  const emailChanged = useMemo(() => {
+    const current = payload?.identity.email?.trim().toLowerCase() ?? "";
+    const next = identityForm.email.trim().toLowerCase();
+    return current !== next;
+  }, [payload?.identity.email, identityForm.email]);
 
-  const currentDevice = useMemo(() => {
-    const userAgent = currentSession?.deviceName ? null : (payload?.identity.lastLoginUserAgent ?? null);
-    if (currentSession?.deviceName) {
-      const normalized = currentSession.deviceName.toLowerCase();
-      if (normalized.includes("mac")) return "Mac";
-      if (normalized.includes("windows")) return "Windows";
-      if (normalized.includes("ios")) return "iPhone";
-      if (normalized.includes("android")) return "Android";
-      return "Browser";
-    }
-    return deviceFromUserAgent(userAgent);
-  }, [currentSession?.deviceName, payload?.identity.lastLoginUserAgent]);
+  const dirty = useMemo(() => {
+    if (!payload) return false;
+    const nameChanged = (payload.identity.fullName ?? "").trim() !== identityForm.fullName.trim();
+    return nameChanged || emailChanged;
+  }, [payload, identityForm.fullName, emailChanged]);
+
+  const emailValid = useMemo(() => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identityForm.email.trim()), [identityForm.email]);
+
+  const canSaveIdentity = dirty && emailValid && (!emailChanged || identityForm.currentPasswordForEmail.trim().length > 0) && !saveBusy;
 
   if (loading && !payload) {
     return (
@@ -145,22 +166,107 @@ export function ProfilePage(): ReactElement {
   return (
     <section className="dashboard-stack profile-page">
       <Card title="Profile" subtitle="Your operator account">
-        {notice ? <p className="muted">{notice}</p> : null}
         {error ? <p className="error">{error}</p> : null}
       </Card>
 
       <div className="profile-top-grid">
         <Card title="Identity">
           <div className="profile-identity">
-            <div className="profile-identity-name">{payload.identity.fullName}</div>
-            <div className="muted">{payload.identity.email ?? "—"}</div>
-            <div className="profile-kv"><span>Role</span><strong>{payload.identity.role}</strong></div>
-            <div className="profile-kv"><span>ID</span><strong>{payload.identity.adminCode}</strong></div>
+            <label className="item-review-field">
+              <span>Full Name</span>
+              <Input
+                value={identityForm.fullName}
+                onChange={(e) => setIdentityForm((prev) => ({ ...prev, fullName: e.target.value }))}
+                placeholder="Enter full name (optional)"
+              />
+            </label>
+            <label className="item-review-field">
+              <span>Email</span>
+              <Input
+                value={identityForm.email}
+                onChange={(e) => setIdentityForm((prev) => ({ ...prev, email: e.target.value }))}
+                placeholder="name@example.com"
+              />
+            </label>
+            {!emailValid ? <p className="error">Enter a valid email address.</p> : null}
+            {emailChanged ? (
+              <label className="item-review-field">
+                <span>Current Password (required for email change)</span>
+                <Input
+                  type="password"
+                  value={identityForm.currentPasswordForEmail}
+                  onChange={(e) => setIdentityForm((prev) => ({ ...prev, currentPasswordForEmail: e.target.value }))}
+                  placeholder="Confirm with current password"
+                />
+              </label>
+            ) : null}
+            <div className="profile-kv">
+              <span>Role</span>
+              <strong className="status-chip status-chip-resolved">{payload.identity.role}</strong>
+            </div>
+            <div className="profile-kv"><span>Internal ID</span><strong>{payload.identity.adminCode}</strong></div>
             <div className="profile-kv"><span>Joined</span><strong>{formatDateTime(payload.identity.joinedAt)}</strong></div>
             <div className="profile-kv"><span>Last login</span><strong>{formatDateTime(payload.identity.lastLoginAt)}</strong></div>
+            <div className="profile-security-actions">
+              <Button
+                type="button"
+                variant="primary"
+                disabled={!canSaveIdentity}
+                onClick={async () => {
+                  try {
+                    setSaveBusy(true);
+                    await api.updateAdminIdentity({
+                      fullName: identityForm.fullName,
+                      email: identityForm.email,
+                      previousEmail: payload.identity.email,
+                      currentPassword: identityForm.currentPasswordForEmail,
+                    });
+                    await load(true);
+                    toast.success("Profile updated successfully");
+                  } catch (err) {
+                    const msg = err instanceof Error ? err.message : "Failed to update profile";
+                    setError(msg);
+                    toast.error(msg);
+                  } finally {
+                    setSaveBusy(false);
+                  }
+                }}
+              >
+                {saveBusy ? "Saving..." : "Save Changes"}
+              </Button>
+              {dirty ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() =>
+                    setIdentityForm({
+                      fullName: payload.identity.fullName ?? "",
+                      email: payload.identity.email ?? "",
+                      currentPasswordForEmail: "",
+                    })
+                  }
+                >
+                  Cancel
+                </Button>
+              ) : null}
+            </div>
           </div>
         </Card>
 
+        <Card title="Security">
+          <div className="profile-security-stack">
+            <div className="profile-kv">
+              <span>Password</span>
+              <strong>••••••••••••</strong>
+            </div>
+            <Button type="button" variant="primary" onClick={() => setShowPasswordModal(true)}>
+              Change Password
+            </Button>
+          </div>
+        </Card>
+      </div>
+
+      <div className="profile-top-grid">
         <Card title="Permissions">
           <div className="profile-permissions">
             {permissionRows.map((row) => (
@@ -184,10 +290,10 @@ export function ProfilePage(): ReactElement {
 
       <Card title="Recent Actions">
         {payload.recentActions.length === 0 ? (
-          <EmptyState icon={UserCircle2} tone="muted" title="No recent actions" description="No operator activity yet." />
+          <EmptyState icon={UserCircle2} tone="muted" title="No recent actions yet." description="No recent actions yet." />
         ) : (
           <div className="profile-activity-list">
-            {payload.recentActions.map((row) => (
+            {payload.recentActions.slice(0, 5).map((row) => (
               <button
                 key={row.id}
                 type="button"
@@ -202,85 +308,82 @@ export function ProfilePage(): ReactElement {
                 <span className="muted">{relativeTime(row.createdAt)}</span>
               </button>
             ))}
-            <div className="pagination-bar">
-              <span className="muted">Page {payload.pagination.page} of {payload.pagination.totalPages}</span>
-              <div className="pagination-actions">
-                <Button type="button" variant="secondary" disabled={!payload.pagination.hasPrev} onClick={() => setPage((p) => Math.max(1, p - 1))}>
-                  ← Previous
-                </Button>
-                <Button type="button" variant="secondary" disabled={!payload.pagination.hasNext} onClick={() => setPage((p) => p + 1)}>
-                  Next →
-                </Button>
-              </div>
-            </div>
           </div>
         )}
       </Card>
-
-      <Card title="Security">
-        <div className="profile-security-stack">
-          <div className="profile-security-line">
-            <ShieldCheck size={16} />
-            <span>Current Session Active: {payload.security.currentSessionActive ? "Yes" : "No"}</span>
-          </div>
-          <div className="profile-security-line muted">Current Device: {currentDevice}</div>
-          <div className="profile-security-line muted">
-            Current IP: {currentSession?.ip ?? payload.identity.lastLoginIp ?? "Not available"}
-          </div>
-          <div className="profile-security-line muted">
-            Last Login: {formatDateTime(payload.identity.lastLoginAt)}
-          </div>
-          {payload.security.activeSessionsCount > 1 ? (
-            <div className="profile-security-line muted">{payload.security.activeSessionsCount} active sessions</div>
-          ) : null}
-          <div className="profile-security-actions">
-            <Button
-              type="button"
-              variant="danger"
-              disabled={busy !== null}
-              onClick={async () => {
-                try {
-                  setBusy("logout-current");
-                  await api.logoutCurrentAdminSession();
-                  api.logout();
-                  window.location.assign("/login");
-                } catch (err) {
-                  setError(err instanceof Error ? err.message : "Failed to logout current session.");
-                } finally {
-                  setBusy(null);
-                }
-              }}
-            >
-              {busy === "logout-current" ? "Logging out..." : "Logout Current Session"}
-            </Button>
-            {payload.security.activeSessionsCount > 1 ? (
+      {showPasswordModal ? (
+        <div className="modal-backdrop" role="presentation" onClick={() => !pwdBusy && setShowPasswordModal(false)}>
+          <div className="modal-panel" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <h3>Change Password</h3>
+            <label className="item-review-field">
+              <span>Current Password</span>
+              <Input
+                type="password"
+                value={passwordForm.currentPassword}
+                onChange={(e) => setPasswordForm((prev) => ({ ...prev, currentPassword: e.target.value }))}
+              />
+            </label>
+            <label className="item-review-field">
+              <span>New Password</span>
+              <Input
+                type="password"
+                value={passwordForm.newPassword}
+                onChange={(e) => setPasswordForm((prev) => ({ ...prev, newPassword: e.target.value }))}
+              />
+            </label>
+            <label className="item-review-field">
+              <span>Confirm Password</span>
+              <Input
+                type="password"
+                value={passwordForm.confirmPassword}
+                onChange={(e) => setPasswordForm((prev) => ({ ...prev, confirmPassword: e.target.value }))}
+              />
+            </label>
+            <div className="profile-security-line muted">
+              <ShieldCheck size={14} />
+              <span>Use at least 10 characters with mixed letters, numbers, and symbols.</span>
+            </div>
+            <div className="modal-actions">
+              <Button type="button" variant="ghost" disabled={pwdBusy} onClick={() => setShowPasswordModal(false)}>
+                Cancel
+              </Button>
               <Button
                 type="button"
-                variant="secondary"
-                disabled={busy !== null}
+                variant="primary"
+                disabled={pwdBusy}
                 onClick={async () => {
+                  const strong = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{10,}$/.test(passwordForm.newPassword);
+                  if (!strong) {
+                    toast.error("New password is too weak.");
+                    return;
+                  }
+                  if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+                    toast.error("Password confirmation does not match.");
+                    return;
+                  }
                   try {
-                    setBusy("logout-others");
-                    const result = await api.logoutOtherAdminSessions();
-                    if (result.restricted) {
-                      setNotice("Logout other sessions is temporarily restricted.");
-                    } else {
-                      setNotice(`Logged out ${result.revokedCount} other session(s).`);
-                    }
-                    await load(true);
+                    setPwdBusy(true);
+                    await api.changeAdminPassword({
+                      currentPassword: passwordForm.currentPassword,
+                      newPassword: passwordForm.newPassword,
+                      email: payload.identity.email,
+                    });
+                    setShowPasswordModal(false);
+                    setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+                    toast.success("Password updated successfully");
                   } catch (err) {
-                    setError(err instanceof Error ? err.message : "Failed to logout other sessions.");
+                    toast.error(err instanceof Error ? err.message : "Failed to update password");
                   } finally {
-                    setBusy(null);
+                    setPwdBusy(false);
                   }
                 }}
               >
-                {busy === "logout-others" ? "Processing..." : "Logout Other Sessions"}
+                {pwdBusy ? "Updating..." : "Update Password"}
               </Button>
-            ) : null}
+            </div>
           </div>
         </div>
-      </Card>
+      ) : null}
     </section>
   );
 }

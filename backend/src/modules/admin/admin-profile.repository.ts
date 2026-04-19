@@ -12,6 +12,11 @@ export interface AdminProfileIdentityRow {
   last_login_user_agent: string | null;
 }
 
+export interface AdminProfileUpdateInput {
+  fullName: string | null;
+  email: string;
+}
+
 export interface AdminProfileStatsRow {
   approvals: string;
   rejects: string;
@@ -149,6 +154,29 @@ export class AdminProfileRepository {
       [adminId],
     );
     return result.rows[0] ?? null;
+  }
+
+  async updateIdentity(adminId: string, input: AdminProfileUpdateInput): Promise<void> {
+    await this.ensureSchema();
+    await this.app.db.query(
+      `
+      UPDATE public.users
+      SET
+        full_name = $2,
+        email = $3::citext,
+        updated_at = NOW()
+      WHERE id = $1::uuid
+      `,
+      [adminId, input.fullName, input.email],
+    );
+    await this.app.db.query(
+      `
+      UPDATE public.admin_users
+      SET email = $2::citext
+      WHERE id = $1::uuid
+      `,
+      [adminId, input.email],
+    );
   }
 
   async getStats(adminId: string): Promise<AdminProfileStatsRow> {
