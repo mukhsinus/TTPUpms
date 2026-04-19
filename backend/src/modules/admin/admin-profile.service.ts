@@ -281,6 +281,7 @@ export class AdminProfileService {
       userAgent: input.userAgent,
       displayName: input.adminId,
     });
+    await this.repository.touchAdminLastLogin(input.adminId, readClientIp(input.requestIp));
     await this.audit.insert({
       actorUserId: input.adminId,
       entityTable: "auth",

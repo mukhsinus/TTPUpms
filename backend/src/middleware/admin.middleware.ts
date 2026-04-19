@@ -33,3 +33,46 @@ export async function requireAdmin(request: FastifyRequest, reply: FastifyReply)
 
   request.user = { ...request.user, role: panelRole };
 }
+
+/** Superadmin-only gate for control-plane endpoints. Must run after `requireAdmin`. */
+export async function requireSuperadmin(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  if (!request.user) {
+    reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED", {}));
+    return;
+  }
+  if (request.user.role !== "superadmin") {
+    reply.status(403).send(failure("Superadmin access required", "FORBIDDEN", {}));
+    return;
+  }
+}
+
+/**
+ * Soft-lock policy: suspended admins can still sign in and view baseline data,
+ * but sensitive write actions are blocked.
+ */
+export async function requireActiveAdminForSensitiveAction(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  if (!request.user) {
+    reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED", {}));
+    return;
+  }
+  try {
+    const row = await request.server.db.query<{ status: string | null }>(
+      `SELECT status::text AS status FROM public.admin_users WHERE id = $1::uuid LIMIT 1`,
+      [request.user.id],
+    );
+    const status = row.rows[0]?.status ?? "active";
+    if (status === "suspended") {
+      reply.status(423).send(
+        failure("Account is suspended for sensitive operations", "ADMIN_SUSPENDED", {
+          userId: request.user.id,
+        }),
+      );
+      return;
+    }
+  } catch (err) {
+    request.log.warn({ err, userId: request.user.id }, "Failed to read admin status; allowing request");
+  }
+}

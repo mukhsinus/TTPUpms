@@ -377,6 +377,20 @@ export class AdminProfileRepository {
     );
   }
 
+  async touchAdminLastLogin(adminId: string, ip: string | null): Promise<void> {
+    await this.ensureSchema();
+    await this.app.db.query(
+      `
+      UPDATE public.admin_users
+      SET
+        last_login_at = NOW(),
+        last_login_ip = COALESCE($2, last_login_ip)
+      WHERE id = $1::uuid
+      `,
+      [adminId, ip],
+    );
+  }
+
   async listSessions(adminId: string): Promise<AdminSessionRow[]> {
     await this.ensureSchema();
     const result = await this.app.db.query<AdminSessionRow>(

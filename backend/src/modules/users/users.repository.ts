@@ -3,7 +3,7 @@ import { ServiceError } from "../../utils/service-error";
 
 export interface UserProfileEntity {
   id: string;
-  email: string;
+  email: string | null;
   fullName: string | null;
   studentFullName: string | null;
   degree: "bachelor" | "master" | null;
@@ -15,7 +15,7 @@ export interface UserProfileEntity {
 
 interface UserProfileRow {
   id: string;
-  email: string;
+  email: string | null;
   full_name: string | null;
   student_full_name: string | null;
   degree: string | null;

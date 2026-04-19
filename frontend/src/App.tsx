@@ -50,6 +50,22 @@ const ProfilePage = lazy(async () => {
   const m = await loadProfilePage();
   return { default: m.ProfilePage };
 });
+const AdminsPage = lazy(async () => {
+  const m = await import("./pages/AdminsPage");
+  return { default: m.AdminsPage };
+});
+const AuditLogsPage = lazy(async () => {
+  const m = await import("./pages/AuditLogsPage");
+  return { default: m.AuditLogsPage };
+});
+const SecurityCenterPage = lazy(async () => {
+  const m = await import("./pages/SecurityCenterPage");
+  return { default: m.SecurityCenterPage };
+});
+const ReportsPage = lazy(async () => {
+  const m = await import("./pages/ReportsPage");
+  return { default: m.ReportsPage };
+});
 
 function SubmissionsEntry(): ReactElement {
   return isAdminPanelRole(api.getSessionUser()) ? <AdminSubmissionsPage /> : <SubmissionsPage />;
@@ -156,6 +172,38 @@ export default function App(): ReactElement {
               element={
                 <RoleGuard allow={["admin", "superadmin"]} redirectTo="/dashboard">
                   <UsersPage />
+                </RoleGuard>
+              }
+            />
+            <Route
+              path="/admins"
+              element={
+                <RoleGuard allow={["superadmin"]} redirectTo="/dashboard">
+                  <AdminsPage />
+                </RoleGuard>
+              }
+            />
+            <Route
+              path="/audit"
+              element={
+                <RoleGuard allow={["superadmin"]} redirectTo="/dashboard">
+                  <AuditLogsPage />
+                </RoleGuard>
+              }
+            />
+            <Route
+              path="/security"
+              element={
+                <RoleGuard allow={["superadmin"]} redirectTo="/dashboard">
+                  <SecurityCenterPage />
+                </RoleGuard>
+              }
+            />
+            <Route
+              path="/reports"
+              element={
+                <RoleGuard allow={["superadmin"]} redirectTo="/dashboard">
+                  <ReportsPage />
                 </RoleGuard>
               }
             />

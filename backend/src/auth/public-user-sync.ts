@@ -60,8 +60,7 @@ export async function syncPublicUserRoleFromAuth(
         ? authUser.user_metadata.name
         : null;
 
-  const emailForInsert =
-    email && email.length > 0 ? email : `${authUser.id}@users.supabase.local`;
+  const emailForInsert = email && email.length > 0 ? email : null;
 
   const initialRole = forceAdmin || adminPanelLogin ? "admin" : "student";
 
@@ -108,6 +107,7 @@ async function ensureAdminUsersRow(db: Pool, userId: string): Promise<void> {
     FROM public.users u
     WHERE u.id = $1::uuid
       AND u.role::text IN ('admin', 'superadmin')
+      AND u.email IS NOT NULL
     ON CONFLICT (id) DO UPDATE SET
       email = EXCLUDED.email,
       role = CASE

@@ -1,6 +1,10 @@
 import type { FastifyInstance } from "fastify";
 import { authMiddleware } from "../../middleware/auth.middleware";
-import { requireAdmin } from "../../middleware/admin.middleware";
+import {
+  requireActiveAdminForSensitiveAction,
+  requireAdmin,
+  requireSuperadmin,
+} from "../../middleware/admin.middleware";
 import { AuditLogRepository } from "../audit/audit-log.repository";
 import { NotificationService } from "../notifications/notification.service";
 import { AdminOverrideController } from "./admin-override.controller";
@@ -11,6 +15,8 @@ import { AdminProfileService } from "./admin-profile.service";
 import { AdminController } from "./admin.controller";
 import { AdminRepository } from "./admin.repository";
 import { AdminService } from "./admin.service";
+import { SuperadminController } from "./superadmin.controller";
+import { SuperadminService } from "./superadmin.service";
 
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
   const notifications = new NotificationService(app);
@@ -25,6 +31,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   const overrideRepository = new AdminOverrideRepository(app);
   const overrideService = new AdminOverrideService(overrideRepository, notifications);
   const overrideController = new AdminOverrideController(overrideService);
+  const superadminService = new SuperadminService(app, audit, notifications);
+  const superadminController = new SuperadminController(superadminService);
 
   await app.register(async (r) => {
     r.addHook("preHandler", authMiddleware);
@@ -99,6 +107,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     r.patch(
       "/submissions/:submissionId/override-score",
       {
+        preHandler: [requireActiveAdminForSensitiveAction, requireSuperadmin],
         config: { rateLimit: { max: 50, timeWindow: "1 minute" } },
       },
       overrideController.overrideScore,
@@ -107,9 +116,163 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     r.patch(
       "/submissions/:submissionId/override-status",
       {
+        preHandler: [requireActiveAdminForSensitiveAction, requireSuperadmin],
         config: { rateLimit: { max: 50, timeWindow: "1 minute" } },
       },
       overrideController.overrideStatus,
+    );
+
+    r.get(
+      "/super/dashboard",
+      {
+        preHandler: [requireSuperadmin],
+        config: { rateLimit: { max: 120, timeWindow: "1 minute" } },
+      },
+      superadminController.getDashboard,
+    );
+
+    r.get(
+      "/admins",
+      {
+        preHandler: [requireSuperadmin],
+        config: { rateLimit: { max: 120, timeWindow: "1 minute" } },
+      },
+      superadminController.listAdmins,
+    );
+
+    r.get(
+      "/admins/:adminId",
+      {
+        preHandler: [requireSuperadmin],
+        config: { rateLimit: { max: 120, timeWindow: "1 minute" } },
+      },
+      superadminController.getAdminDetail,
+    );
+
+    r.patch(
+      "/admins/:adminId/role",
+      {
+        preHandler: [requireActiveAdminForSensitiveAction, requireSuperadmin],
+        config: { rateLimit: { max: 30, timeWindow: "1 minute" } },
+      },
+      superadminController.changeAdminRole,
+    );
+
+    r.patch(
+      "/admins/:adminId/status",
+      {
+        preHandler: [requireActiveAdminForSensitiveAction, requireSuperadmin],
+        config: { rateLimit: { max: 30, timeWindow: "1 minute" } },
+      },
+      superadminController.changeAdminStatus,
+    );
+
+    r.post(
+      "/admins/:adminId/reset-password",
+      {
+        preHandler: [requireActiveAdminForSensitiveAction, requireSuperadmin],
+        config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
+      },
+      superadminController.resetAdminPassword,
+    );
+
+    r.get(
+      "/audit",
+      {
+        preHandler: [requireSuperadmin],
+        config: { rateLimit: { max: 120, timeWindow: "1 minute" } },
+      },
+      superadminController.listAuditLogs,
+    );
+
+    r.get(
+      "/security/events",
+      {
+        preHandler: [requireSuperadmin],
+        config: { rateLimit: { max: 120, timeWindow: "1 minute" } },
+      },
+      superadminController.listSecurityEvents,
+    );
+
+    r.post(
+      "/security/events/:eventId/resolve",
+      {
+        preHandler: [requireActiveAdminForSensitiveAction, requireSuperadmin],
+        config: { rateLimit: { max: 40, timeWindow: "1 minute" } },
+      },
+      superadminController.resolveSecurityEvent,
+    );
+
+    r.post(
+      "/security/admins/:adminId/revoke-sessions",
+      {
+        preHandler: [requireActiveAdminForSensitiveAction, requireSuperadmin],
+        config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
+      },
+      superadminController.revokeAdminSessions,
+    );
+
+    r.post(
+      "/submissions/:submissionId/assign",
+      {
+        preHandler: [requireActiveAdminForSensitiveAction, requireSuperadmin],
+        config: { rateLimit: { max: 50, timeWindow: "1 minute" } },
+      },
+      superadminController.assignSubmission,
+    );
+
+    r.get(
+      "/submissions/:submissionId/notes",
+      {
+        preHandler: [requireSuperadmin],
+        config: { rateLimit: { max: 120, timeWindow: "1 minute" } },
+      },
+      superadminController.listSubmissionNotes,
+    );
+
+    r.post(
+      "/submissions/:submissionId/notes",
+      {
+        preHandler: [requireActiveAdminForSensitiveAction, requireSuperadmin],
+        config: { rateLimit: { max: 50, timeWindow: "1 minute" } },
+      },
+      superadminController.addSubmissionNote,
+    );
+
+    r.get(
+      "/reports/moderation-performance.csv",
+      {
+        preHandler: [requireSuperadmin],
+        config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
+      },
+      superadminController.exportModerationPerformance,
+    );
+
+    r.get(
+      "/reports/admin-productivity.csv",
+      {
+        preHandler: [requireSuperadmin],
+        config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
+      },
+      superadminController.exportAdminProductivity,
+    );
+
+    r.get(
+      "/reports/approval-summary.csv",
+      {
+        preHandler: [requireSuperadmin],
+        config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
+      },
+      superadminController.exportApprovalSummary,
+    );
+
+    r.get(
+      "/reports/audit-export.csv",
+      {
+        preHandler: [requireSuperadmin],
+        config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
+      },
+      superadminController.exportAudit,
     );
   });
 }

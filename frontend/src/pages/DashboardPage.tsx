@@ -14,7 +14,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { api, type AdminDashboardPayload, type AdminRecentActivityItem } from "../lib/api";
+import { api, type AdminDashboardPayload, type AdminRecentActivityItem, type SuperadminDashboardPayload } from "../lib/api";
 import { isAdminPanelRole, normalizeRole } from "../lib/rbac";
 import { useToast } from "../contexts/ToastContext";
 import { EmptyState } from "../components/ui/EmptyState";
@@ -68,6 +68,7 @@ export function DashboardPage(): ReactElement {
   const toast = useToast();
   const [submissions, setSubmissions] = useState<Awaited<ReturnType<typeof api.getSubmissions>>>([]);
   const [adminDashboard, setAdminDashboard] = useState<AdminDashboardPayload | null>(null);
+  const [superDashboard, setSuperDashboard] = useState<SuperadminDashboardPayload | null>(null);
   const [activityPage, setActivityPage] = useState(1);
   const [drawerAdminId, setDrawerAdminId] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -78,6 +79,7 @@ export function DashboardPage(): ReactElement {
   const sessionUser = api.getSessionUser();
   const role = normalizeRole(sessionUser?.role ?? "student");
   const isAdmin = isAdminPanelRole(sessionUser);
+  const isSuperadmin = role === "superadmin";
   const activityCountByAdmin = useMemo(() => {
     const m = new Map<string, number>();
     for (const row of adminDashboard?.recentActivity ?? []) {
@@ -99,6 +101,10 @@ export function DashboardPage(): ReactElement {
       try {
         setLoading(true);
         if (isAdmin) {
+          if (isSuperadmin) {
+            const data = await api.getSuperadminDashboard();
+            setSuperDashboard(data);
+          }
           await loadAdminDashboard(activityPage);
         } else {
           setSubmissions(await api.getSubmissions());
@@ -136,6 +142,95 @@ export function DashboardPage(): ReactElement {
               Retry
             </Button>
           </EmptyState>
+        </Card>
+      </section>
+    );
+  }
+
+  if (isSuperadmin && superDashboard) {
+    const handleSuperRefresh = async (): Promise<void> => {
+      try {
+        setIsRefreshing(true);
+        const [ops, adminData] = await Promise.all([
+          api.getSuperadminDashboard(),
+          api.getAdminDashboard({ page: activityPage, pageSize: 12, forceRefresh: true }),
+        ]);
+        setSuperDashboard(ops);
+        setAdminDashboard(adminData);
+        toast.success("Superadmin dashboard updated");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to refresh");
+      } finally {
+        setIsRefreshing(false);
+      }
+    };
+
+    return (
+      <section className="dashboard-stack ops-dashboard">
+        <Card className="ops-header-card">
+          <h2 className="ops-title">Dashboard</h2>
+          <p className="ops-subtitle">Superadmin Control Center</p>
+        </Card>
+
+        <div className="stats-grid stats-grid-four ops-kpis">
+          <Card className="stat-card stat-card-primary">
+            <p className="stat-card-label">Pending Queue</p>
+            <h2 className="stat-card-value">{superDashboard.pendingQueue}</h2>
+          </Card>
+          <Card className="stat-card stat-card-success">
+            <p className="stat-card-label">Processed (7d)</p>
+            <h2 className="stat-card-value">{superDashboard.processed7d}</h2>
+          </Card>
+          <Card className="stat-card stat-card-warn">
+            <p className="stat-card-label">Avg Review Time</p>
+            <h2 className="stat-card-value">{superDashboard.avgReviewMinutes.toFixed(2)} min</h2>
+          </Card>
+          <Card className="stat-card stat-card-accent">
+            <p className="stat-card-label">Active Admins Today</p>
+            <h2 className="stat-card-value">{superDashboard.activeAdminsToday}</h2>
+          </Card>
+        </div>
+
+        <Card title="Security And Queue Signals">
+          <p className="muted">
+            Security alerts: <strong>{superDashboard.securityAlertsCount}</strong> · Queue overloaded:{" "}
+            <strong>{superDashboard.overloadedQueue ? "Yes" : "No"}</strong>
+          </p>
+          <ul className="submission-timeline">
+            {superDashboard.alerts.length > 0 ? (
+              superDashboard.alerts.map((alert) => (
+                <li key={alert.code}>
+                  <span className="submission-timeline-label">{alert.severity.toUpperCase()}</span>
+                  <span className="submission-timeline-value">{alert.message}</span>
+                </li>
+              ))
+            ) : (
+              <li>
+                <span className="submission-timeline-label">OK</span>
+                <span className="submission-timeline-value">No immediate system alerts.</span>
+              </li>
+            )}
+          </ul>
+        </Card>
+
+        <Card title="Quick Actions">
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Button type="button" variant="primary" onClick={() => navigate("/submissions")}>
+              Open Queue
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => navigate("/admins")}>
+              Manage Admins
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => navigate("/audit")}>
+              Open Audit Logs
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => navigate("/security")}>
+              Security Center
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => void handleSuperRefresh()} disabled={isRefreshing}>
+              {isRefreshing ? "Refreshing..." : "Refresh"}
+            </Button>
+          </div>
         </Card>
       </section>
     );

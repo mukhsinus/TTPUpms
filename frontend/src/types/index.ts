@@ -65,7 +65,7 @@ export interface SubmissionItem {
 
 export interface User {
   id: string;
-  email: string;
+  email: string | null;
   fullName: string | null;
   role: "student" | "reviewer" | "admin" | "superadmin";
   telegramUserId?: string | null;

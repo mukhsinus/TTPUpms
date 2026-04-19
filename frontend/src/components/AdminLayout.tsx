@@ -1,4 +1,13 @@
-import { ClipboardList, LayoutDashboard, LogOut, UserCircle2, X } from "lucide-react";
+import {
+  ClipboardList,
+  FileText,
+  LayoutDashboard,
+  LogOut,
+  ShieldAlert,
+  UserCircle2,
+  Users,
+  X,
+} from "lucide-react";
 import { useMemo, useState, type PropsWithChildren, type ReactElement } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { api } from "../lib/api";
@@ -15,9 +24,14 @@ export function AdminLayout({ children, onLogout }: AdminLayoutProps): ReactElem
   const location = useLocation();
   const user = api.getSessionUser();
   const role = normalizeRole(user?.role ?? "student");
+  const isSuperadmin = role === "superadmin";
 
   const pageTitle = useMemo(() => {
     if (location.pathname.startsWith("/profile")) return "Profile";
+    if (location.pathname.startsWith("/admins")) return "Admins";
+    if (location.pathname.startsWith("/audit")) return "Audit Logs";
+    if (location.pathname.startsWith("/security")) return "Security";
+    if (location.pathname.startsWith("/reports")) return "Reports";
     if (location.pathname.startsWith("/submissions/")) return "Submission detail";
     if (location.pathname.startsWith("/submissions")) return "Submissions";
     return "Dashboard";
@@ -68,6 +82,26 @@ export function AdminLayout({ children, onLogout }: AdminLayoutProps): ReactElem
             <UserCircle2 size={16} />
             Profile
           </NavLink>
+          {isSuperadmin ? (
+            <>
+              <NavLink to="/admins" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+                <Users size={16} />
+                Admins
+              </NavLink>
+              <NavLink to="/audit" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+                <FileText size={16} />
+                Audit Logs
+              </NavLink>
+              <NavLink to="/security" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+                <ShieldAlert size={16} />
+                Security
+              </NavLink>
+              <NavLink to="/reports" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+                <FileText size={16} />
+                Reports
+              </NavLink>
+            </>
+          ) : null}
         </nav>
         <div className="sidebar-user">
           <p className="user-name">{user?.fullName ?? user?.email ?? "User"}</p>

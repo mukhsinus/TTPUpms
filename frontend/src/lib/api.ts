@@ -1,7 +1,7 @@
 import type { Category, Submission, SubmissionItem, SubmissionStatus, User } from "../types";
 import { signInWithSupabasePassword } from "./auth-sign-in";
 import { ApiError } from "./api-error";
-import { normalizeRole, type AppRole } from "./rbac";
+import { isAdminPanelRole, normalizeRole, type AppRole } from "./rbac";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? import.meta.env.VITE_API_BASE_URL ?? "";
 const AUTH_TOKEN_KEY = "upms_admin_token";
@@ -243,6 +243,134 @@ export interface AdminActivityProfilePayload {
     rejects: number;
   };
   recentActivity: AdminRecentActivityItem[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+    hasPrev: boolean;
+    hasNext: boolean;
+  };
+}
+
+export interface SuperadminDashboardPayload {
+  pendingQueue: number;
+  processed7d: number;
+  avgReviewMinutes: number;
+  activeAdminsToday: number;
+  securityAlertsCount: number;
+  overloadedQueue: boolean;
+  alerts: Array<{
+    code: string;
+    message: string;
+    severity: "warning" | "critical";
+  }>;
+}
+
+export interface SuperadminAdminListPayload {
+  items: Array<{
+    id: string;
+    name: string | null;
+    email: string | null;
+    role: "admin" | "superadmin";
+    status: "active" | "suspended";
+    createdAt: string;
+    lastLoginAt: string | null;
+    lastLoginIp: string | null;
+    approvals: number;
+    rejects: number;
+    avgReviewMinutes: number;
+  }>;
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+    hasPrev: boolean;
+    hasNext: boolean;
+  };
+}
+
+export interface SuperadminAdminDetailPayload {
+  identity: {
+    id: string;
+    fullName: string | null;
+    email: string | null;
+    role: "admin" | "superadmin";
+    status: "active" | "suspended";
+    createdAt: string;
+    suspendedAt: string | null;
+    suspensionReason: string | null;
+    lastLoginAt: string | null;
+    lastLoginIp: string | null;
+  };
+  stats: {
+    approvals: number;
+    rejects: number;
+    avgReviewMinutes: number;
+  };
+  recentActivity: Array<{
+    id: string;
+    action: string;
+    targetTable: string | null;
+    targetId: string | null;
+    createdAt: string;
+  }>;
+  sessions: Array<{
+    id: string;
+    ip: string | null;
+    userAgent: string | null;
+    createdAt: string;
+    lastSeenAt: string;
+    revokedAt: string | null;
+  }>;
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+    hasPrev: boolean;
+    hasNext: boolean;
+  };
+}
+
+export interface SuperadminAuditLogsPayload {
+  items: Array<{
+    id: string;
+    time: string;
+    actorId: string | null;
+    actorName: string | null;
+    actorEmail: string | null;
+    action: string;
+    targetTable: string | null;
+    targetId: string | null;
+    details: Record<string, unknown> | null;
+    ip: string | null;
+  }>;
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+    hasPrev: boolean;
+    hasNext: boolean;
+  };
+}
+
+export interface SuperadminSecurityEventsPayload {
+  items: Array<{
+    id: string;
+    adminId: string;
+    adminName: string | null;
+    adminEmail: string | null;
+    type: "new_device_login" | "logout_others_request" | "admin_registration";
+    status: "pending" | "approved" | "rejected";
+    metadata: Record<string, unknown> | null;
+    approvedBy: string | null;
+    approvedAt: string | null;
+    createdAt: string;
+    updatedAt: string;
+  }>;
   pagination: {
     page: number;
     pageSize: number;
@@ -837,6 +965,10 @@ export const api = {
     });
   },
 
+  getSuperadminDashboard(): Promise<SuperadminDashboardPayload> {
+    return request<SuperadminDashboardPayload>("/api/admin/super/dashboard");
+  },
+
   getAdminProfile(params?: { page?: number; pageSize?: number; forceRefresh?: boolean }): Promise<AdminProfilePayload> {
     const page = params?.page ?? 1;
     const pageSize = params?.pageSize ?? 10;
@@ -895,6 +1027,144 @@ export const api = {
       pageSize: String(pageSize),
     });
     return request<AdminActivityProfilePayload>(`/api/admin/dashboard/admins/${adminId}?${q.toString()}`);
+  },
+
+  getSuperadminAdmins(params?: { page?: number; pageSize?: number; search?: string }): Promise<SuperadminAdminListPayload> {
+    const q = new URLSearchParams({
+      page: String(params?.page ?? 1),
+      pageSize: String(params?.pageSize ?? 20),
+    });
+    if (params?.search?.trim()) {
+      q.set("search", params.search.trim());
+    }
+    return request<SuperadminAdminListPayload>(`/api/admin/admins?${q.toString()}`);
+  },
+
+  getSuperadminAdminDetail(
+    adminId: string,
+    params?: { page?: number; pageSize?: number },
+  ): Promise<SuperadminAdminDetailPayload> {
+    const q = new URLSearchParams({
+      page: String(params?.page ?? 1),
+      pageSize: String(params?.pageSize ?? 10),
+    });
+    return request<SuperadminAdminDetailPayload>(`/api/admin/admins/${adminId}?${q.toString()}`);
+  },
+
+  async setSuperadminRole(adminId: string, role: "admin" | "superadmin"): Promise<void> {
+    await request<{ ok: boolean }>(`/api/admin/admins/${adminId}/role`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    });
+  },
+
+  async setAdminStatus(adminId: string, status: "active" | "suspended", reason?: string): Promise<void> {
+    await request<{ ok: boolean }>(`/api/admin/admins/${adminId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status, reason }),
+    });
+  },
+
+  resetAdminPassword(adminId: string, temporaryPassword?: string): Promise<{ temporaryPassword: string; email: string | null }> {
+    return request<{ temporaryPassword: string; email: string | null }>(`/api/admin/admins/${adminId}/reset-password`, {
+      method: "POST",
+      body: JSON.stringify({ temporaryPassword }),
+    });
+  },
+
+  getSuperadminAuditLogs(params?: {
+    page?: number;
+    pageSize?: number;
+    adminId?: string;
+    action?: string;
+    search?: string;
+    dateFrom?: string;
+    dateTo?: string;
+  }): Promise<SuperadminAuditLogsPayload> {
+    const q = new URLSearchParams({
+      page: String(params?.page ?? 1),
+      pageSize: String(params?.pageSize ?? 25),
+    });
+    if (params?.adminId) q.set("adminId", params.adminId);
+    if (params?.action) q.set("action", params.action);
+    if (params?.search?.trim()) q.set("search", params.search.trim());
+    if (params?.dateFrom) q.set("dateFrom", params.dateFrom);
+    if (params?.dateTo) q.set("dateTo", params.dateTo);
+    return request<SuperadminAuditLogsPayload>(`/api/admin/audit?${q.toString()}`);
+  },
+
+  getSuperadminSecurityEvents(params?: {
+    page?: number;
+    pageSize?: number;
+    status?: "pending" | "approved" | "rejected";
+    type?: "new_device_login" | "logout_others_request" | "admin_registration";
+  }): Promise<SuperadminSecurityEventsPayload> {
+    const q = new URLSearchParams({
+      page: String(params?.page ?? 1),
+      pageSize: String(params?.pageSize ?? 25),
+    });
+    if (params?.status) q.set("status", params.status);
+    if (params?.type) q.set("type", params.type);
+    return request<SuperadminSecurityEventsPayload>(`/api/admin/security/events?${q.toString()}`);
+  },
+
+  async resolveSecurityEvent(eventId: string, status: "approved" | "rejected"): Promise<void> {
+    await request<{ ok: boolean }>(`/api/admin/security/events/${eventId}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ status }),
+    });
+  },
+
+  revokeAdminSessions(adminId: string): Promise<{ revokedCount: number }> {
+    return request<{ revokedCount: number }>(`/api/admin/security/admins/${adminId}/revoke-sessions`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  },
+
+  async assignSubmissionToAdmin(submissionId: string, adminId: string): Promise<void> {
+    await request<{ ok: boolean }>(`/api/admin/submissions/${submissionId}/assign`, {
+      method: "POST",
+      body: JSON.stringify({ adminId }),
+    });
+  },
+
+  async addSubmissionInternalNote(submissionId: string, note: string): Promise<void> {
+    await request<{ ok: boolean }>(`/api/admin/submissions/${submissionId}/notes`, {
+      method: "POST",
+      body: JSON.stringify({ note }),
+    });
+  },
+
+  getSubmissionInternalNotes(submissionId: string): Promise<
+    Array<{ id: string; submission_id: string; admin_id: string; admin_name: string | null; note: string; created_at: string }>
+  > {
+    return request<Array<{ id: string; submission_id: string; admin_id: string; admin_name: string | null; note: string; created_at: string }>>(
+      `/api/admin/submissions/${submissionId}/notes`,
+    );
+  },
+
+  async downloadReportCsv(
+    kind: "moderation-performance" | "admin-productivity" | "approval-summary" | "audit-export",
+    fromIso: string,
+    toIso: string,
+  ): Promise<Blob> {
+    const token = getAuthToken();
+    const q = new URLSearchParams({ from: fromIso, to: toIso });
+    const path = `/api/admin/reports/${kind}.csv?${q.toString()}`;
+    const headers = new Headers();
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+    const sessionUser = api.getSessionUser();
+    if (sessionUser && isAdminPanelRole(sessionUser)) {
+      headers.set("x-admin-session-id", getOrCreateAdminSessionId());
+    }
+    const response = await fetch(`${API_BASE_URL}${path}`, { method: "GET", headers });
+    if (!response.ok) {
+      throw new ApiError(`CSV export failed (${response.status})`, response.status);
+    }
+    return response.blob();
   },
 
   getAdminSubmissions(params: {

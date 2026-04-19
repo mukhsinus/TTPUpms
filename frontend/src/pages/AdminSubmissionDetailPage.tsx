@@ -10,6 +10,7 @@ import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Input } from "../components/ui/Input";
 import { SubmissionDetailSkeleton } from "../components/ui/PageSkeletons";
+import { normalizeRole } from "../lib/rbac";
 
 export function AdminSubmissionDetailPage(): ReactElement {
   const navigate = useNavigate();
@@ -24,6 +25,13 @@ export function AdminSubmissionDetailPage(): ReactElement {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const [assignmentAdminId, setAssignmentAdminId] = useState("");
+  const [noteText, setNoteText] = useState("");
+  const [notes, setNotes] = useState<
+    Array<{ id: string; submission_id: string; admin_id: string; admin_name: string | null; note: string; created_at: string }>
+  >([]);
+  const role = normalizeRole(api.getSessionUser()?.role ?? "student");
+  const isSuperadmin = role === "superadmin";
 
   const reload = useCallback(async (): Promise<void> => {
     if (!submissionId) {
@@ -31,7 +39,11 @@ export function AdminSubmissionDetailPage(): ReactElement {
     }
     const data = await api.getAdminSubmissionDetail(submissionId);
     setDetail(data);
-  }, [submissionId]);
+    if (isSuperadmin) {
+      const nextNotes = await api.getSubmissionInternalNotes(submissionId);
+      setNotes(nextNotes);
+    }
+  }, [submissionId, isSuperadmin]);
 
   useEffect(() => {
     if (!submissionId) {
@@ -45,6 +57,10 @@ export function AdminSubmissionDetailPage(): ReactElement {
         const data = await api.getAdminSubmissionDetail(submissionId);
         if (!cancelled) {
           setDetail(data);
+          if (isSuperadmin) {
+            const nextNotes = await api.getSubmissionInternalNotes(submissionId);
+            setNotes(nextNotes);
+          }
         }
       } catch (err) {
         if (!cancelled) {
@@ -59,7 +75,7 @@ export function AdminSubmissionDetailPage(): ReactElement {
     return () => {
       cancelled = true;
     };
-  }, [submissionId]);
+  }, [submissionId, isSuperadmin]);
 
   const submission = detail?.submission;
   const canModerate = submission?.status === "pending";
@@ -244,6 +260,11 @@ export function AdminSubmissionDetailPage(): ReactElement {
               {submission.reviewerEmail ? ` · ${submission.reviewerEmail}` : ""}
             </p>
           ) : null}
+          {submission.reviewedById ? (
+            <p className="muted">
+              Processed by: {submission.reviewerEmail ?? submission.reviewedById}
+            </p>
+          ) : null}
         </Card>
 
         <Card title="Student">
@@ -328,6 +349,189 @@ export function AdminSubmissionDetailPage(): ReactElement {
                 </li>
               ))}
             </ul>
+          </Card>
+        ) : null}
+
+        {isSuperadmin ? (
+          <Card title="Superadmin Controls">
+            <div className="items-stack">
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={async () => {
+                    if (!submissionId) return;
+                    try {
+                      setBusy(true);
+                      await api.setSubmissionStatus({
+                        submissionId,
+                        status: "review",
+                        reason: "Reopened by superadmin",
+                      });
+                      await reload();
+                      toast.success("Submission reopened");
+                    } catch (err) {
+                      setActionError(err instanceof Error ? err.message : "Reopen failed");
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  Reopen
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  disabled={busy}
+                  onClick={async () => {
+                    if (!submissionId) return;
+                    try {
+                      setBusy(true);
+                      await api.setSubmissionStatus({
+                        submissionId,
+                        status: "approved",
+                        reason: "Force approved by superadmin",
+                      });
+                      await reload();
+                      toast.success("Submission force-approved");
+                    } catch (err) {
+                      setActionError(err instanceof Error ? err.message : "Force approve failed");
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  Force Approve
+                </Button>
+                <Button
+                  type="button"
+                  variant="danger"
+                  disabled={busy}
+                  onClick={async () => {
+                    if (!submissionId) return;
+                    try {
+                      setBusy(true);
+                      await api.setSubmissionStatus({
+                        submissionId,
+                        status: "rejected",
+                        reason: "Force rejected by superadmin",
+                      });
+                      await reload();
+                      toast.success("Submission force-rejected");
+                    } catch (err) {
+                      setActionError(err instanceof Error ? err.message : "Force reject failed");
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  Force Reject
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={async () => {
+                    if (!submissionId) return;
+                    const raw = window.prompt("Set total approved score", submission.totalPoints.toString());
+                    if (!raw) return;
+                    const next = Number(raw);
+                    if (!Number.isFinite(next) || next < 0) {
+                      setActionError("Score must be a non-negative number.");
+                      return;
+                    }
+                    try {
+                      setBusy(true);
+                      await api.setSubmissionScore({
+                        submissionId,
+                        totalScore: next,
+                        reason: "Edited by superadmin",
+                      });
+                      await reload();
+                      toast.success("Approved score updated");
+                    } catch (err) {
+                      setActionError(err instanceof Error ? err.message : "Score update failed");
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  Edit Approved Score
+                </Button>
+              </div>
+
+              <label className="item-review-field">
+                <span>Assign To Admin (UUID)</span>
+                <Input
+                  value={assignmentAdminId}
+                  onChange={(e) => setAssignmentAdminId(e.target.value)}
+                  placeholder="Target admin UUID"
+                />
+              </label>
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={busy || assignmentAdminId.trim().length === 0}
+                onClick={async () => {
+                  if (!submissionId || !assignmentAdminId.trim()) return;
+                  try {
+                    setBusy(true);
+                    await api.assignSubmissionToAdmin(submissionId, assignmentAdminId.trim());
+                    setAssignmentAdminId("");
+                    toast.success("Submission assigned");
+                  } catch (err) {
+                    setActionError(err instanceof Error ? err.message : "Assign failed");
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                Assign
+              </Button>
+
+              <label className="item-review-field">
+                <span>Internal Note</span>
+                <textarea
+                  className="ui-input"
+                  rows={3}
+                  value={noteText}
+                  onChange={(e) => setNoteText(e.target.value)}
+                  placeholder="Internal superadmin note..."
+                />
+              </label>
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={busy || noteText.trim().length === 0}
+                onClick={async () => {
+                  if (!submissionId || !noteText.trim()) return;
+                  try {
+                    setBusy(true);
+                    await api.addSubmissionInternalNote(submissionId, noteText.trim());
+                    setNoteText("");
+                    await reload();
+                    toast.success("Note added");
+                  } catch (err) {
+                    setActionError(err instanceof Error ? err.message : "Note add failed");
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                Add Note
+              </Button>
+              <ul className="submission-timeline">
+                {notes.map((n) => (
+                  <li key={n.id}>
+                    <span className="submission-timeline-label">{n.admin_name ?? n.admin_id}</span>
+                    <span className="submission-timeline-value">
+                      {n.note} · {new Date(n.created_at).toLocaleString()}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           </Card>
         ) : null}
       </div>

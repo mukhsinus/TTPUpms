@@ -75,8 +75,8 @@ $$;
 -- Tables
 -- -----------------------------
 create table if not exists public.users (
-  id uuid primary key references auth.users(id) on delete cascade,
-  email citext not null unique,
+  id uuid primary key,
+  email citext,
   full_name text,
   telegram_id bigint unique,
   telegram_username text,
@@ -475,6 +475,7 @@ for each row execute function public.enforce_reviews_submission_item_matches_sub
 -- -----------------------------
 create index if not exists idx_users_role on public.users(role);
 create index if not exists idx_users_telegram_id on public.users(telegram_id);
+create unique index if not exists uq_users_email_not_null on public.users(email) where email is not null;
 
 create index if not exists idx_submissions_user_id on public.submissions(user_id);
 create index if not exists idx_submissions_status on public.submissions(status);
