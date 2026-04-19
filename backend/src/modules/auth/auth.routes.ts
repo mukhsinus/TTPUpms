@@ -97,14 +97,19 @@ async function handleMe(
   if (adminPanelLogin && (role === "admin" || role === "superadmin")) {
     const rawSessionToken = request.headers["x-admin-session-id"];
     const sessionToken = Array.isArray(rawSessionToken) ? rawSessionToken[0] : rawSessionToken;
-    await profileService.recordAdminPanelLogin({
-      adminId: id,
-      sessionToken: (sessionToken ?? request.id).trim(),
-      requestIp: request.ip,
-      userAgent: readUserAgent(request),
-    });
+    void profileService
+      .recordAdminPanelLogin({
+        adminId: id,
+        sessionToken: (sessionToken ?? request.id).trim(),
+        requestIp: request.ip,
+        userAgent: readUserAgent(request),
+      })
+      .catch((err) => {
+        request.log.warn({ err, userId: id }, "Deferred admin login security tracking failed");
+      });
   }
 
+  reply.header("Cache-Control", "private, no-store");
   reply.send(
     success({
       userId: id,

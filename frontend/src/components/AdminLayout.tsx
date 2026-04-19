@@ -23,6 +23,16 @@ export function AdminLayout({ children, onLogout }: AdminLayoutProps): ReactElem
     return "Dashboard";
   }, [location.pathname]);
 
+  const prefetchDashboard = (): void => {
+    void api.getAdminDashboard({ page: 1, pageSize: 12 }).catch(() => undefined);
+  };
+  const prefetchSubmissions = (): void => {
+    void api.getAdminSubmissions({ page: 1, pageSize: 20 }).catch(() => undefined);
+  };
+  const prefetchProfile = (): void => {
+    void api.getAdminProfile({ page: 1, pageSize: 10 }).catch(() => undefined);
+  };
+
   return (
     <div className="dashboard-shell">
       <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}>
@@ -34,15 +44,27 @@ export function AdminLayout({ children, onLogout }: AdminLayoutProps): ReactElem
           </div>
         </div>
         <nav className="sidebar-nav">
-          <NavLink to="/dashboard" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+          <NavLink
+            to="/dashboard"
+            onMouseEnter={prefetchDashboard}
+            className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
+          >
             <LayoutDashboard size={16} />
             Dashboard
           </NavLink>
-          <NavLink to="/submissions" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+          <NavLink
+            to="/submissions"
+            onMouseEnter={prefetchSubmissions}
+            className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
+          >
             <ClipboardList size={16} />
             Submissions
           </NavLink>
-          <NavLink to="/profile" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+          <NavLink
+            to="/profile"
+            onMouseEnter={prefetchProfile}
+            className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
+          >
             <UserCircle2 size={16} />
             Profile
           </NavLink>

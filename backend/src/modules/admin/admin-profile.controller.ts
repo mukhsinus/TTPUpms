@@ -40,6 +40,7 @@ export class AdminProfileController {
         requestIp: request.ip,
         userAgent: readUserAgent(request),
       });
+      reply.header("Cache-Control", "private, max-age=5, stale-while-revalidate=20");
       reply.send(success(data));
     } catch (error) {
       this.handleError(reply, error);

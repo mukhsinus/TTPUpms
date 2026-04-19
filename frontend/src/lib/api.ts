@@ -21,6 +21,20 @@ let adminDashboardCache:
       data: AdminDashboardPayload;
     }
   | null = null;
+let adminSubmissionsCache = new Map<
+  string,
+  {
+    expiresAt: number;
+    data: AdminSubmissionsListPayload;
+  }
+>();
+let adminSubmissionDetailCache = new Map<
+  string,
+  {
+    expiresAt: number;
+    data: AdminSubmissionDetailPayload;
+  }
+>();
 let adminProfileCache:
   | {
       key: string;
@@ -28,6 +42,9 @@ let adminProfileCache:
       data: AdminProfilePayload;
     }
   | null = null;
+
+const ADMIN_LIST_CACHE_TTL_MS = 10_000;
+const ADMIN_DETAIL_CACHE_TTL_MS = 15_000;
 
 interface RequestResultOptions {
   /** When true, a 401 does not clear storage or navigate (e.g. login probe before token is stored). */
@@ -379,6 +396,26 @@ function getOrCreateAdminSessionId(): string {
   }
 }
 
+function keyFromSubmissionsParams(params: {
+  page?: number;
+  pageSize?: number;
+  status?: AdminModerationStatus;
+  category?: string;
+  search?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}): string {
+  return JSON.stringify({
+    page: params.page ?? 1,
+    pageSize: params.pageSize ?? 20,
+    status: params.status ?? "",
+    category: params.category?.trim() ?? "",
+    search: params.search?.trim() ?? "",
+    dateFrom: params.dateFrom ?? "",
+    dateTo: params.dateTo ?? "",
+  });
+}
+
 function getStoredServerRole(): AppRole | null {
   try {
     const raw = localStorage.getItem(AUTH_ROLE_KEY);
@@ -543,6 +580,8 @@ export const api = {
     }
     adminDashboardCache = null;
     adminProfileCache = null;
+    adminSubmissionsCache.clear();
+    adminSubmissionDetailCache.clear();
   },
 
   getSessionUser(): SessionUser | null {
@@ -627,6 +666,8 @@ export const api = {
     setSessionRoleFromServer(me.data.role);
     adminDashboardCache = null;
     adminProfileCache = null;
+    adminSubmissionsCache.clear();
+    adminSubmissionDetailCache.clear();
   },
 
   async getDashboardStats(): Promise<{
@@ -747,6 +788,11 @@ export const api = {
         status: input.status,
         reason: input.reason,
       }),
+    }).then((data) => {
+      adminSubmissionDetailCache.delete(input.submissionId);
+      adminSubmissionsCache.clear();
+      adminDashboardCache = null;
+      return data;
     });
   },
 
@@ -757,6 +803,11 @@ export const api = {
         totalScore: input.totalScore,
         reason: input.reason,
       }),
+    }).then((data) => {
+      adminSubmissionDetailCache.delete(input.submissionId);
+      adminSubmissionsCache.clear();
+      adminDashboardCache = null;
+      return data;
     });
   },
 
@@ -854,7 +905,15 @@ export const api = {
     search?: string;
     dateFrom?: string;
     dateTo?: string;
+    forceRefresh?: boolean;
   }): Promise<AdminSubmissionsListPayload> {
+    const cacheKey = keyFromSubmissionsParams(params);
+    const now = Date.now();
+    const cached = adminSubmissionsCache.get(cacheKey);
+    if (!params.forceRefresh && cached && cached.expiresAt > now) {
+      return Promise.resolve(cached.data);
+    }
+
     const q = new URLSearchParams();
     if (params.page !== undefined) {
       q.set("page", String(params.page));
@@ -878,17 +937,41 @@ export const api = {
       q.set("dateTo", params.dateTo);
     }
     const suffix = q.toString() ? `?${q.toString()}` : "";
-    return request<AdminSubmissionsListPayload>(`/api/admin/submissions${suffix}`);
+    return request<AdminSubmissionsListPayload>(`/api/admin/submissions${suffix}`).then((data) => {
+      adminSubmissionsCache.set(cacheKey, {
+        expiresAt: Date.now() + ADMIN_LIST_CACHE_TTL_MS,
+        data,
+      });
+      return data;
+    });
   },
 
-  getAdminSubmissionDetail(submissionId: string): Promise<AdminSubmissionDetailPayload> {
-    return request<AdminSubmissionDetailPayload>(`/api/admin/submissions/${submissionId}`);
+  getAdminSubmissionDetail(submissionId: string, options?: { forceRefresh?: boolean }): Promise<AdminSubmissionDetailPayload> {
+    const key = submissionId;
+    const now = Date.now();
+    const cached = adminSubmissionDetailCache.get(key);
+    if (!options?.forceRefresh && cached && cached.expiresAt > now) {
+      return Promise.resolve(cached.data);
+    }
+    return request<AdminSubmissionDetailPayload>(`/api/admin/submissions/${submissionId}`).then((data) => {
+      adminSubmissionDetailCache.set(key, {
+        expiresAt: Date.now() + ADMIN_DETAIL_CACHE_TTL_MS,
+        data,
+      });
+      return data;
+    });
   },
 
   adminApproveSubmission(submissionId: string, body: { score?: number }): Promise<AdminSubmissionDetailPayload["submission"]> {
     return request<AdminSubmissionDetailPayload["submission"]>(`/api/admin/submissions/${submissionId}/approve`, {
       method: "POST",
       body: JSON.stringify(body),
+    }).then((data) => {
+      adminSubmissionDetailCache.delete(submissionId);
+      adminSubmissionsCache.clear();
+      adminDashboardCache = null;
+      adminProfileCache = null;
+      return data;
     });
   },
 
@@ -899,6 +982,12 @@ export const api = {
     return request<AdminSubmissionDetailPayload["submission"]>(`/api/admin/submissions/${submissionId}/reject`, {
       method: "POST",
       body: JSON.stringify(body),
+    }).then((data) => {
+      adminSubmissionDetailCache.delete(submissionId);
+      adminSubmissionsCache.clear();
+      adminDashboardCache = null;
+      adminProfileCache = null;
+      return data;
     });
   },
 

@@ -22,6 +22,7 @@ export class AdminController {
     }
     try {
       const data = await this.service.getMetrics();
+      reply.header("Cache-Control", "private, max-age=5, stale-while-revalidate=20");
       reply.send(success(data));
     } catch (error) {
       this.handleError(reply, error);
@@ -36,6 +37,7 @@ export class AdminController {
     try {
       const query = adminDashboardQuerySchema.parse(request.query);
       const data = await this.service.getDashboard(query);
+      reply.header("Cache-Control", "private, max-age=5, stale-while-revalidate=20");
       reply.send(success(data));
     } catch (error) {
       this.handleError(reply, error);
@@ -51,6 +53,7 @@ export class AdminController {
       const params = adminDashboardAdminParamsSchema.parse(request.params);
       const query = adminDashboardQuerySchema.parse(request.query);
       const data = await this.service.getAdminActivityProfile(params.adminId, query);
+      reply.header("Cache-Control", "private, max-age=5, stale-while-revalidate=20");
       reply.send(success(data));
     } catch (error) {
       this.handleError(reply, error);
@@ -65,6 +68,7 @@ export class AdminController {
     try {
       const query = adminSubmissionsQuerySchema.parse(request.query);
       const data = await this.service.listSubmissions(query);
+      reply.header("Cache-Control", "private, max-age=5, stale-while-revalidate=20");
       reply.send(success(data));
     } catch (error) {
       this.handleError(reply, error);
@@ -79,6 +83,7 @@ export class AdminController {
     try {
       const params = adminSubmissionIdParamsSchema.parse(request.params);
       const data = await this.service.getSubmissionDetail(params.id);
+      reply.header("Cache-Control", "private, max-age=10, stale-while-revalidate=30");
       reply.send(success(data));
     } catch (error) {
       this.handleError(reply, error);

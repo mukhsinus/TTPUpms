@@ -1,4 +1,4 @@
-import { lazy, Suspense, type ReactElement } from "react";
+import { lazy, Suspense, useEffect, type ReactElement } from "react";
 import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { AdminLayout } from "./components/AdminLayout";
 import { AppLayout } from "./components/AppLayout";
@@ -10,12 +10,16 @@ import { api } from "./lib/api";
 import { isAdminPanelRole } from "./lib/rbac";
 import { LoginPage } from "./pages/LoginPage";
 
+const loadDashboardPage = async () => import("./pages/DashboardPage");
+const loadAdminSubmissionsPage = async () => import("./pages/AdminSubmissionsPage");
+const loadProfilePage = async () => import("./pages/ProfilePage");
+
 const DashboardPage = lazy(async () => {
-  const m = await import("./pages/DashboardPage");
+  const m = await loadDashboardPage();
   return { default: m.DashboardPage };
 });
 const AdminSubmissionsPage = lazy(async () => {
-  const m = await import("./pages/AdminSubmissionsPage");
+  const m = await loadAdminSubmissionsPage();
   return { default: m.AdminSubmissionsPage };
 });
 const AdminSubmissionDetailPage = lazy(async () => {
@@ -43,7 +47,7 @@ const UsersPage = lazy(async () => {
   return { default: m.UsersPage };
 });
 const ProfilePage = lazy(async () => {
-  const m = await import("./pages/ProfilePage");
+  const m = await loadProfilePage();
   return { default: m.ProfilePage };
 });
 
@@ -57,6 +61,34 @@ function SubmissionDetailEntry(): ReactElement {
 
 function AuthenticatedShell({ onLogout }: { onLogout: () => void }): ReactElement {
   const user = api.getSessionUser();
+  useEffect(() => {
+    if (!isAdminPanelRole(user)) {
+      return;
+    }
+    const warm = (): void => {
+      void loadDashboardPage();
+      void loadAdminSubmissionsPage();
+      void loadProfilePage();
+      void api.getAdminDashboard({ page: 1, pageSize: 12 }).catch(() => undefined);
+      void api.getAdminSubmissions({ page: 1, pageSize: 20 }).catch(() => undefined);
+      void api.getAdminProfile({ page: 1, pageSize: 10 }).catch(() => undefined);
+    };
+    const browser = globalThis as typeof globalThis & {
+      requestIdleCallback?: (cb: IdleRequestCallback) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    if (typeof browser.requestIdleCallback === "function") {
+      const handle = browser.requestIdleCallback(
+        () => warm(),
+      );
+      return () => {
+        browser.cancelIdleCallback?.(handle);
+      };
+    }
+    const t = globalThis.setTimeout(warm, 120);
+    return () => globalThis.clearTimeout(t);
+  }, [user]);
+
   if (isAdminPanelRole(user)) {
     return (
       <AdminLayout onLogout={onLogout}>
