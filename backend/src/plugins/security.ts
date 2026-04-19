@@ -1,5 +1,4 @@
 import cors from "@fastify/cors";
-import compress from "@fastify/compress";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import type { FastifyInstance } from "fastify";
@@ -59,11 +58,5 @@ export async function registerSecurityPlugins(app: FastifyInstance): Promise<voi
     keyGenerator: (request) => request.ip,
     errorResponseBuilder: (_request, context) =>
       failure(`Rate limit exceeded. Retry in ${context.after}.`, "RATE_LIMITED", { retryAfter: context.after }),
-  });
-
-  await app.register(compress, {
-    global: true,
-    encodings: ["br", "gzip", "deflate"],
-    threshold: 1024,
   });
 }

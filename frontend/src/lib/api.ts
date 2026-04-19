@@ -721,9 +721,13 @@ async function requestResult<T>(
   }
 
   if (!payload || payload.error !== null) {
+    const hint =
+      !rawText.trim() || typeof parsed !== "object"
+        ? "Empty or incomplete response from server (connection may have closed early)."
+        : "Invalid API response format";
     return {
       data: null,
-      error: "Invalid API response format",
+      error: hint,
       statusCode: response.status,
     };
   }
