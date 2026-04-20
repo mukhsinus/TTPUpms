@@ -130,13 +130,10 @@ export function AdminSubmissionsPage(): ReactElement {
   const [studentOverview, setStudentOverview] = useState<AdminStudentOverviewPayload | null>(null);
 
   useEffect(() => {
-    if (initialSearchFromUrl === searchInput) {
-      return;
-    }
     setPage(1);
     setSearchInput(initialSearchFromUrl);
     setDebouncedSearch(initialSearchFromUrl);
-  }, [initialSearchFromUrl, searchInput]);
+  }, [initialSearchFromUrl]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
