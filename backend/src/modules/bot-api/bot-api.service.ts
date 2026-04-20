@@ -1352,16 +1352,23 @@ export class BotApiService {
     bytes: Buffer;
   }): Promise<{ proofFileUrl: string; mimeType: string; sizeBytes: number }> {
     if (!ALLOWED_MIME_TYPES.has(input.mimeType)) {
-      throw new Error("Only PDF, JPG, and PNG files are allowed");
+      throw new BotApiHttpError(400, "Only PDF, JPG, and PNG files are allowed", "VALIDATION_ERROR");
     }
 
     if (input.bytes.byteLength > TEN_MB) {
-      throw new Error("File exceeds maximum size of 10MB");
+      throw new BotApiHttpError(400, "File exceeds maximum size of 10MB", "VALIDATION_ERROR");
     }
 
     const user = await this.findOrCreateUserByTelegramId(input.telegramId);
     const checksum = createHash("sha256").update(input.bytes).digest("hex");
-    await this.antiFraud.assertNoDuplicateFile({ userId: user.id, checksum });
+    try {
+      await this.antiFraud.assertNoDuplicateFile({ userId: user.id, checksum });
+    } catch (error) {
+      if (error instanceof AntiFraudError) {
+        throw new BotApiHttpError(error.statusCode, error.message, "ANTI_FRAUD");
+      }
+      throw error;
+    }
     const safeFilename = toSafeFilename(input.filename);
     const storagePath = `${user.id}/${randomUUID()}-${safeFilename}`;
 
@@ -1375,7 +1382,7 @@ export class BotApiService {
         { telegram_id: input.telegramId, user_id: user.id, err: uploadResult.error.message },
         "Proof upload failed",
       );
-      throw new Error("Storage upload failed");
+      throw new BotApiHttpError(500, "Storage upload failed", "STORAGE_UPLOAD_FAILED");
     }
 
     const { data: publicUrlData } = this.app.supabaseAdmin.storage.from(env.STORAGE_BUCKET).getPublicUrl(storagePath);

@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { getPostgresDriverErrorFields } from "../../utils/pg-http-map";
 
 interface DuplicateRow {
   id: string;
@@ -50,16 +51,29 @@ export class AntiFraudService {
   }
 
   async assertNoDuplicateFile(input: { userId: string; checksum: string }): Promise<void> {
-    const result = await this.app.db.query<DuplicateRow>(
-      `
-      SELECT id
-      FROM files
-      WHERE user_id = $1
-        AND checksum_sha256 = $2
-      LIMIT 1
-      `,
-      [input.userId, input.checksum],
-    );
+    let result;
+    try {
+      result = await this.app.db.query<DuplicateRow>(
+        `
+        SELECT id
+        FROM files
+        WHERE user_id = $1
+          AND checksum_sha256 = $2
+        LIMIT 1
+        `,
+        [input.userId, input.checksum],
+      );
+    } catch (error) {
+      const pg = getPostgresDriverErrorFields(error);
+      if (pg?.code === "42P01" || pg?.code === "42703") {
+        this.app.log.warn(
+          { user_id: input.userId, code: pg.code, message: pg.message },
+          "Skipping duplicate file check: files schema is behind",
+        );
+        return;
+      }
+      throw error;
+    }
 
     if (result.rows[0]) {
       throw new AntiFraudError(409, "Duplicate file detected");

@@ -14,7 +14,7 @@ import { ScoringRulesRepository } from "../scoring/scoring-rules.repository";
 import { SubmissionsRepository } from "../submissions/submissions.repository";
 import { SubmissionsService } from "../submissions/submissions.service";
 import { UsersRepository } from "../users/users.repository";
-import { AntiFraudService } from "../validation/anti-fraud.service";
+import { AntiFraudError, AntiFraudService } from "../validation/anti-fraud.service";
 import { ServiceError } from "../../utils/service-error";
 import { BotApiHttpError } from "./bot-api-errors";
 import { updateUserProfileBodySchema } from "../users/users.schema";
@@ -228,6 +228,11 @@ function handleRouteError(app: FastifyInstance, reply: FastifyReply, error: unkn
 
   if (error instanceof ServiceError) {
     reply.status(error.statusCode).send(failure(error.message, error.clientCode ?? "SERVICE_ERROR", {}));
+    return;
+  }
+
+  if (error instanceof AntiFraudError) {
+    reply.status(error.statusCode).send(failure(error.message, "ANTI_FRAUD", {}));
     return;
   }
 
