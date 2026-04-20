@@ -15,6 +15,15 @@ function normalizeBotApiKey(value: string | undefined): string | undefined {
   return s.length ? s : undefined;
 }
 
+function normalizeEnvString(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  let s = value.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").trim();
+  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+    s = s.slice(1, -1).trim();
+  }
+  return s.length ? s : undefined;
+}
+
 const resolvedDatabaseUrl =
   process.env.DATABASE_URL ??
   process.env.SUPABASE_DB_URL ??
@@ -28,6 +37,7 @@ const envInput = {
   DATABASE_URL: resolvedDatabaseUrl,
   SUPABASE_DB_URL: process.env.SUPABASE_DB_URL ?? resolvedDatabaseUrl,
   BOT_API_KEY: normalizeBotApiKey(process.env.BOT_API_KEY),
+  STORAGE_BUCKET: normalizeEnvString(process.env.STORAGE_BUCKET),
 };
 
 const envSchema = z.object({

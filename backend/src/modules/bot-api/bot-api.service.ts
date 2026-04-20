@@ -133,9 +133,55 @@ export interface BotCategoryCatalogEntry {
 
 const TEN_MB = 10 * 1024 * 1024;
 const ALLOWED_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
+const ALLOWED_MIME_TYPES_ARRAY = [...ALLOWED_MIME_TYPES];
 
 function toSafeFilename(filename: string): string {
   return filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+function readStorageErrorStatusCode(error: unknown): number | null {
+  if (typeof error !== "object" || error === null || !("statusCode" in error)) {
+    return null;
+  }
+  const code = (error as { statusCode?: unknown }).statusCode;
+  if (typeof code === "number" && Number.isFinite(code)) {
+    return code;
+  }
+  if (typeof code === "string") {
+    const parsed = Number(code);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function isMissingBucketStorageError(error: unknown): boolean {
+  const statusCode = readStorageErrorStatusCode(error);
+  if (statusCode === 404) {
+    return true;
+  }
+  if (typeof error !== "object" || error === null || !("message" in error)) {
+    return false;
+  }
+  const msg = (error as { message?: unknown }).message;
+  if (typeof msg !== "string") {
+    return false;
+  }
+  return /bucket.*not.*found/i.test(msg);
+}
+
+function isBucketAlreadyExistsError(error: unknown): boolean {
+  const statusCode = readStorageErrorStatusCode(error);
+  if (statusCode === 409) {
+    return true;
+  }
+  if (typeof error !== "object" || error === null || !("message" in error)) {
+    return false;
+  }
+  const msg = (error as { message?: unknown }).message;
+  if (typeof msg !== "string") {
+    return false;
+  }
+  return /already exists/i.test(msg);
 }
 
 function toAuthUser(user: BotUser): AuthUser {
@@ -1371,15 +1417,59 @@ export class BotApiService {
     }
     const safeFilename = toSafeFilename(input.filename);
     const storagePath = `${user.id}/${randomUUID()}-${safeFilename}`;
+    const storage = this.app.supabaseAdmin.storage.from(env.STORAGE_BUCKET);
 
-    const uploadResult = await this.app.supabaseAdmin.storage.from(env.STORAGE_BUCKET).upload(storagePath, input.bytes, {
+    let uploadResult = await storage.upload(storagePath, input.bytes, {
       contentType: input.mimeType,
       upsert: false,
     });
 
     if (uploadResult.error) {
+      if (isMissingBucketStorageError(uploadResult.error)) {
+        this.app.log.warn(
+          {
+            telegram_id: input.telegramId,
+            user_id: user.id,
+            bucket: env.STORAGE_BUCKET,
+            storage_error: uploadResult.error,
+          },
+          "Storage bucket missing for bot upload; attempting one-time bucket creation",
+        );
+
+        const created = await this.app.supabaseAdmin.storage.createBucket(env.STORAGE_BUCKET, {
+          public: true,
+          fileSizeLimit: `${Math.floor(TEN_MB / (1024 * 1024))}MB`,
+          allowedMimeTypes: ALLOWED_MIME_TYPES_ARRAY,
+        });
+
+        if (created.error && !isBucketAlreadyExistsError(created.error)) {
+          this.app.log.error(
+            {
+              telegram_id: input.telegramId,
+              user_id: user.id,
+              bucket: env.STORAGE_BUCKET,
+              err: created.error,
+            },
+            "Failed to create missing storage bucket",
+          );
+        } else {
+          uploadResult = await storage.upload(storagePath, input.bytes, {
+            contentType: input.mimeType,
+            upsert: false,
+          });
+        }
+      }
+    }
+
+    if (uploadResult.error) {
       this.app.log.error(
-        { telegram_id: input.telegramId, user_id: user.id, err: uploadResult.error.message },
+        {
+          telegram_id: input.telegramId,
+          user_id: user.id,
+          bucket: env.STORAGE_BUCKET,
+          storage_path: storagePath,
+          err: uploadResult.error,
+        },
         "Proof upload failed",
       );
       throw new BotApiHttpError(500, "Storage upload failed", "STORAGE_UPLOAD_FAILED");
