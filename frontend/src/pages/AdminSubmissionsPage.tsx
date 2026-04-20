@@ -3,7 +3,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 import { ClipboardList } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { api, type AdminModerationStatus, type AdminSubmissionListItem } from "../lib/api";
+import {
+  api,
+  type AdminModerationStatus,
+  type AdminSearchSuggestion,
+  type AdminStudentOverviewPayload,
+  type AdminSubmissionListItem,
+} from "../lib/api";
 import i18nInstance from "../i18n";
 import { EmptyState } from "../components/ui/EmptyState";
 import { ModerationStatusBadge } from "../components/ui/Badge";
@@ -12,6 +18,8 @@ import { Input } from "../components/ui/Input";
 import { Button } from "../components/ui/Button";
 import { Table } from "../components/ui/Table";
 import { TableSkeleton } from "../components/ui/PageSkeletons";
+import { SearchAutocomplete, type SearchAutocompleteSuggestion } from "../components/ui/SearchAutocomplete";
+import { isLikelyStudentId, normalizeStudentId } from "../lib/student-id";
 
 const PAGE_SIZE = 20;
 const SEARCH_DEBOUNCE_MS = 320;
@@ -114,6 +122,7 @@ export function AdminSubmissionsPage(): ReactElement {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [studentOverview, setStudentOverview] = useState<AdminStudentOverviewPayload | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -127,6 +136,30 @@ export function AdminSubmissionsPage(): ReactElement {
     }, SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
   }, [searchInput]);
+
+  useEffect(() => {
+    const q = debouncedSearch.trim();
+    if (!q || !isLikelyStudentId(q)) {
+      setStudentOverview(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const overview = await api.getAdminStudentOverview(normalizeStudentId(q));
+        if (!cancelled) {
+          setStudentOverview(overview);
+        }
+      } catch {
+        if (!cancelled) {
+          setStudentOverview(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedSearch]);
 
   useEffect(() => {
     void (async () => {
@@ -159,7 +192,34 @@ export function AdminSubmissionsPage(): ReactElement {
     setDatePreset("last7");
     setCustomFrom("");
     setCustomTo("");
+    setStudentOverview(null);
   }, []);
+
+  const mapSuggestion = useCallback((item: AdminSearchSuggestion, index: number): SearchAutocompleteSuggestion => {
+    const typeLabelMap: Record<AdminSearchSuggestion["kind"], string> = {
+      student_id: "Student ID",
+      student_name: "Student",
+      submission_id: "Submission ID",
+      category: "Category",
+      subgroup: "Subgroup",
+      faculty: "Faculty",
+      teacher: "Teacher",
+      telegram_username: "Telegram",
+    };
+    const typeLabel = typeLabelMap[item.kind] ?? "Result";
+    return {
+      id: `${item.kind}-${item.value}-${index}`,
+      value: item.value,
+      label: item.label,
+      meta: item.meta ? `${typeLabel} · ${item.meta}` : typeLabel,
+      kind: item.kind,
+    };
+  }, []);
+
+  const fetchSearchSuggestions = useCallback(async (query: string): Promise<SearchAutocompleteSuggestion[]> => {
+    const rows = await api.getAdminSearchSuggestions(query, 8);
+    return rows.map((item, index) => mapSuggestion(item, index));
+  }, [mapSuggestion]);
 
   const load = useCallback(async (): Promise<void> => {
     const runId = requestSeq.current + 1;
@@ -211,14 +271,19 @@ export function AdminSubmissionsPage(): ReactElement {
     <section className="dashboard-stack">
       <Card title={t("title")} subtitle={t("subtitleAdmin")}>
         <div className="table-toolbar moderation-queue-toolbar">
-          <Input
+          <SearchAutocomplete
             value={searchInput}
-            onChange={(e) => {
+            onChange={(next) => {
               setPage(1);
-              setSearchInput(e.target.value);
+              setSearchInput(next);
             }}
+            onSelect={(item) => {
+              setPage(1);
+              setSearchInput(item.value);
+            }}
+            fetchSuggestions={fetchSearchSuggestions}
             placeholder={t("searchPlaceholderAdmin")}
-            aria-label={t("searchPlaceholderAdmin")}
+            ariaLabel={t("searchPlaceholderAdmin")}
           />
           <select
             className="ui-input"
@@ -294,6 +359,24 @@ export function AdminSubmissionsPage(): ReactElement {
           {t("kpiLine", { pendingCount, total, showing })}
           {refreshing ? " · " + t("loading") : ""}
         </div>
+        {studentOverview ? (
+          <div className="moderation-queue-kpi-line" role="status" aria-live="polite">
+            <strong>{studentOverview.studentName ?? t("student")}:</strong>{" "}
+            {studentOverview.studentId}
+            {" · "}
+            {studentOverview.faculty ?? "—"}
+            {" · "}
+            total: {studentOverview.totalSubmissions}
+            {" · "}
+            pending: {studentOverview.pendingSubmissions}
+            {" · "}
+            approved: {studentOverview.approvedSubmissions}
+            {" · "}
+            rejected: {studentOverview.rejectedSubmissions}
+            {" · "}
+            approved points: {studentOverview.totalApprovedScore.toFixed(2)}
+          </div>
+        ) : null}
         {error ? (
           <div className="submissions-inline-error">
             <p className="error" role="alert">

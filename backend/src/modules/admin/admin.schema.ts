@@ -17,6 +17,15 @@ export const adminDashboardAdminParamsSchema = z.object({
   adminId: z.string().uuid(),
 });
 
+export const adminSearchSuggestionsQuerySchema = z.object({
+  q: z.string().trim().min(1).max(200),
+  limit: z.coerce.number().int().min(1).max(20).default(8),
+});
+
+export const adminStudentOverviewQuerySchema = z.object({
+  studentId: z.string().trim().min(1).max(64),
+});
+
 export const adminSubmissionsQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
@@ -49,3 +58,5 @@ export type AdminDashboardQuery = z.infer<typeof adminDashboardQuerySchema>;
 export type AdminSubmissionsQuery = z.infer<typeof adminSubmissionsQuerySchema>;
 export type AdminApproveBody = z.infer<typeof adminApproveBodySchema>;
 export type AdminRejectBody = z.infer<typeof adminRejectBodySchema>;
+export type AdminSearchSuggestionsQuery = z.infer<typeof adminSearchSuggestionsQuerySchema>;
+export type AdminStudentOverviewQuery = z.infer<typeof adminStudentOverviewQuerySchema>;

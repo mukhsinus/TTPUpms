@@ -76,9 +76,17 @@ let adminProfileInFlight:
       promise: Promise<AdminProfilePayload>;
     }
   | null = null;
+let adminSearchSuggestionsCache = new Map<
+  string,
+  {
+    expiresAt: number;
+    data: AdminSearchSuggestion[];
+  }
+>();
 
 const ADMIN_LIST_CACHE_TTL_MS = 10_000;
 const ADMIN_DETAIL_CACHE_TTL_MS = 15_000;
+const ADMIN_SEARCH_SUGGESTION_CACHE_TTL_MS = 20_000;
 
 interface RequestResultOptions {
   /** When true, a 401 does not clear storage or navigate (e.g. login probe before token is stored). */
@@ -467,6 +475,36 @@ export interface AdminSubmissionDetailPayload {
   } | null;
 }
 
+export type AdminSearchSuggestionKind =
+  | "student_id"
+  | "student_name"
+  | "submission_id"
+  | "category"
+  | "subgroup"
+  | "faculty"
+  | "teacher"
+  | "telegram_username";
+
+export interface AdminSearchSuggestion {
+  kind: AdminSearchSuggestionKind;
+  value: string;
+  label: string;
+  meta: string | null;
+}
+
+export interface AdminStudentOverviewPayload {
+  userId: string;
+  studentId: string;
+  studentName: string | null;
+  faculty: string | null;
+  telegramUsername: string | null;
+  totalSubmissions: number;
+  pendingSubmissions: number;
+  approvedSubmissions: number;
+  rejectedSubmissions: number;
+  totalApprovedScore: number;
+}
+
 /** Item payload from PATCH /api/reviews/items/:itemId (and POST review item). */
 export interface ReviewSubmissionItemResponse {
   id: string;
@@ -770,6 +808,7 @@ export const api = {
     adminSubmissionsInFlight.clear();
     adminSubmissionDetailCache.clear();
     adminSubmissionDetailInFlight.clear();
+    adminSearchSuggestionsCache.clear();
   },
 
   getSessionUser(): SessionUser | null {
@@ -852,6 +891,7 @@ export const api = {
     adminSubmissionsInFlight.clear();
     adminSubmissionDetailCache.clear();
     adminSubmissionDetailInFlight.clear();
+    adminSearchSuggestionsCache.clear();
     void this.syncSessionRoleFromServer({ authSource: options?.authSource, token }).catch(() => undefined);
   },
 
@@ -1397,6 +1437,39 @@ export const api = {
       adminSubmissionsInFlight.set(cacheKey, promise);
     }
     return promise;
+  },
+
+  getAdminSearchSuggestions(query: string, limit = 8): Promise<AdminSearchSuggestion[]> {
+    const q = query.trim();
+    if (!q) {
+      return Promise.resolve([]);
+    }
+    const safeLimit = Math.max(1, Math.min(limit, 20));
+    const cacheKey = `${safeLimit}:${q.toLowerCase()}`;
+    const cached = adminSearchSuggestionsCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return Promise.resolve(cached.data);
+    }
+    const params = new URLSearchParams({
+      q,
+      limit: String(safeLimit),
+    });
+    return request<AdminSearchSuggestion[]>(`/api/admin/submissions/search-suggestions?${params.toString()}`).then((data) => {
+      adminSearchSuggestionsCache.set(cacheKey, {
+        expiresAt: Date.now() + ADMIN_SEARCH_SUGGESTION_CACHE_TTL_MS,
+        data,
+      });
+      return data;
+    });
+  },
+
+  getAdminStudentOverview(studentId: string): Promise<AdminStudentOverviewPayload | null> {
+    const value = studentId.trim();
+    if (!value) {
+      return Promise.resolve(null);
+    }
+    const params = new URLSearchParams({ studentId: value });
+    return request<AdminStudentOverviewPayload | null>(`/api/admin/submissions/student-overview?${params.toString()}`);
   },
 
   getAdminSubmissionDetail(submissionId: string, options?: { forceRefresh?: boolean }): Promise<AdminSubmissionDetailPayload> {

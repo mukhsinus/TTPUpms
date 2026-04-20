@@ -8,7 +8,9 @@ import {
   adminDashboardAdminParamsSchema,
   adminDashboardQuerySchema,
   adminRejectBodySchema,
+  adminSearchSuggestionsQuerySchema,
   adminSubmissionIdParamsSchema,
+  adminStudentOverviewQuerySchema,
   adminSubmissionsQuerySchema,
 } from "./admin.schema";
 
@@ -69,6 +71,34 @@ export class AdminController {
       const query = adminSubmissionsQuerySchema.parse(request.query);
       const data = await this.service.listSubmissions(query);
       reply.header("Cache-Control", "private, max-age=5, stale-while-revalidate=20");
+      reply.send(success(data));
+    } catch (error) {
+      this.handleError(reply, error);
+    }
+  };
+
+  listSearchSuggestions = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!request.user) {
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
+      return;
+    }
+    try {
+      const query = adminSearchSuggestionsQuerySchema.parse(request.query);
+      const data = await this.service.listSearchSuggestions(query);
+      reply.send(success(data));
+    } catch (error) {
+      this.handleError(reply, error);
+    }
+  };
+
+  getStudentOverview = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!request.user) {
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
+      return;
+    }
+    try {
+      const query = adminStudentOverviewQuerySchema.parse(request.query);
+      const data = await this.service.getStudentOverview(query.studentId);
       reply.send(success(data));
     } catch (error) {
       this.handleError(reply, error);

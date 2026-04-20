@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { ServiceError } from "../../utils/service-error";
+import { normalizeStudentId } from "../../utils/student-id";
 
 export interface UserProfileEntity {
   id: string;
@@ -110,6 +111,21 @@ export class UsersRepository {
     faculty: string;
     studentId: string;
   }): Promise<UserProfileEntity> {
+    const normalizedStudentId = normalizeStudentId(input.studentId);
+    const duplicate = await this.app.db.query<{ id: string }>(
+      `
+      SELECT id
+      FROM public.users
+      WHERE id <> $1
+        AND upper(regexp_replace(COALESCE(student_id, ''), '\\s+', '', 'g')) = $2
+      LIMIT 1
+      `,
+      [userId, normalizedStudentId],
+    );
+    if (duplicate.rows[0]) {
+      throw new ServiceError(409, "Student ID already exists", "DUPLICATE_STUDENT_ID");
+    }
+
     const result = await this.app.db.query<UserProfileRow>(
       `
       UPDATE public.users
@@ -132,7 +148,7 @@ export class UsersRepository {
         is_profile_completed,
         role::text AS role
       `,
-      [userId, input.studentFullName, input.degree, input.faculty, input.studentId],
+      [userId, input.studentFullName, input.degree, input.faculty, normalizedStudentId],
     );
 
     const row = result.rows[0];

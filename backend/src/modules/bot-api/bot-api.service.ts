@@ -25,6 +25,7 @@ import type { SubmissionsService } from "../submissions/submissions.service";
 import type { UsersRepository } from "../users/users.repository";
 import { AntiFraudError, type AntiFraudService } from "../validation/anti-fraud.service";
 import { getPostgresDriverErrorFields } from "../../utils/pg-http-map";
+import { normalizeStudentId } from "../../utils/student-id";
 import { BotApiHttpError } from "./bot-api-errors";
 import {
   assertValidProofReference,
@@ -605,7 +606,7 @@ export class BotApiService {
         studentFullName: input.student_full_name.trim(),
         degree: input.degree,
         faculty: input.faculty.trim(),
-        studentId: input.student_id.trim(),
+        studentId: normalizeStudentId(input.student_id),
       });
 
       const refreshed = await this.findUserByTelegramId(telegramId);

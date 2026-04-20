@@ -16,8 +16,11 @@ import type {
   AdminFileRow,
   AdminItemRow,
   AdminNeedsAttentionRow,
+  AdminSearchSuggestionKind,
+  AdminSearchSuggestionRow,
   AdminSubmissionDetailRow,
   AdminSubmissionListRow,
+  AdminStudentOverviewRow,
   AdminUserRow,
 } from "./admin.repository";
 import { AdminRepository } from "./admin.repository";
@@ -319,6 +322,37 @@ export class AdminService {
     return data;
   }
 
+  async listSearchSuggestions(query: { q: string; limit: number }): Promise<
+    Array<{
+      kind: AdminSearchSuggestionKind;
+      value: string;
+      label: string;
+      meta: string | null;
+    }>
+  > {
+    const rows = await this.repository.searchSuggestions(query.q, query.limit);
+    return rows.map((row) => this.mapSearchSuggestionRow(row));
+  }
+
+  async getStudentOverview(studentId: string): Promise<{
+    userId: string;
+    studentId: string;
+    studentName: string | null;
+    faculty: string | null;
+    telegramUsername: string | null;
+    totalSubmissions: number;
+    pendingSubmissions: number;
+    approvedSubmissions: number;
+    rejectedSubmissions: number;
+    totalApprovedScore: number;
+  } | null> {
+    const row = await this.repository.findStudentOverviewByStudentId(studentId);
+    if (!row) {
+      return null;
+    }
+    return this.mapStudentOverviewRow(row);
+  }
+
   private async buildSubmissionsList(query: AdminSubmissionsQuery): Promise<{
     items: ReturnType<AdminService["mapListRow"]>[];
     total: number;
@@ -396,6 +430,46 @@ export class AdminService {
       waitingOver24h,
       needsManualScore: row.needs_manual_score,
       reason,
+    };
+  }
+
+  private mapSearchSuggestionRow(row: AdminSearchSuggestionRow): {
+    kind: AdminSearchSuggestionKind;
+    value: string;
+    label: string;
+    meta: string | null;
+  } {
+    return {
+      kind: row.kind,
+      value: row.value,
+      label: row.label,
+      meta: row.meta,
+    };
+  }
+
+  private mapStudentOverviewRow(row: AdminStudentOverviewRow): {
+    userId: string;
+    studentId: string;
+    studentName: string | null;
+    faculty: string | null;
+    telegramUsername: string | null;
+    totalSubmissions: number;
+    pendingSubmissions: number;
+    approvedSubmissions: number;
+    rejectedSubmissions: number;
+    totalApprovedScore: number;
+  } {
+    return {
+      userId: row.user_id,
+      studentId: row.student_id,
+      studentName: row.student_name,
+      faculty: row.faculty,
+      telegramUsername: row.telegram_username,
+      totalSubmissions: Number(row.total_submissions ?? "0"),
+      pendingSubmissions: Number(row.pending_submissions ?? "0"),
+      approvedSubmissions: Number(row.approved_submissions ?? "0"),
+      rejectedSubmissions: Number(row.rejected_submissions ?? "0"),
+      totalApprovedScore: Number(row.total_approved_score ?? "0"),
     };
   }
 

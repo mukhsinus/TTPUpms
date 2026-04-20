@@ -2,6 +2,7 @@ import { Scenes } from "telegraf";
 import { cancelOnlyKeyboard, degreePickerKeyboard, mainMenuKeyboard } from "../keyboards";
 import type { UpmsService } from "../services/upms.service";
 import type { BotContext } from "../types/session";
+import { normalizeStudentId } from "../utils/student-id";
 import { userFacingUpmsMessage } from "../utils/upms-user-facing";
 
 interface OnboardingState {
@@ -115,7 +116,7 @@ export function createStudentOnboardingScene(upms: UpmsService): Scenes.WizardSc
         return;
       }
 
-      const studentId = ctx.message.text.trim();
+      const studentId = normalizeStudentId(ctx.message.text);
       if (studentId.length > 64) {
         await ctx.reply("That student ID is too long. Check your ID and try again.");
         return;

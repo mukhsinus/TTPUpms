@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { env } from "../config/env";
 import type { CategoryCatalogEntry } from "../types/session";
+import { normalizeStudentId } from "../utils/student-id";
 import { UpmsApiError } from "./upms-api-error";
 
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -326,7 +327,7 @@ export class UpmsService {
         student_full_name: input.studentFullName,
         degree: input.degree,
         faculty: input.faculty,
-        student_id: input.studentId,
+        student_id: normalizeStudentId(input.studentId),
       }),
     });
     return mapBotUserRow(data);

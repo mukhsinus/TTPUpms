@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { PoolClient } from "pg";
 import { getPostgresDriverErrorFields } from "../../utils/pg-http-map";
+import { isLikelyStudentId, normalizeStudentId } from "../../utils/student-id";
 import { ServiceError } from "../../utils/service-error";
 import type { AdminModerationStatus, AdminSubmissionsQuery } from "./admin.schema";
 
@@ -117,6 +118,36 @@ export interface AdminActivitySummaryRow {
   rejects: string;
 }
 
+export type AdminSearchSuggestionKind =
+  | "student_id"
+  | "student_name"
+  | "submission_id"
+  | "category"
+  | "subgroup"
+  | "faculty"
+  | "teacher"
+  | "telegram_username";
+
+export interface AdminSearchSuggestionRow {
+  kind: AdminSearchSuggestionKind;
+  value: string;
+  label: string;
+  meta: string | null;
+}
+
+export interface AdminStudentOverviewRow {
+  user_id: string;
+  student_id: string;
+  student_name: string | null;
+  faculty: string | null;
+  telegram_username: string | null;
+  total_submissions: string;
+  pending_submissions: string;
+  approved_submissions: string;
+  rejected_submissions: string;
+  total_approved_score: string;
+}
+
 export type AdminDbExecutor = FastifyInstance["db"] | PoolClient;
 
 function moderationStatusFilterSql(status: AdminModerationStatus): { clause: string; params: unknown[] } {
@@ -176,15 +207,39 @@ function buildAdminSubmissionFilters(query: AdminSubmissionsQuery): { whereSql: 
   }
   if (query.search?.trim()) {
     const raw = query.search.trim().slice(0, 200);
+    const normalizedStudentId = normalizeStudentId(raw);
     if (SUBMISSION_ID_UUID.test(raw)) {
       conditions.push(`s.id = $${p}::uuid`);
       params.push(raw);
+      p += 1;
+    } else if (isLikelyStudentId(raw)) {
+      conditions.push(`upper(regexp_replace(COALESCE(u.student_id::text, ''), '\\s+', '', 'g')) = $${p}`);
+      params.push(normalizedStudentId);
       p += 1;
     } else {
       const escaped = raw.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
       const pattern = `%${escaped}%`;
       conditions.push(
-        `(s.title ILIKE $${p} ESCAPE '\\' OR COALESCE(u.student_full_name::text, u.full_name::text, '') ILIKE $${p} ESCAPE '\\' OR COALESCE(u.student_id::text, '') ILIKE $${p} ESCAPE '\\')`,
+        `(
+          s.title ILIKE $${p} ESCAPE '\\'
+          OR COALESCE(s.description, '') ILIKE $${p} ESCAPE '\\'
+          OR COALESCE(u.student_full_name::text, u.full_name::text, '') ILIKE $${p} ESCAPE '\\'
+          OR COALESCE(u.student_id::text, '') ILIKE $${p} ESCAPE '\\'
+          OR COALESCE(u.faculty::text, '') ILIKE $${p} ESCAPE '\\'
+          OR COALESCE(u.telegram_username::text, '') ILIKE $${p} ESCAPE '\\'
+          OR EXISTS (
+            SELECT 1
+            FROM public.submission_items si3
+            LEFT JOIN public.categories c3 ON c3.id = si3.category_id
+            LEFT JOIN public.category_subcategories cs3 ON cs3.id = si3.subcategory_id
+            WHERE si3.submission_id = s.id
+              AND (
+                COALESCE(c3.title::text, c3.name, '') ILIKE $${p} ESCAPE '\\'
+                OR COALESCE(cs3.label::text, cs3.slug, '') ILIKE $${p} ESCAPE '\\'
+                OR COALESCE(si3.metadata->>'teacher', si3.metadata->>'teacher_name', si3.metadata->>'supervisor', '') ILIKE $${p} ESCAPE '\\'
+              )
+          )
+        )`,
       );
       params.push(pattern);
       p += 1;
@@ -714,6 +769,164 @@ export class AdminRepository {
     );
 
     return result.rows;
+  }
+
+  async searchSuggestions(queryText: string, limit: number): Promise<AdminSearchSuggestionRow[]> {
+    const raw = queryText.trim();
+    if (!raw) {
+      return [];
+    }
+    const safeLimit = Math.max(1, Math.min(limit, 20));
+    const pattern = `%${raw.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_")}%`;
+    const normalized = normalizeStudentId(raw);
+    const normalizedPrefix = `${normalized.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_")}%`;
+
+    const result = await this.app.db.query<AdminSearchSuggestionRow>(
+      `
+      WITH input AS (
+        SELECT
+          $1::text AS pattern,
+          $2::text AS normalized_prefix,
+          $3::int AS lim
+      ),
+      student_id_hits AS (
+        SELECT DISTINCT
+          'student_id'::text AS kind,
+          u.student_id::text AS value,
+          u.student_id::text AS label,
+          COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), '')) AS meta
+        FROM public.users u, input i
+        WHERE COALESCE(u.student_id, '') <> ''
+          AND upper(regexp_replace(u.student_id::text, '\\s+', '', 'g')) LIKE i.normalized_prefix ESCAPE '\\'
+        LIMIT (SELECT lim FROM input)
+      ),
+      student_name_hits AS (
+        SELECT DISTINCT
+          'student_name'::text AS kind,
+          COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), '')) AS value,
+          COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), '')) AS label,
+          u.student_id::text AS meta
+        FROM public.users u, input i
+        WHERE COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), '')) ILIKE i.pattern ESCAPE '\\'
+        LIMIT (SELECT lim FROM input)
+      ),
+      submission_id_hits AS (
+        SELECT
+          'submission_id'::text AS kind,
+          s.id::text AS value,
+          s.id::text AS label,
+          COALESCE(NULLIF(BTRIM(s.title), ''), 'Submission') AS meta
+        FROM public.submissions s, input i
+        WHERE s.id::text ILIKE i.pattern ESCAPE '\\'
+        ORDER BY s.created_at DESC
+        LIMIT (SELECT lim FROM input)
+      ),
+      category_hits AS (
+        SELECT DISTINCT
+          'category'::text AS kind,
+          COALESCE(NULLIF(BTRIM(c.title::text), ''), c.name) AS value,
+          COALESCE(NULLIF(BTRIM(c.title::text), ''), c.name) AS label,
+          c.code::text AS meta
+        FROM public.categories c, input i
+        WHERE COALESCE(c.title::text, c.name, '') ILIKE i.pattern ESCAPE '\\'
+           OR COALESCE(c.code::text, '') ILIKE i.pattern ESCAPE '\\'
+        LIMIT (SELECT lim FROM input)
+      ),
+      subgroup_hits AS (
+        SELECT DISTINCT
+          'subgroup'::text AS kind,
+          COALESCE(NULLIF(BTRIM(cs.label::text), ''), cs.slug) AS value,
+          COALESCE(NULLIF(BTRIM(cs.label::text), ''), cs.slug) AS label,
+          NULL::text AS meta
+        FROM public.category_subcategories cs, input i
+        WHERE COALESCE(cs.label::text, cs.slug, '') ILIKE i.pattern ESCAPE '\\'
+        LIMIT (SELECT lim FROM input)
+      ),
+      faculty_hits AS (
+        SELECT DISTINCT
+          'faculty'::text AS kind,
+          u.faculty::text AS value,
+          u.faculty::text AS label,
+          NULL::text AS meta
+        FROM public.users u, input i
+        WHERE COALESCE(u.faculty, '') ILIKE i.pattern ESCAPE '\\'
+        LIMIT (SELECT lim FROM input)
+      ),
+      teacher_hits AS (
+        SELECT DISTINCT
+          'teacher'::text AS kind,
+          COALESCE(si.metadata->>'teacher', si.metadata->>'teacher_name', si.metadata->>'supervisor') AS value,
+          COALESCE(si.metadata->>'teacher', si.metadata->>'teacher_name', si.metadata->>'supervisor') AS label,
+          NULL::text AS meta
+        FROM public.submission_items si, input i
+        WHERE COALESCE(si.metadata->>'teacher', si.metadata->>'teacher_name', si.metadata->>'supervisor', '') ILIKE i.pattern ESCAPE '\\'
+        LIMIT (SELECT lim FROM input)
+      ),
+      telegram_hits AS (
+        SELECT DISTINCT
+          'telegram_username'::text AS kind,
+          u.telegram_username::text AS value,
+          CONCAT('@', u.telegram_username::text) AS label,
+          COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), '')) AS meta
+        FROM public.users u, input i
+        WHERE COALESCE(u.telegram_username, '') ILIKE i.pattern ESCAPE '\\'
+        LIMIT (SELECT lim FROM input)
+      )
+      SELECT kind::text, value::text, label::text, meta::text
+      FROM (
+        SELECT * FROM student_id_hits
+        UNION ALL
+        SELECT * FROM student_name_hits
+        UNION ALL
+        SELECT * FROM submission_id_hits
+        UNION ALL
+        SELECT * FROM category_hits
+        UNION ALL
+        SELECT * FROM subgroup_hits
+        UNION ALL
+        SELECT * FROM faculty_hits
+        UNION ALL
+        SELECT * FROM teacher_hits
+        UNION ALL
+        SELECT * FROM telegram_hits
+      ) all_hits
+      WHERE value IS NOT NULL AND BTRIM(value) <> ''
+      LIMIT $3::int
+      `,
+      [pattern, normalizedPrefix, safeLimit],
+    );
+    return result.rows;
+  }
+
+  async findStudentOverviewByStudentId(studentIdInput: string): Promise<AdminStudentOverviewRow | null> {
+    const normalized = normalizeStudentId(studentIdInput);
+    if (!normalized) {
+      return null;
+    }
+
+    const result = await this.app.db.query<AdminStudentOverviewRow>(
+      `
+      SELECT
+        u.id::text AS user_id,
+        u.student_id::text AS student_id,
+        COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), '')) AS student_name,
+        u.faculty::text AS faculty,
+        u.telegram_username::text AS telegram_username,
+        COUNT(s.id)::text AS total_submissions,
+        COUNT(*) FILTER (WHERE s.status IN ('submitted', 'review', 'needs_revision'))::text AS pending_submissions,
+        COUNT(*) FILTER (WHERE s.status = 'approved')::text AS approved_submissions,
+        COUNT(*) FILTER (WHERE s.status = 'rejected')::text AS rejected_submissions,
+        COALESCE(SUM(s.total_score) FILTER (WHERE s.status = 'approved'), 0)::text AS total_approved_score
+      FROM public.users u
+      LEFT JOIN public.submissions s ON s.user_id = u.id
+      WHERE upper(regexp_replace(COALESCE(u.student_id, ''), '\\s+', '', 'g')) = $1
+      GROUP BY u.id, u.student_id, u.student_full_name, u.full_name, u.faculty, u.telegram_username
+      LIMIT 1
+      `,
+      [normalized],
+    );
+
+    return result.rows[0] ?? null;
   }
 
   async findSubmissionById(submissionId: string): Promise<AdminSubmissionDetailRow | null> {

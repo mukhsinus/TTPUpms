@@ -1,10 +1,11 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useState, type ReactElement } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, type SuperadminAuditLogsPayload } from "../lib/api";
 import { useToast } from "../contexts/ToastContext";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Input } from "../components/ui/Input";
+import { SearchAutocomplete, type SearchAutocompleteSuggestion } from "../components/ui/SearchAutocomplete";
 import { Table } from "../components/ui/Table";
 
 function formatDate(value: string): string {
@@ -81,6 +82,57 @@ export function AuditLogsPage(): ReactElement {
   const [data, setData] = useState<SuperadminAuditLogsPayload | null>(null);
   const [selectedRow, setSelectedRow] = useState<SuperadminAuditLogsPayload["items"][number] | null>(null);
 
+  const fetchSearchSuggestions = useCallback(
+    async (query: string): Promise<SearchAutocompleteSuggestion[]> => {
+      const result = await api.getSuperadminAuditLogs({
+        page: 1,
+        pageSize: 8,
+        search: query,
+        action: action.trim() || undefined,
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+      });
+      return result.items.map((row, index) => ({
+        id: `${row.id}-${index}`,
+        value: row.targetId ?? row.action,
+        label: humanizeAction(row.action),
+        meta: `${targetLabel(row)} · ${formatDate(row.time)}`,
+      }));
+    },
+    [action, dateFrom, dateTo],
+  );
+
+  const fetchActionSuggestions = useCallback(async (query: string): Promise<SearchAutocompleteSuggestion[]> => {
+    const values = [
+      "admin_moderation_approve",
+      "admin_moderation_reject",
+      "admin_override_score",
+      "admin_override_status",
+      "submission_assigned",
+      "admin_note_added",
+      "role_changed",
+      "admin_suspended",
+      "admin_unsuspended",
+      "password_reset",
+      "security_event_approved",
+      "security_event_rejected",
+      "session_revoked",
+      "login",
+      "logout_current_session",
+      "logout_other_sessions",
+    ];
+    const q = query.trim().toLowerCase();
+    return values
+      .filter((v) => v.toLowerCase().includes(q))
+      .slice(0, 8)
+      .map((v) => ({
+        id: v,
+        value: v,
+        label: humanizeAction(v),
+        meta: v,
+      }));
+  }, []);
+
   const load = async (): Promise<void> => {
     setLoading(true);
     try {
@@ -111,8 +163,22 @@ export function AuditLogsPage(): ReactElement {
     <section className="dashboard-stack">
       <Card title="Audit Logs" subtitle="Immutable searchable activity history.">
         <div className="row-between" style={{ gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
-          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search target/details" />
-          <Input value={action} onChange={(e) => setAction(e.target.value)} placeholder="Action (e.g. role_changed)" />
+          <SearchAutocomplete
+            value={search}
+            onChange={setSearch}
+            onSelect={(item) => setSearch(item.value)}
+            fetchSuggestions={fetchSearchSuggestions}
+            placeholder="Search target/details"
+            ariaLabel="Search target/details"
+          />
+          <SearchAutocomplete
+            value={action}
+            onChange={setAction}
+            onSelect={(item) => setAction(item.value)}
+            fetchSuggestions={fetchActionSuggestions}
+            placeholder="Action (e.g. role_changed)"
+            ariaLabel="Action"
+          />
           <Input type="datetime-local" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
           <Input type="datetime-local" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
           <Button type="button" variant="primary" onClick={() => void load()} disabled={loading}>

@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { normalizeRole } from "../lib/rbac";
 import { api, type SuperadminAdminDetailPayload, type SuperadminAdminListPayload } from "../lib/api";
 import { useToast } from "../contexts/ToastContext";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Input } from "../components/ui/Input";
+import { SearchAutocomplete, type SearchAutocompleteSuggestion } from "../components/ui/SearchAutocomplete";
 import { Table } from "../components/ui/Table";
 
 type AdminListItem = SuperadminAdminListPayload["items"][number];
@@ -59,6 +60,18 @@ export function AdminsPage(): ReactElement {
 
   const rows = list?.items ?? [];
   const pagination = list?.pagination;
+  const fetchAdminSuggestions = useCallback(
+    async (query: string): Promise<SearchAutocompleteSuggestion[]> => {
+      const data = await api.getSuperadminAdmins({ page: 1, pageSize: 8, search: query });
+      return data.items.map((item, index) => ({
+        id: `${item.id}-${index}`,
+        value: item.email ?? item.name ?? "",
+        label: item.name ?? item.email ?? "Admin",
+        meta: item.email ?? null,
+      }));
+    },
+    [],
+  );
 
   const runAction = async (adminId: string, action: () => Promise<void>, successMessage: string): Promise<void> => {
     try {
@@ -83,12 +96,16 @@ export function AdminsPage(): ReactElement {
     <section className="dashboard-stack">
       <Card title="Admins" subtitle="Manage internal staff access, role, security status, and activity.">
         <div className="row-between" style={{ gap: 12, marginBottom: 12 }}>
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name or email"
-            style={{ maxWidth: 340 }}
-          />
+          <div style={{ maxWidth: 340, width: "100%" }}>
+            <SearchAutocomplete
+              value={search}
+              onChange={setSearch}
+              onSelect={(item) => setSearch(item.value)}
+              fetchSuggestions={fetchAdminSuggestions}
+              placeholder="Search by name or email"
+              ariaLabel="Search by name or email"
+            />
+          </div>
           <Button type="button" variant="primary" onClick={() => void load()} disabled={loading}>
             {loading ? "Loading..." : "Search"}
           </Button>
