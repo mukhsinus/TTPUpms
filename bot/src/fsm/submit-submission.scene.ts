@@ -1,12 +1,8 @@
-import { Scenes } from "telegraf";
+import { Markup, Scenes } from "telegraf";
 import {
-  addAnotherItemKeyboard,
   categoryPickerKeyboard,
   mainMenuKeyboard,
-  olympiadPlacementKeyboard,
-  previewSubmitKeyboard,
-  skipOptionalLinkKeyboard,
-  submitFlowNavKeyboard,
+  submitFlowKeyboardWithCategories,
 } from "../keyboards";
 import type { UpmsService } from "../services/upms.service";
 import type { BotContext, CategoryCatalogEntry, PendingSubmissionItem, SubmitFlowState } from "../types/session";
@@ -135,6 +131,16 @@ async function leaveWithMenu(ctx: BotContext): Promise<void> {
   await ctx.scene.leave();
 }
 
+function submitFlowKeyboard(
+  ctx: BotContext,
+  options?: { topRows?: ReturnType<typeof Markup.button.callback>[][] },
+) {
+  return submitFlowKeyboardWithCategories(st(ctx).categories ?? [], {
+    selectedCategoryId: st(ctx).categoryId,
+    topRows: options?.topRows,
+  });
+}
+
 async function presentCategoryStep(ctx: BotContext, upms: UpmsService): Promise<boolean> {
   const tgId = ctx.session.authenticatedTelegramId;
   if (!tgId) {
@@ -199,6 +205,122 @@ async function presentCategoryStep(ctx: BotContext, upms: UpmsService): Promise<
   botFlowStep(ctx.from?.id, "category_prompt", { categoryCount: categories.length });
   await ctx.reply(MSG_PICK_CATEGORY, categoryPickerKeyboard(categories));
   return true;
+}
+
+async function promptForSelectedCategory(
+  ctx: BotContext,
+  selected: CategoryCatalogEntry,
+  options?: { announceChange?: boolean; discardedDraft?: boolean },
+): Promise<void> {
+  const announceChange = options?.announceChange ?? false;
+  const discardedDraft = options?.discardedDraft ?? false;
+  if (categoryRequiresPlacementMetadata(selected)) {
+    botFlowStep(ctx.from?.id, "placement_prompt", {
+      categoryCode: selected.code ?? selected.name,
+      switched: announceChange,
+      discardedDraft,
+    });
+    const changedPrefix = announceChange
+      ? `🔄 Category changed to ${selected.title.trim() || selected.name}.\n\n`
+      : "";
+    const discardedLine = discardedDraft ? "Previous unfinished draft data was discarded.\n\n" : "";
+    await ctx.reply(
+      `${changedPrefix}${discardedLine}🥇 Pick your placement (1st, 2nd, or 3rd) using the buttons below.`,
+      submitFlowKeyboard(ctx, {
+        topRows: [
+          [
+            Markup.button.callback("1st place", "place_1"),
+            Markup.button.callback("2nd place", "place_2"),
+            Markup.button.callback("3rd place", "place_3"),
+          ],
+        ],
+      }),
+    );
+    await ctx.wizard.selectStep(2);
+    return;
+  }
+
+  botFlowStep(ctx.from?.id, "subcategory_removed", {
+    categoryCode: selected.code ?? selected.name,
+    switched: announceChange,
+    discardedDraft,
+  });
+  const changedPrefix = announceChange
+    ? `🔄 Category changed to ${selected.title.trim() || selected.name}.\n\n`
+    : "";
+  const discardedLine = discardedDraft ? "Previous unfinished draft data was discarded.\n\n" : "";
+  await ctx.reply(
+    `${changedPrefix}${discardedLine}${buildCategoryIntroMessage(selected, { includeTitlePrompt: true })}`,
+    submitFlowKeyboard(ctx),
+  );
+  await ctx.wizard.selectStep(3);
+}
+
+async function switchToCategoryById(
+  ctx: BotContext,
+  categoryId: string,
+  options?: { announceChange?: boolean },
+): Promise<boolean> {
+  const s = st(ctx);
+  const categories = s.categories ?? [];
+  const selected = categories.find((c) => c.id === categoryId);
+  if (!selected) {
+    await ctx.reply("Invalid category. Start again from the menu.");
+    await leaveWithMenu(ctx);
+    return false;
+  }
+
+  if (s.categoryId === selected.id && options?.announceChange) {
+    await ctx.reply("This category is already selected. Continue filling the form.", submitFlowKeyboard(ctx));
+    return true;
+  }
+
+  const hadUnfinishedDraft = Boolean(s.title || s.description || s.proofFileUrl || s.itemMetadata);
+  clearCurrentItem(s);
+  s.categoryId = selected.id;
+  s.categoryName = selected.name;
+  s.categoryDisplayTitle = selected.title.trim() || selected.name;
+
+  botFlowStep(ctx.from?.id, "category_selected", {
+    categoryCode: selected.code ?? selected.name,
+    hasSubcategories: false,
+    switched: options?.announceChange ?? false,
+  });
+
+  await promptForSelectedCategory(ctx, selected, {
+    announceChange: options?.announceChange,
+    discardedDraft: hadUnfinishedDraft,
+  });
+  return true;
+}
+
+async function handleGlobalSubmitFlowActions(ctx: BotContext, upms: UpmsService): Promise<boolean> {
+  if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "wizard_cancel") {
+    await ctx.answerCbQuery();
+    await ctx.reply("Cancelled.", mainMenuKeyboard());
+    await leaveWithMenu(ctx);
+    return true;
+  }
+
+  if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "flow_change_category") {
+    await ctx.answerCbQuery();
+    await goToCategoryPickerFromSubmitFlow(ctx, upms);
+    return true;
+  }
+
+  if (ctx.message && "text" in ctx.message && isChangeCategoryText(ctx.message.text)) {
+    await goToCategoryPickerFromSubmitFlow(ctx, upms);
+    return true;
+  }
+
+  if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data.startsWith("cat_")) {
+    await ctx.answerCbQuery();
+    const categoryId = ctx.callbackQuery.data.replace("cat_", "");
+    await switchToCategoryById(ctx, categoryId, { announceChange: Boolean(st(ctx).categoryId) });
+    return true;
+  }
+
+  return false;
 }
 
 function formatItemBlock(s: SubmitFlowState, externalLink: string | null): string {
@@ -304,21 +426,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
     },
     // 1 — category
     async (ctx) => {
-      if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "wizard_cancel") {
-        await ctx.answerCbQuery();
-        await ctx.reply("Cancelled.", mainMenuKeyboard());
-        await leaveWithMenu(ctx);
-        return;
-      }
-
-      if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "flow_change_category") {
-        await ctx.answerCbQuery();
-        await goToCategoryPickerFromSubmitFlow(ctx, upms);
-        return;
-      }
-
-      if (ctx.message && "text" in ctx.message && isChangeCategoryText(ctx.message.text)) {
-        await goToCategoryPickerFromSubmitFlow(ctx, upms);
+      if (await handleGlobalSubmitFlowActions(ctx, upms)) {
         return;
       }
 
@@ -333,63 +441,11 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
         await ctx.reply("Please use the category buttons.");
         return;
       }
-
-      const categoryId = data.replace("cat_", "");
-      const categories = st(ctx).categories ?? [];
-      const selected = categories.find((c) => c.id === categoryId);
-      if (!selected) {
-        await ctx.answerCbQuery();
-        await ctx.reply("Invalid category. Start again from the menu.");
-        await leaveWithMenu(ctx);
-        return;
-      }
-
-      await ctx.answerCbQuery();
-      const s = st(ctx);
-      s.categoryId = selected.id;
-      s.categoryName = selected.name;
-      s.categoryDisplayTitle = selected.title.trim() || selected.name;
-
-      botFlowStep(ctx.from?.id, "category_selected", {
-        categoryCode: selected.code ?? selected.name,
-        hasSubcategories: false,
-      });
-      delete s.subcategorySlug;
-      delete s.subcategoryLabel;
-      delete s.itemMetadata;
-
-      if (categoryRequiresPlacementMetadata(selected)) {
-        botFlowStep(ctx.from?.id, "placement_prompt", {
-          categoryCode: selected.code ?? selected.name,
-        });
-        await ctx.reply(
-          "🥇 Pick your placement (1st, 2nd, or 3rd) using the buttons below.",
-          olympiadPlacementKeyboard(),
-        );
-        return ctx.wizard.selectStep(2);
-      }
-
-      botFlowStep(ctx.from?.id, "subcategory_removed", { categoryCode: selected.code ?? selected.name });
-      await ctx.reply(buildCategoryIntroMessage(selected, { includeTitlePrompt: true }), submitFlowNavKeyboard());
-      return ctx.wizard.selectStep(3);
+      return;
     },
     // 2 — optional placement metadata (no subcategory step)
     async (ctx) => {
-      if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "wizard_cancel") {
-        await ctx.answerCbQuery();
-        await ctx.reply("Cancelled.", mainMenuKeyboard());
-        await leaveWithMenu(ctx);
-        return;
-      }
-
-      if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "flow_change_category") {
-        await ctx.answerCbQuery();
-        await goToCategoryPickerFromSubmitFlow(ctx, upms);
-        return;
-      }
-
-      if (ctx.message && "text" in ctx.message && isChangeCategoryText(ctx.message.text)) {
-        await goToCategoryPickerFromSubmitFlow(ctx, upms);
+      if (await handleGlobalSubmitFlowActions(ctx, upms)) {
         return;
       }
 
@@ -404,12 +460,23 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       }
 
       if (!categoryRequiresPlacementMetadata(cat)) {
-        await ctx.reply(buildCategoryIntroMessage(cat, { includeTitlePrompt: true }), submitFlowNavKeyboard());
+        await ctx.reply(buildCategoryIntroMessage(cat, { includeTitlePrompt: true }), submitFlowKeyboard(ctx));
         return ctx.wizard.selectStep(3);
       }
 
       if (!ctx.callbackQuery || !("data" in ctx.callbackQuery) || !ctx.callbackQuery.data.startsWith("place_")) {
-        await ctx.reply("🥇 Tap 1st, 2nd, or 3rd place below.", olympiadPlacementKeyboard());
+        await ctx.reply(
+          "🥇 Tap 1st, 2nd, or 3rd place below.",
+          submitFlowKeyboard(ctx, {
+            topRows: [
+              [
+                Markup.button.callback("1st place", "place_1"),
+                Markup.button.callback("2nd place", "place_2"),
+                Markup.button.callback("3rd place", "place_3"),
+              ],
+            ],
+          }),
+        );
         return;
       }
 
@@ -421,26 +488,12 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       }
       s.itemMetadata = { place: placeNum };
       botFlowStep(ctx.from?.id, "placement_selected", { place: placeNum });
-      await ctx.reply(buildCategoryIntroMessage(cat, { includeTitlePrompt: true }), submitFlowNavKeyboard());
+      await ctx.reply(buildCategoryIntroMessage(cat, { includeTitlePrompt: true }), submitFlowKeyboard(ctx));
       return ctx.wizard.selectStep(3);
     },
     // 3 — title
     async (ctx) => {
-      if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "wizard_cancel") {
-        await ctx.answerCbQuery();
-        await ctx.reply("Cancelled.", mainMenuKeyboard());
-        await leaveWithMenu(ctx);
-        return;
-      }
-
-      if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "flow_change_category") {
-        await ctx.answerCbQuery();
-        await goToCategoryPickerFromSubmitFlow(ctx, upms);
-        return;
-      }
-
-      if (ctx.message && "text" in ctx.message && isChangeCategoryText(ctx.message.text)) {
-        await goToCategoryPickerFromSubmitFlow(ctx, upms);
+      if (await handleGlobalSubmitFlowActions(ctx, upms)) {
         return;
       }
 
@@ -451,26 +504,12 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
 
       st(ctx).title = ctx.message.text.trim();
       botFlowStep(ctx.from?.id, "title_entered", { titleLen: st(ctx).title!.length });
-      await ctx.reply(MSG_DESCRIPTION_STEP, submitFlowNavKeyboard());
+      await ctx.reply(MSG_DESCRIPTION_STEP, submitFlowKeyboard(ctx));
       return ctx.wizard.next();
     },
     // 4 — description
     async (ctx) => {
-      if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "wizard_cancel") {
-        await ctx.answerCbQuery();
-        await ctx.reply("Cancelled.", mainMenuKeyboard());
-        await leaveWithMenu(ctx);
-        return;
-      }
-
-      if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "flow_change_category") {
-        await ctx.answerCbQuery();
-        await goToCategoryPickerFromSubmitFlow(ctx, upms);
-        return;
-      }
-
-      if (ctx.message && "text" in ctx.message && isChangeCategoryText(ctx.message.text)) {
-        await goToCategoryPickerFromSubmitFlow(ctx, upms);
+      if (await handleGlobalSubmitFlowActions(ctx, upms)) {
         return;
       }
 
@@ -481,26 +520,12 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
 
       st(ctx).description = ctx.message.text.trim();
       botFlowStep(ctx.from?.id, "description_entered", { descriptionLen: st(ctx).description!.length });
-      await ctx.reply(MSG_PROOF_STEP, submitFlowNavKeyboard());
+      await ctx.reply(MSG_PROOF_STEP, submitFlowKeyboard(ctx));
       return ctx.wizard.next();
     },
     // 5 — file
     async (ctx) => {
-      if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "wizard_cancel") {
-        await ctx.answerCbQuery();
-        await ctx.reply("Cancelled.", mainMenuKeyboard());
-        await leaveWithMenu(ctx);
-        return;
-      }
-
-      if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "flow_change_category") {
-        await ctx.answerCbQuery();
-        await goToCategoryPickerFromSubmitFlow(ctx, upms);
-        return;
-      }
-
-      if (ctx.message && "text" in ctx.message && isChangeCategoryText(ctx.message.text)) {
-        await goToCategoryPickerFromSubmitFlow(ctx, upms);
+      if (await handleGlobalSubmitFlowActions(ctx, upms)) {
         return;
       }
 
@@ -562,7 +587,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
         );
       } catch (e) {
         console.error("Submit flow: proof upload failed:", e);
-        await ctx.reply(userFacingUpmsMessage(e, "Could not upload proof to UPMS."), submitFlowNavKeyboard());
+        await ctx.reply(userFacingUpmsMessage(e, "Could not upload proof to UPMS."), submitFlowKeyboard(ctx));
         return;
       }
 
@@ -570,26 +595,15 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
 
       botFlowStep(ctx.from?.id, "file_uploaded", { mimeType });
 
-      await ctx.reply(MSG_LINK_STEP, skipOptionalLinkKeyboard());
+      await ctx.reply(
+        MSG_LINK_STEP,
+        submitFlowKeyboard(ctx, { topRows: [[Markup.button.callback("Skip", "skip_external_link")]] }),
+      );
       return ctx.wizard.next();
     },
     // 6 — optional link + persist item
     async (ctx) => {
-      if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "wizard_cancel") {
-        await ctx.answerCbQuery();
-        await ctx.reply("Cancelled.", mainMenuKeyboard());
-        await leaveWithMenu(ctx);
-        return;
-      }
-
-      if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "flow_change_category") {
-        await ctx.answerCbQuery();
-        await goToCategoryPickerFromSubmitFlow(ctx, upms);
-        return;
-      }
-
-      if (ctx.message && "text" in ctx.message && isChangeCategoryText(ctx.message.text)) {
-        await goToCategoryPickerFromSubmitFlow(ctx, upms);
+      if (await handleGlobalSubmitFlowActions(ctx, upms)) {
         return;
       }
 
@@ -616,12 +630,20 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       clearCurrentItem(s);
       await ctx.reply(
         "✅ Line saved.\n\n➕ Add another achievement, or tap Preview to check everything before submit.",
-        addAnotherItemKeyboard(),
+        submitFlowKeyboard(ctx, {
+          topRows: [
+            [Markup.button.callback("Add another item", "flow_add_more")],
+            [Markup.button.callback("Preview and submit", "flow_preview")],
+          ],
+        }),
       );
       return ctx.wizard.next();
     },
     // 7 — add another vs preview
     async (ctx) => {
+      if (await handleGlobalSubmitFlowActions(ctx, upms)) {
+        return;
+      }
       if (!ctx.callbackQuery || !("data" in ctx.callbackQuery)) {
         await ctx.reply("👆 Use the buttons below.");
         return;
@@ -657,7 +679,15 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
         const s = st(ctx);
         const blocks = s.previewBlocks ?? [];
         if (blocks.length === 0) {
-          await ctx.reply("No items yet. Add at least one achievement.", addAnotherItemKeyboard());
+          await ctx.reply(
+            "No items yet. Add at least one achievement.",
+            submitFlowKeyboard(ctx, {
+              topRows: [
+                [Markup.button.callback("Add another item", "flow_add_more")],
+                [Markup.button.callback("Preview and submit", "flow_preview")],
+              ],
+            }),
+          );
           return;
         }
 
@@ -676,7 +706,17 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
           "",
           "✅ Tap Submit if everything looks correct, or Cancel to stop.",
         ].join("\n\n");
-        await ctx.reply(summary, previewSubmitKeyboard());
+        await ctx.reply(
+          summary,
+          submitFlowKeyboard(ctx, {
+            topRows: [
+              [
+                Markup.button.callback("Submit", "confirm_submit"),
+                Markup.button.callback("Cancel", "wizard_cancel"),
+              ],
+            ],
+          }),
+        );
         return ctx.wizard.next();
       }
 
@@ -684,21 +724,11 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
     },
     // 8 — submit / cancel
     async (ctx) => {
+      if (await handleGlobalSubmitFlowActions(ctx, upms)) {
+        return;
+      }
       if (!ctx.callbackQuery || !("data" in ctx.callbackQuery)) {
         await ctx.reply("👆 Use Submit or Cancel below.");
-        return;
-      }
-
-      if (ctx.callbackQuery.data === "wizard_cancel") {
-        await ctx.answerCbQuery();
-        await ctx.reply("Cancelled.", mainMenuKeyboard());
-        await leaveWithMenu(ctx);
-        return;
-      }
-
-      if (ctx.callbackQuery.data === "flow_change_category") {
-        await ctx.answerCbQuery();
-        await goToCategoryPickerFromSubmitFlow(ctx, upms);
         return;
       }
 

@@ -44,6 +44,45 @@ export function categoryPickerKeyboard(categories: CategoryCatalogEntry[]) {
   return Markup.inlineKeyboard(rows);
 }
 
+function categoryButtonLabelWithSelection(c: CategoryCatalogEntry, isSelected: boolean): string {
+  const base = categoryButtonLabel(c);
+  return isSelected ? `✅ ${base}` : base;
+}
+
+export function submitFlowKeyboardWithCategories(
+  categories: CategoryCatalogEntry[],
+  options?: {
+    selectedCategoryId?: string;
+    topRows?: ReturnType<typeof Markup.button.callback>[][];
+  },
+) {
+  const rows: ReturnType<typeof Markup.button.callback>[][] = [];
+  if (options?.topRows?.length) {
+    rows.push(...options.topRows);
+  }
+  for (let i = 0; i < categories.length; i += 2) {
+    const a = categories[i];
+    const row = [
+      Markup.button.callback(
+        categoryButtonLabelWithSelection(a, options?.selectedCategoryId === a.id),
+        `cat_${a.id}`,
+      ),
+    ];
+    if (categories[i + 1]) {
+      const b = categories[i + 1];
+      row.push(
+        Markup.button.callback(
+          categoryButtonLabelWithSelection(b, options?.selectedCategoryId === b.id),
+          `cat_${b.id}`,
+        ),
+      );
+    }
+    rows.push(row);
+  }
+  rows.push(SUBMIT_FLOW_NAV_ROW);
+  return Markup.inlineKeyboard(rows);
+}
+
 /** Callback sub_<slug> — category is already chosen in session */
 export function subcategoryPickerKeyboard(subcategories: CategoryCatalogEntry["subcategories"]) {
   const rows: ReturnType<typeof Markup.button.callback>[][] = [];
