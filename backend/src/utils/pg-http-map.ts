@@ -42,6 +42,13 @@ export function mapPgErrorToClient(error: unknown): {
 
   if (e.code === "23514") {
     const msg = e.message ?? "";
+    if (msg.includes("CATEGORY_MAX_POINTS_EXCEEDED")) {
+      return {
+        status: 400,
+        code: "CATEGORY_MAX_POINTS_EXCEEDED",
+        message: "Approved score exceeds category max points for this submission.",
+      };
+    }
     if (msg.includes("SUBMISSION_LIMIT_EXCEEDED")) {
       return {
         status: 409,

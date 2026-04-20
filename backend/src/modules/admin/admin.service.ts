@@ -7,6 +7,7 @@ import {
   normalizeLegacyStorageObjectPath,
   normalizeLegacyStoragePathForRead,
 } from "../files/proof-reference";
+import { mapPgErrorToClient } from "../../utils/pg-http-map";
 import { ServiceError } from "../../utils/service-error";
 import type {
   AdminActivityRow,
@@ -540,6 +541,10 @@ export class AdminService {
       if (error instanceof ServiceError) {
         throw error;
       }
+      const mapped = mapPgErrorToClient(error);
+      if (mapped) {
+        throw new ServiceError(mapped.status, mapped.message, mapped.code);
+      }
       const message = error instanceof Error ? error.message : "Failed to approve submission";
       throw new ServiceError(500, message, "APPROVE_SUBMISSION_FAILED");
     } finally {
@@ -667,6 +672,10 @@ export class AdminService {
       this.app.log.error({ err: error, submissionId }, "rejectSubmission failed");
       if (error instanceof ServiceError) {
         throw error;
+      }
+      const mapped = mapPgErrorToClient(error);
+      if (mapped) {
+        throw new ServiceError(mapped.status, mapped.message, mapped.code);
       }
       const message = error instanceof Error ? error.message : "Failed to reject submission";
       throw new ServiceError(500, message, "REJECT_SUBMISSION_FAILED");
