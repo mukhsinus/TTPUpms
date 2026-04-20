@@ -189,6 +189,19 @@ async function presentCategoryStep(ctx: BotContext, upms: UpmsService): Promise<
     return false;
   }
 
+  try {
+    const phase = await upms.getSystemPhase();
+    if (phase.phase === "evaluation") {
+      await ctx.reply(
+        "📌 Submission period is closed.\nCurrent phase: Evaluation.\n\nYour previous submissions remain in system.\nResults/updates will be announced later.",
+        mainMenuKeyboard(),
+      );
+      return false;
+    }
+  } catch {
+    // Backend phase guard still enforces close/open semantics.
+  }
+
   const s = st(ctx);
 
   let me;

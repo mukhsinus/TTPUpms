@@ -38,6 +38,12 @@ interface UploadProofResponse {
   sizeBytes: number;
 }
 
+export interface BotSystemPhaseState {
+  phase: "submission" | "evaluation";
+  submissionDeadline: string | null;
+  evaluationDeadline: string | null;
+}
+
 /** Mirrors backend `BotSubmitDraftResult` (camelCase in JSON). */
 export interface SubmitDraftSuccessItem {
   title: string;
@@ -455,6 +461,12 @@ export class UpmsService {
       }),
     });
     return result.totalPoints;
+  }
+
+  async getSystemPhase(): Promise<BotSystemPhaseState> {
+    return this.requestJson<BotSystemPhaseState>("/api/system/phase", {
+      method: "GET",
+    });
   }
 
   async uploadProofFile(input: {

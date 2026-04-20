@@ -3,6 +3,7 @@ import { z } from "zod";
 import { env } from "../../config/env";
 import { botWriteIdempotency } from "../../middleware/bot-idempotency.middleware";
 import { idempotencyOnSend } from "../../middleware/idempotency.middleware";
+import { botStudentSubmissionPhaseGuard } from "../../middleware/project-phase.middleware";
 import { userWriteRateLimitPreHandler } from "../../middleware/user-write-rate-limit.middleware";
 import { mapPgErrorToClient } from "../../utils/pg-http-map";
 import { failure, success } from "../../utils/http-response";
@@ -247,6 +248,7 @@ function handleRouteError(app: FastifyInstance, reply: FastifyReply, error: unkn
 }
 
 export async function botApiRoutes(app: FastifyInstance): Promise<void> {
+  const botSubmissionPhaseGuard = botStudentSubmissionPhaseGuard(app);
   const audit = new AuditLogRepository(app);
   const submissionsRepository = new SubmissionsRepository(app);
   const notifications = new NotificationService(app);
@@ -365,7 +367,7 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
 
   app.post(
     "/submissions/draft",
-    { preHandler: botWriteIdempotency(app, "bot_submissions_draft") },
+    { preHandler: [botSubmissionPhaseGuard, ...botWriteIdempotency(app, "bot_submissions_draft")] },
     async (request, reply) => {
       try {
         const body = createDraftSubmissionSchema.parse(request.body);
@@ -379,7 +381,7 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
 
   app.post(
     "/submissions/items",
-    { preHandler: botWriteIdempotency(app, "bot_submissions_items") },
+    { preHandler: [botSubmissionPhaseGuard, ...botWriteIdempotency(app, "bot_submissions_items")] },
     async (request, reply) => {
       try {
         const body = addBotSubmissionItemSchema.parse(request.body);
@@ -404,7 +406,7 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
   /** Atomically create submission + all lines + submit (Telegram bot — no mid-flow DB rows). */
   app.post(
     "/submissions/complete",
-    { preHandler: botWriteIdempotency(app, "bot_submissions_complete") },
+    { preHandler: [botSubmissionPhaseGuard, ...botWriteIdempotency(app, "bot_submissions_complete")] },
     async (request, reply) => {
       try {
         const body = botCompleteSubmissionSchema.parse(request.body);
@@ -428,7 +430,7 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
 
   app.post(
     "/submissions/:id/submit",
-    { preHandler: botWriteIdempotency(app, "bot_submissions_submit") },
+    { preHandler: [botSubmissionPhaseGuard, ...botWriteIdempotency(app, "bot_submissions_submit")] },
     async (request, reply) => {
       try {
         const params = submitDraftParamsSchema.parse(request.params);
@@ -443,7 +445,7 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
 
   app.post(
     "/submissions/student",
-    { preHandler: botWriteIdempotency(app, "bot_submissions_student") },
+    { preHandler: [botSubmissionPhaseGuard, ...botWriteIdempotency(app, "bot_submissions_student")] },
     async (request, reply) => {
       try {
         const body = createStudentSubmissionSchema.parse(request.body);
@@ -465,7 +467,7 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
 
   app.post(
     "/submissions/achievement",
-    { preHandler: botWriteIdempotency(app, "bot_submissions_achievement") },
+    { preHandler: [botSubmissionPhaseGuard, ...botWriteIdempotency(app, "bot_submissions_achievement")] },
     async (request, reply) => {
       try {
         const body = createAchievementSchema.parse(request.body);
@@ -484,7 +486,7 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
 
   app.post(
     "/files/upload",
-    { preHandler: botWriteIdempotency(app, "bot_files_upload") },
+    { preHandler: [botSubmissionPhaseGuard, ...botWriteIdempotency(app, "bot_files_upload")] },
     async (request, reply) => {
       try {
         const body = uploadProofSchema.parse(request.body);

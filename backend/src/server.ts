@@ -1,6 +1,7 @@
 import { buildApp } from "./app";
 import { env } from "./config/env";
 import { SubmissionItemsRepository } from "./modules/submission-items/submission-items.repository";
+import { SystemPhaseService } from "./modules/system/system-phase.service";
 
 /**
  * Upload limits: `buildApp` sets Fastify `bodyLimit` from `BODY_LIMIT_BYTES` and registers
@@ -9,6 +10,12 @@ import { SubmissionItemsRepository } from "./modules/submission-items/submission
 
 async function startServer(): Promise<void> {
   const app = await buildApp();
+  const phaseService = new SystemPhaseService(app);
+  const phaseInterval = setInterval(() => {
+    void phaseService.applyAutomaticTransitions().catch((err) => {
+      app.log.error({ err }, "Automatic project phase transition failed");
+    });
+  }, 60_000);
 
   try {
     const submissionItemsRepo = new SubmissionItemsRepository(app);
@@ -23,6 +30,7 @@ async function startServer(): Promise<void> {
 
   const shutdown = async (signal: string): Promise<void> => {
     app.log.info({ signal }, "Shutting down server");
+    clearInterval(phaseInterval);
     await app.close();
     process.exit(0);
   };

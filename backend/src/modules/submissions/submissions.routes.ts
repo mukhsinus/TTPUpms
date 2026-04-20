@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { authMiddleware } from "../../middleware/auth.middleware";
 import { idempotencyOnSend, idempotencyPreHandler } from "../../middleware/idempotency.middleware";
+import { studentSubmissionPhaseGuard } from "../../middleware/project-phase.middleware";
 import { userWriteRateLimitPreHandler } from "../../middleware/user-write-rate-limit.middleware";
 import { AuditLogRepository } from "../audit/audit-log.repository";
 import { NotificationService } from "../notifications/notification.service";
@@ -29,11 +30,12 @@ export async function submissionsRoutes(app: FastifyInstance): Promise<void> {
     requireIdempotencyKey: true,
   });
   const onSendIdempotency = idempotencyOnSend(app);
+  const phaseGuard = studentSubmissionPhaseGuard(app);
 
   app.post(
     "/",
     {
-      preHandler: [authMiddleware, submissionWriteRate, submissionsIdempotency],
+      preHandler: [authMiddleware, phaseGuard, submissionWriteRate, submissionsIdempotency],
       onSend: [onSendIdempotency],
     },
     controller.createSubmission,
@@ -43,7 +45,7 @@ export async function submissionsRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     "/:id/submit",
     {
-      preHandler: [authMiddleware, submissionWriteRate, submissionSubmitIdempotency],
+      preHandler: [authMiddleware, phaseGuard, submissionWriteRate, submissionSubmitIdempotency],
       onSend: [onSendIdempotency],
     },
     controller.submitSubmission,

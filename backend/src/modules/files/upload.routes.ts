@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { env } from "../../config/env";
 import { authMiddleware } from "../../middleware/auth.middleware";
+import { studentSubmissionPhaseGuard } from "../../middleware/project-phase.middleware";
 import { mergePublicUserRoleFromDb } from "../../middleware/public-user-role";
 import { errorCodeFromStatus, failure, success } from "../../utils/http-response";
 import { AntiFraudService } from "../validation/anti-fraud.service";
@@ -49,11 +50,12 @@ async function mergeRoleHook(request: FastifyRequest, _reply: FastifyReply): Pro
 export async function uploadRoutes(app: FastifyInstance): Promise<void> {
   const antiFraud = new AntiFraudService(app);
   const uploadService = new UploadService(app, antiFraud);
+  const phaseGuard = studentSubmissionPhaseGuard(app);
 
   app.post(
     "/upload",
     {
-      preHandler: [authMiddleware, mergeRoleHook],
+      preHandler: [authMiddleware, mergeRoleHook, phaseGuard],
       bodyLimit: JSON_UPLOAD_BODY_LIMIT,
       config: { rateLimit: { max: 30, timeWindow: "1 minute" } },
     },

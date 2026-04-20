@@ -499,6 +499,20 @@ export interface AdminStudentOverviewPayload {
   totalApprovedScore: number;
 }
 
+export type ProjectPhase = "submission" | "evaluation";
+
+export interface SystemPhasePayload {
+  phase: ProjectPhase;
+  submissionDeadline: string | null;
+  evaluationDeadline: string | null;
+  lastChangedBy: {
+    userId: string;
+    name: string | null;
+    email: string | null;
+  } | null;
+  lastChangedAt: string | null;
+}
+
 /** Item payload from PATCH /api/reviews/items/:itemId (and POST review item). */
 export interface ReviewSubmissionItemResponse {
   id: string;
@@ -1061,6 +1075,30 @@ export const api = {
 
   getAdminMetrics(): Promise<AdminDashboardMetrics> {
     return request<AdminDashboardMetrics>("/api/admin/metrics");
+  },
+
+  getSystemPhase(): Promise<SystemPhasePayload> {
+    return request<SystemPhasePayload>("/api/system/phase");
+  },
+
+  setSystemPhase(phase: ProjectPhase): Promise<SystemPhasePayload> {
+    return request<SystemPhasePayload>("/api/admin/system/phase", {
+      method: "PATCH",
+      body: JSON.stringify({ phase }),
+    });
+  },
+
+  setSystemDeadlines(input: {
+    submissionDeadline: string | null;
+    evaluationDeadline: string | null;
+  }): Promise<SystemPhasePayload> {
+    return request<SystemPhasePayload>("/api/admin/system/deadlines", {
+      method: "PATCH",
+      body: JSON.stringify({
+        submissionDeadline: input.submissionDeadline,
+        evaluationDeadline: input.evaluationDeadline,
+      }),
+    });
   },
 
   getAdminDashboard(params?: { page?: number; pageSize?: number; forceRefresh?: boolean }): Promise<AdminDashboardPayload> {

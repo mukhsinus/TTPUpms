@@ -20,6 +20,25 @@ function setSessionFromLinkedUser(
   ctx.session.profileComplete = linkedUser.role !== "student" || Boolean(linkedUser.isProfileCompleted);
 }
 
+function formatBotPhaseBanner(input: {
+  phase: "submission" | "evaluation";
+  submissionDeadline: string | null;
+  evaluationDeadline: string | null;
+}): string {
+  const phaseLine = input.phase === "submission" ? "🟢 Submission Open" : "🟠 Evaluation In Progress";
+  const lines = ["Current Phase:", phaseLine];
+  if (input.submissionDeadline) {
+    lines.push(`Submission deadline: ${new Date(input.submissionDeadline).toLocaleString("en-GB")}`);
+  }
+  if (input.evaluationDeadline) {
+    lines.push(`Evaluation deadline: ${new Date(input.evaluationDeadline).toLocaleString("en-GB")}`);
+  }
+  return lines.join("\n");
+}
+
+const SUBMISSION_CLOSED_TEXT =
+  "📌 Submission period is closed.\nCurrent phase: Evaluation.\n\nYour previous submissions remain in system.\nResults/updates will be announced later.";
+
 /** Block student actions until profile onboarding is finished (after stage so active scenes still run). */
 function profileIncompleteGate(): Middleware<BotContext> {
   return async (ctx, next) => {
@@ -105,7 +124,14 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
     }
 
     const who = displayStudentGreeting(user);
-    await ctx.reply(`Welcome back, ${who}.\nChoose an action below.`, mainMenuKeyboard());
+    let phaseBanner = "";
+    try {
+      const phase = await upmsService.getSystemPhase();
+      phaseBanner = `\n\n${formatBotPhaseBanner(phase)}`;
+    } catch {
+      phaseBanner = "";
+    }
+    await ctx.reply(`Welcome back, ${who}.\nChoose an action below.${phaseBanner}`, mainMenuKeyboard());
   });
 
   bot.command("help", async (ctx) => {
@@ -132,6 +158,15 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
 
   bot.action("menu_submit", async (ctx) => {
     await ctx.answerCbQuery();
+    try {
+      const phase = await upmsService.getSystemPhase();
+      if (phase.phase === "evaluation") {
+        await ctx.reply(`${formatBotPhaseBanner(phase)}\n\n${SUBMISSION_CLOSED_TEXT}`, mainMenuKeyboard());
+        return;
+      }
+    } catch {
+      // continue to scene; backend guard still enforces phase
+    }
     await ctx.scene.enter("submit-submission");
   });
 
@@ -200,7 +235,14 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
 
   bot.action("menu_back", async (ctx) => {
     await ctx.answerCbQuery();
-    await ctx.reply("Main menu:", mainMenuKeyboard());
+    let phaseBanner = "";
+    try {
+      const phase = await upmsService.getSystemPhase();
+      phaseBanner = `\n\n${formatBotPhaseBanner(phase)}`;
+    } catch {
+      phaseBanner = "";
+    }
+    await ctx.reply(`Main menu:${phaseBanner}`, mainMenuKeyboard());
   });
 
   bot.catch(async (error, ctx) => {

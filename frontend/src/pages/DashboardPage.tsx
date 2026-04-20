@@ -17,7 +17,13 @@ import {
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import i18nInstance from "../i18n";
-import { api, type AdminDashboardPayload, type AdminRecentActivityItem, type SuperadminDashboardPayload } from "../lib/api";
+import {
+  api,
+  type AdminDashboardPayload,
+  type AdminRecentActivityItem,
+  type SuperadminDashboardPayload,
+  type SystemPhasePayload,
+} from "../lib/api";
 import { isAdminPanelRole, normalizeRole } from "../lib/rbac";
 import { isLikelyStudentId, normalizeStudentId } from "../lib/student-id";
 import { useToast } from "../contexts/ToastContext";
@@ -75,6 +81,26 @@ function dateLocaleForUi(lang: string): string {
   return "en-US";
 }
 
+function toDateTimeLocalValue(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
+}
+
+function fromDateTimeLocalValue(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const d = new Date(trimmed);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
 export function DashboardPage(): ReactElement {
   const { t, i18n } = useTranslation("dashboard");
   const navigate = useNavigate();
@@ -88,6 +114,11 @@ export function DashboardPage(): ReactElement {
   const [kpiPulse, setKpiPulse] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [systemPhase, setSystemPhase] = useState<SystemPhasePayload | null>(null);
+  const [pendingPhaseSwitch, setPendingPhaseSwitch] = useState<"submission" | "evaluation" | null>(null);
+  const [phaseBusy, setPhaseBusy] = useState(false);
+  const [submissionDeadlineInput, setSubmissionDeadlineInput] = useState("");
+  const [evaluationDeadlineInput, setEvaluationDeadlineInput] = useState("");
   const didInitialLoadRef = useRef(false);
 
   const sessionUser = api.getSessionUser();
@@ -103,6 +134,11 @@ export function DashboardPage(): ReactElement {
     }
     return m;
   }, [adminDashboard?.recentActivity]);
+
+  useEffect(() => {
+    setSubmissionDeadlineInput(toDateTimeLocalValue(systemPhase?.submissionDeadline ?? null));
+    setEvaluationDeadlineInput(toDateTimeLocalValue(systemPhase?.evaluationDeadline ?? null));
+  }, [systemPhase?.submissionDeadline, systemPhase?.evaluationDeadline]);
 
   const loadAdminDashboard = useCallback(
     async (page: number, forceRefresh = false): Promise<void> => {
@@ -123,7 +159,11 @@ export function DashboardPage(): ReactElement {
             const data = await api.getSuperadminDashboard();
             setSuperDashboard(data);
           }
-          await loadAdminDashboard(activityPage);
+          const [phase, dashboard] = await Promise.all([
+            api.getSystemPhase(),
+            loadAdminDashboard(activityPage),
+          ]);
+          setSystemPhase(phase);
         } else {
           setSubmissions(await api.getSubmissions());
         }
@@ -178,11 +218,28 @@ export function DashboardPage(): ReactElement {
         ]);
         setSuperDashboard(ops);
         setAdminDashboard(adminData);
+        setSystemPhase(await api.getSystemPhase());
         toast.success(t("toastSuperadminUpdated"));
       } catch (err) {
         toast.error(err instanceof Error ? err.message : t("toastRefreshFailed"));
       } finally {
         setIsRefreshing(false);
+      }
+    };
+
+    const saveDeadlines = async (): Promise<void> => {
+      try {
+        setPhaseBusy(true);
+        const next = await api.setSystemDeadlines({
+          submissionDeadline: fromDateTimeLocalValue(submissionDeadlineInput),
+          evaluationDeadline: fromDateTimeLocalValue(evaluationDeadlineInput),
+        });
+        setSystemPhase(next);
+        toast.success(t("toastSystemDeadlinesUpdated"));
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : t("toastRefreshFailed"));
+      } finally {
+        setPhaseBusy(false);
       }
     };
 
@@ -257,6 +314,112 @@ export function DashboardPage(): ReactElement {
             </Button>
           </div>
         </Card>
+
+        {systemPhase ? (
+          <Card title={t("systemPhaseTitle")} subtitle={t("systemPhaseSubtitle")}>
+            <p className="muted">
+              <strong>{t("systemPhaseCurrent")}: </strong>
+              {systemPhase.phase === "submission" ? t("phaseSubmission") : t("phaseEvaluation")}
+            </p>
+            <p className="muted">
+              {t("systemPhaseSubmissionDeadline")}:{" "}
+              {systemPhase.submissionDeadline ? formatDateTime(systemPhase.submissionDeadline, t) : t("dateUnavailable")}
+            </p>
+            <p className="muted">
+              {t("systemPhaseEvaluationDeadline")}:{" "}
+              {systemPhase.evaluationDeadline ? formatDateTime(systemPhase.evaluationDeadline, t) : t("dateUnavailable")}
+            </p>
+            <p className="muted">
+              {t("systemPhaseLastChangedAt")}:{" "}
+              {systemPhase.lastChangedAt ? formatDateTime(systemPhase.lastChangedAt, t) : t("dateUnavailable")}
+            </p>
+            <p className="muted">
+              {t("systemPhaseLastChangedBy")}:{" "}
+              {systemPhase.lastChangedBy?.name ?? systemPhase.lastChangedBy?.email ?? t("dateUnavailable")}
+            </p>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={phaseBusy || systemPhase.phase === "submission"}
+                onClick={() => setPendingPhaseSwitch("submission")}
+              >
+                {t("switchToSubmission")}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={phaseBusy || systemPhase.phase === "evaluation"}
+                onClick={() => setPendingPhaseSwitch("evaluation")}
+              >
+                {t("switchToEvaluation")}
+              </Button>
+            </div>
+            <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+              <label className="muted">
+                {t("systemPhaseSubmissionDeadline")}
+                <input
+                  className="ui-input"
+                  type="datetime-local"
+                  value={submissionDeadlineInput}
+                  onChange={(event) => setSubmissionDeadlineInput(event.target.value)}
+                />
+              </label>
+              <label className="muted">
+                {t("systemPhaseEvaluationDeadline")}
+                <input
+                  className="ui-input"
+                  type="datetime-local"
+                  value={evaluationDeadlineInput}
+                  onChange={(event) => setEvaluationDeadlineInput(event.target.value)}
+                />
+              </label>
+              <div>
+                <Button type="button" variant="primary" disabled={phaseBusy} onClick={() => void saveDeadlines()}>
+                  {phaseBusy ? t("refreshing") : t("saveDeadlines")}
+                </Button>
+              </div>
+            </div>
+          </Card>
+        ) : null}
+
+        {pendingPhaseSwitch ? (
+          <div className="modal-backdrop" role="presentation" onClick={() => (phaseBusy ? null : setPendingPhaseSwitch(null))}>
+            <div className="modal-panel" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+              <h3>{pendingPhaseSwitch === "evaluation" ? t("confirmSwitchToEvaluationTitle") : t("confirmSwitchToSubmissionTitle")}</h3>
+              <p className="muted">
+                {pendingPhaseSwitch === "evaluation"
+                  ? t("confirmSwitchToEvaluationBody")
+                  : t("confirmSwitchToSubmissionBody")}
+              </p>
+              <div className="modal-actions">
+                <Button type="button" variant="ghost" disabled={phaseBusy} onClick={() => setPendingPhaseSwitch(null)}>
+                  {t("cancel")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  disabled={phaseBusy}
+                  onClick={async () => {
+                    try {
+                      setPhaseBusy(true);
+                      const next = await api.setSystemPhase(pendingPhaseSwitch);
+                      setSystemPhase(next);
+                      toast.success(t("toastSystemPhaseUpdated"));
+                      setPendingPhaseSwitch(null);
+                    } catch (err) {
+                      toast.error(err instanceof Error ? err.message : t("toastRefreshFailed"));
+                    } finally {
+                      setPhaseBusy(false);
+                    }
+                  }}
+                >
+                  {phaseBusy ? t("refreshing") : t("confirm")}
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </section>
     );
   }
@@ -313,13 +476,32 @@ export function DashboardPage(): ReactElement {
       try {
         setIsRefreshing(true);
         setKpiPulse(true);
-        await loadAdminDashboard(activityPage, true);
+        await Promise.all([
+          loadAdminDashboard(activityPage, true),
+          api.getSystemPhase().then((phase) => setSystemPhase(phase)),
+        ]);
         toast.success(t("toastDashboardUpdated"));
       } catch (err) {
         toast.error(err instanceof Error ? err.message : t("toastRefreshDashboardFailed"));
       } finally {
         window.setTimeout(() => setKpiPulse(false), 520);
         setIsRefreshing(false);
+      }
+    };
+
+    const saveDeadlines = async (): Promise<void> => {
+      try {
+        setPhaseBusy(true);
+        const next = await api.setSystemDeadlines({
+          submissionDeadline: fromDateTimeLocalValue(submissionDeadlineInput),
+          evaluationDeadline: fromDateTimeLocalValue(evaluationDeadlineInput),
+        });
+        setSystemPhase(next);
+        toast.success(t("toastSystemDeadlinesUpdated"));
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : t("toastRefreshFailed"));
+      } finally {
+        setPhaseBusy(false);
       }
     };
 
@@ -425,6 +607,74 @@ export function DashboardPage(): ReactElement {
               </Button>
             </div>
           </Card>
+
+          {systemPhase ? (
+            <Card title={t("systemPhaseTitle")} subtitle={t("systemPhaseSubtitle")}>
+              <p className="muted">
+                <strong>{t("systemPhaseCurrent")}: </strong>
+                {systemPhase.phase === "submission" ? t("phaseSubmission") : t("phaseEvaluation")}
+              </p>
+              <p className="muted">
+                {t("systemPhaseSubmissionDeadline")}:{" "}
+                {systemPhase.submissionDeadline ? formatDateTime(systemPhase.submissionDeadline, t) : t("dateUnavailable")}
+              </p>
+              <p className="muted">
+                {t("systemPhaseEvaluationDeadline")}:{" "}
+                {systemPhase.evaluationDeadline ? formatDateTime(systemPhase.evaluationDeadline, t) : t("dateUnavailable")}
+              </p>
+              <p className="muted">
+                {t("systemPhaseLastChangedAt")}:{" "}
+                {systemPhase.lastChangedAt ? formatDateTime(systemPhase.lastChangedAt, t) : t("dateUnavailable")}
+              </p>
+              <p className="muted">
+                {t("systemPhaseLastChangedBy")}:{" "}
+                {systemPhase.lastChangedBy?.name ?? systemPhase.lastChangedBy?.email ?? t("dateUnavailable")}
+              </p>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={phaseBusy || systemPhase.phase === "submission"}
+                  onClick={() => setPendingPhaseSwitch("submission")}
+                >
+                  {t("switchToSubmission")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={phaseBusy || systemPhase.phase === "evaluation"}
+                  onClick={() => setPendingPhaseSwitch("evaluation")}
+                >
+                  {t("switchToEvaluation")}
+                </Button>
+              </div>
+              <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+                <label className="muted">
+                  {t("systemPhaseSubmissionDeadline")}
+                  <input
+                    className="ui-input"
+                    type="datetime-local"
+                    value={submissionDeadlineInput}
+                    onChange={(event) => setSubmissionDeadlineInput(event.target.value)}
+                  />
+                </label>
+                <label className="muted">
+                  {t("systemPhaseEvaluationDeadline")}
+                  <input
+                    className="ui-input"
+                    type="datetime-local"
+                    value={evaluationDeadlineInput}
+                    onChange={(event) => setEvaluationDeadlineInput(event.target.value)}
+                  />
+                </label>
+                <div>
+                  <Button type="button" variant="primary" disabled={phaseBusy} onClick={() => void saveDeadlines()}>
+                    {phaseBusy ? t("refreshing") : t("saveDeadlines")}
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          ) : null}
         </section>
 
         <Card title={t("recentActivity")}>
@@ -501,6 +751,44 @@ export function DashboardPage(): ReactElement {
           >
             <AdminActivityDrawer adminId={drawerAdminId} onClose={() => setDrawerAdminId(null)} />
           </Suspense>
+        ) : null}
+
+        {pendingPhaseSwitch ? (
+          <div className="modal-backdrop" role="presentation" onClick={() => (phaseBusy ? null : setPendingPhaseSwitch(null))}>
+            <div className="modal-panel" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+              <h3>{pendingPhaseSwitch === "evaluation" ? t("confirmSwitchToEvaluationTitle") : t("confirmSwitchToSubmissionTitle")}</h3>
+              <p className="muted">
+                {pendingPhaseSwitch === "evaluation"
+                  ? t("confirmSwitchToEvaluationBody")
+                  : t("confirmSwitchToSubmissionBody")}
+              </p>
+              <div className="modal-actions">
+                <Button type="button" variant="ghost" disabled={phaseBusy} onClick={() => setPendingPhaseSwitch(null)}>
+                  {t("cancel")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  disabled={phaseBusy}
+                  onClick={async () => {
+                    try {
+                      setPhaseBusy(true);
+                      const next = await api.setSystemPhase(pendingPhaseSwitch);
+                      setSystemPhase(next);
+                      toast.success(t("toastSystemPhaseUpdated"));
+                      setPendingPhaseSwitch(null);
+                    } catch (err) {
+                      toast.error(err instanceof Error ? err.message : t("toastRefreshFailed"));
+                    } finally {
+                      setPhaseBusy(false);
+                    }
+                  }}
+                >
+                  {phaseBusy ? t("refreshing") : t("confirm")}
+                </Button>
+              </div>
+            </div>
+          </div>
         ) : null}
       </section>
     );

@@ -19,6 +19,10 @@ interface SuperadminTelegramRow {
   telegram_id: string | null;
 }
 
+interface StudentTelegramRow {
+  telegram_id: string | null;
+}
+
 export class NotificationService {
   private queue: Promise<void> = Promise.resolve();
 
@@ -71,6 +75,51 @@ export class NotificationService {
     });
   }
 
+  notifyStudentsProjectPhaseChanged(input: {
+    phase: "submission" | "evaluation";
+    submissionDeadline?: string | null;
+    evaluationDeadline?: string | null;
+  }): void {
+    const text =
+      input.phase === "submission"
+        ? [
+            "🟢 Submission phase is now OPEN.",
+            "",
+            "You can now submit your applications through the bot.",
+            input.submissionDeadline ? `Deadline: ${new Date(input.submissionDeadline).toLocaleString("en-GB")}` : null,
+          ]
+            .filter(Boolean)
+            .join("\n")
+        : [
+            "🟠 Submission phase has ended.",
+            "Evaluation phase has started.",
+            "",
+            "New submissions are now closed.",
+            "Thank you.",
+          ].join("\n");
+
+    this.enqueue(async () => {
+      const chatIds = await this.getStudentChatIds();
+      if (chatIds.length === 0) {
+        return;
+      }
+      const batchSize = 20;
+      for (let i = 0; i < chatIds.length; i += batchSize) {
+        const chunk = chatIds.slice(i, i + batchSize);
+        await Promise.all(
+          chunk.map(async (chatId) => {
+            await this.sendTelegramMessage(chatId, text);
+          }),
+        );
+        if (i + batchSize < chatIds.length) {
+          await new Promise((resolve) => {
+            setTimeout(resolve, 1200);
+          });
+        }
+      }
+    });
+  }
+
   private notifyUser(userId: string, text: string): void {
     this.enqueue(async () => {
       const chatId = await this.getTelegramChatIdByUserId(userId);
@@ -114,6 +163,19 @@ export class NotificationService {
       WHERE au.role::text = 'superadmin'
         AND u.telegram_id IS NOT NULL
         AND BTRIM(u.telegram_id) <> ''
+      `,
+    );
+    return result.rows.map((row) => row.telegram_id).filter((value): value is string => Boolean(value));
+  }
+
+  private async getStudentChatIds(): Promise<string[]> {
+    const result = await this.app.db.query<StudentTelegramRow>(
+      `
+      SELECT DISTINCT telegram_id
+      FROM public.users
+      WHERE role::text = 'student'
+        AND telegram_id IS NOT NULL
+        AND BTRIM(telegram_id) <> ''
       `,
     );
     return result.rows.map((row) => row.telegram_id).filter((value): value is string => Boolean(value));

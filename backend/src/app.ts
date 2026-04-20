@@ -12,6 +12,7 @@ import { usersRoutes } from "./modules/users/users.routes";
 import { reviewsRoutes } from "./modules/reviews/reviews.routes";
 import { submissionItemsRoutes } from "./modules/submission-items/submission-items.routes";
 import { submissionsRoutes } from "./modules/submissions/submissions.routes";
+import { systemRoutes } from "./modules/system/system.routes";
 import { registerDatabase } from "./plugins/database";
 import { registerSecurityPlugins } from "./plugins/security";
 import { registerSupabase } from "./plugins/supabase";
@@ -63,6 +64,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   await app.register(healthRoutes);
+  await app.register(systemRoutes, { prefix: "/api" });
   await app.register(authRoutes, { prefix: "/api/auth" });
   await app.register(usersRoutes, { prefix: "/api/users" });
   await app.register(categoriesRoutes, { prefix: "/api/categories" });

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { authMiddleware } from "../../middleware/auth.middleware";
 import { idempotencyOnSend, idempotencyPreHandler } from "../../middleware/idempotency.middleware";
+import { studentSubmissionPhaseGuard } from "../../middleware/project-phase.middleware";
 import { userWriteRateLimitPreHandler } from "../../middleware/user-write-rate-limit.middleware";
 import { SubmissionItemsController } from "./submission-items.controller";
 import { UsersRepository } from "../users/users.repository";
@@ -24,6 +25,7 @@ export async function submissionItemsRoutes(app: FastifyInstance): Promise<void>
   });
   const itemsDeleteIdempotency = idempotencyPreHandler(app, "submission-items-delete");
   const onSendIdempotency = idempotencyOnSend(app);
+  const phaseGuard = studentSubmissionPhaseGuard(app);
 
   await app.register(
     async (scope) => {
@@ -31,14 +33,17 @@ export async function submissionItemsRoutes(app: FastifyInstance): Promise<void>
       scope.post(
         "/",
         {
-          preHandler: [authMiddleware, submissionItemsWriteRate, itemsPostIdempotency],
+          preHandler: [authMiddleware, phaseGuard, submissionItemsWriteRate, itemsPostIdempotency],
           onSend: [onSendIdempotency],
         },
         controller.addItem,
       );
       scope.delete(
         "/:itemId",
-        { preHandler: [authMiddleware, itemsDeleteIdempotency], onSend: [onSendIdempotency] },
+        {
+          preHandler: [authMiddleware, phaseGuard, itemsDeleteIdempotency],
+          onSend: [onSendIdempotency],
+        },
         controller.deleteItem,
       );
     },
@@ -51,7 +56,7 @@ export async function submissionItemsRoutes(app: FastifyInstance): Promise<void>
       scope.post(
         "/",
         {
-          preHandler: [authMiddleware, submissionItemsWriteRate, itemsFlatPostIdempotency],
+          preHandler: [authMiddleware, phaseGuard, submissionItemsWriteRate, itemsFlatPostIdempotency],
           onSend: [onSendIdempotency],
         },
         controller.addItemFlat,
