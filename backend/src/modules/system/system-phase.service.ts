@@ -99,26 +99,34 @@ export class SystemPhaseService {
     this.invalidateCache();
     const next = await this.getPhaseState({ forceRefresh: true });
 
-    await this.audit.insert({
-      actorUserId: input.actorUserId,
-      entityTable: "system_settings",
-      entityId: "project_phase",
-      action: "project_phase_changed",
-      oldValues: { phase: prev.phase },
-      newValues: { phase: next.phase },
-      metadata: {
+    try {
+      await this.audit.insert({
+        actorUserId: input.actorUserId,
+        entityTable: "system_settings",
+        entityId: "project_phase",
+        action: "project_phase_changed",
+        oldValues: { phase: prev.phase },
+        newValues: { phase: next.phase },
+        metadata: {
+          submissionDeadline: next.submissionDeadline,
+          evaluationDeadline: next.evaluationDeadline,
+        },
+        requestIp: input.requestIp ?? null,
+        userAgent: input.userAgent ?? null,
+      });
+    } catch (error) {
+      this.app.log.error({ err: error }, "Phase changed but audit logging failed");
+    }
+
+    try {
+      this.notifications.notifyStudentsProjectPhaseChanged({
+        phase: next.phase,
         submissionDeadline: next.submissionDeadline,
         evaluationDeadline: next.evaluationDeadline,
-      },
-      requestIp: input.requestIp ?? null,
-      userAgent: input.userAgent ?? null,
-    });
-
-    this.notifications.notifyStudentsProjectPhaseChanged({
-      phase: next.phase,
-      submissionDeadline: next.submissionDeadline,
-      evaluationDeadline: next.evaluationDeadline,
-    });
+      });
+    } catch (error) {
+      this.app.log.error({ err: error }, "Phase changed but notification dispatch failed");
+    }
 
     return next;
   }
@@ -157,22 +165,26 @@ export class SystemPhaseService {
     this.invalidateCache();
     const next = await this.getPhaseState({ forceRefresh: true });
 
-    await this.audit.insert({
-      actorUserId: input.actorUserId,
-      entityTable: "system_settings",
-      entityId: "project_deadlines",
-      action: "project_deadlines_changed",
-      oldValues: {
-        submissionDeadline: prev.submissionDeadline,
-        evaluationDeadline: prev.evaluationDeadline,
-      },
-      newValues: {
-        submissionDeadline: next.submissionDeadline,
-        evaluationDeadline: next.evaluationDeadline,
-      },
-      requestIp: input.requestIp ?? null,
-      userAgent: input.userAgent ?? null,
-    });
+    try {
+      await this.audit.insert({
+        actorUserId: input.actorUserId,
+        entityTable: "system_settings",
+        entityId: "project_deadlines",
+        action: "project_deadlines_changed",
+        oldValues: {
+          submissionDeadline: prev.submissionDeadline,
+          evaluationDeadline: prev.evaluationDeadline,
+        },
+        newValues: {
+          submissionDeadline: next.submissionDeadline,
+          evaluationDeadline: next.evaluationDeadline,
+        },
+        requestIp: input.requestIp ?? null,
+        userAgent: input.userAgent ?? null,
+      });
+    } catch (error) {
+      this.app.log.error({ err: error }, "Deadlines changed but audit logging failed");
+    }
 
     return next;
   }
