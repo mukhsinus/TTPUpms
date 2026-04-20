@@ -1,8 +1,12 @@
-import { Markup, Scenes } from "telegraf";
+import { Scenes } from "telegraf";
 import {
+  addAnotherItemKeyboard,
   categoryPickerKeyboard,
   mainMenuKeyboard,
-  submitFlowKeyboardWithCategories,
+  olympiadPlacementKeyboard,
+  previewSubmitKeyboard,
+  skipOptionalLinkKeyboard,
+  submitFlowNavKeyboard,
 } from "../keyboards";
 import type { UpmsService } from "../services/upms.service";
 import type { BotContext, CategoryCatalogEntry, PendingSubmissionItem, SubmitFlowState } from "../types/session";
@@ -131,16 +135,6 @@ async function leaveWithMenu(ctx: BotContext): Promise<void> {
   await ctx.scene.leave();
 }
 
-function submitFlowKeyboard(
-  ctx: BotContext,
-  options?: { topRows?: ReturnType<typeof Markup.button.callback>[][] },
-) {
-  return submitFlowKeyboardWithCategories(st(ctx).categories ?? [], {
-    selectedCategoryId: st(ctx).categoryId,
-    topRows: options?.topRows,
-  });
-}
-
 async function presentCategoryStep(ctx: BotContext, upms: UpmsService): Promise<boolean> {
   const tgId = ctx.session.authenticatedTelegramId;
   if (!tgId) {
@@ -226,15 +220,7 @@ async function promptForSelectedCategory(
     const discardedLine = discardedDraft ? "Previous unfinished draft data was discarded.\n\n" : "";
     await ctx.reply(
       `${changedPrefix}${discardedLine}🥇 Pick your placement (1st, 2nd, or 3rd) using the buttons below.`,
-      submitFlowKeyboard(ctx, {
-        topRows: [
-          [
-            Markup.button.callback("1st place", "place_1"),
-            Markup.button.callback("2nd place", "place_2"),
-            Markup.button.callback("3rd place", "place_3"),
-          ],
-        ],
-      }),
+      olympiadPlacementKeyboard(),
     );
     await ctx.wizard.selectStep(2);
     return;
@@ -251,7 +237,7 @@ async function promptForSelectedCategory(
   const discardedLine = discardedDraft ? "Previous unfinished draft data was discarded.\n\n" : "";
   await ctx.reply(
     `${changedPrefix}${discardedLine}${buildCategoryIntroMessage(selected, { includeTitlePrompt: true })}`,
-    submitFlowKeyboard(ctx),
+    submitFlowNavKeyboard(),
   );
   await ctx.wizard.selectStep(3);
 }
@@ -271,7 +257,7 @@ async function switchToCategoryById(
   }
 
   if (s.categoryId === selected.id && options?.announceChange) {
-    await ctx.reply("This category is already selected. Continue filling the form.", submitFlowKeyboard(ctx));
+    await ctx.reply("This category is already selected. Continue filling the form.", submitFlowNavKeyboard());
     return true;
   }
 
@@ -460,23 +446,12 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       }
 
       if (!categoryRequiresPlacementMetadata(cat)) {
-        await ctx.reply(buildCategoryIntroMessage(cat, { includeTitlePrompt: true }), submitFlowKeyboard(ctx));
+        await ctx.reply(buildCategoryIntroMessage(cat, { includeTitlePrompt: true }), submitFlowNavKeyboard());
         return ctx.wizard.selectStep(3);
       }
 
       if (!ctx.callbackQuery || !("data" in ctx.callbackQuery) || !ctx.callbackQuery.data.startsWith("place_")) {
-        await ctx.reply(
-          "🥇 Tap 1st, 2nd, or 3rd place below.",
-          submitFlowKeyboard(ctx, {
-            topRows: [
-              [
-                Markup.button.callback("1st place", "place_1"),
-                Markup.button.callback("2nd place", "place_2"),
-                Markup.button.callback("3rd place", "place_3"),
-              ],
-            ],
-          }),
-        );
+        await ctx.reply("🥇 Tap 1st, 2nd, or 3rd place below.", olympiadPlacementKeyboard());
         return;
       }
 
@@ -488,7 +463,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       }
       s.itemMetadata = { place: placeNum };
       botFlowStep(ctx.from?.id, "placement_selected", { place: placeNum });
-      await ctx.reply(buildCategoryIntroMessage(cat, { includeTitlePrompt: true }), submitFlowKeyboard(ctx));
+      await ctx.reply(buildCategoryIntroMessage(cat, { includeTitlePrompt: true }), submitFlowNavKeyboard());
       return ctx.wizard.selectStep(3);
     },
     // 3 — title
@@ -504,7 +479,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
 
       st(ctx).title = ctx.message.text.trim();
       botFlowStep(ctx.from?.id, "title_entered", { titleLen: st(ctx).title!.length });
-      await ctx.reply(MSG_DESCRIPTION_STEP, submitFlowKeyboard(ctx));
+      await ctx.reply(MSG_DESCRIPTION_STEP, submitFlowNavKeyboard());
       return ctx.wizard.next();
     },
     // 4 — description
@@ -520,7 +495,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
 
       st(ctx).description = ctx.message.text.trim();
       botFlowStep(ctx.from?.id, "description_entered", { descriptionLen: st(ctx).description!.length });
-      await ctx.reply(MSG_PROOF_STEP, submitFlowKeyboard(ctx));
+      await ctx.reply(MSG_PROOF_STEP, submitFlowNavKeyboard());
       return ctx.wizard.next();
     },
     // 5 — file
@@ -587,7 +562,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
         );
       } catch (e) {
         console.error("Submit flow: proof upload failed:", e);
-        await ctx.reply(userFacingUpmsMessage(e, "Could not upload proof to UPMS."), submitFlowKeyboard(ctx));
+        await ctx.reply(userFacingUpmsMessage(e, "Could not upload proof to UPMS."), submitFlowNavKeyboard());
         return;
       }
 
@@ -595,10 +570,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
 
       botFlowStep(ctx.from?.id, "file_uploaded", { mimeType });
 
-      await ctx.reply(
-        MSG_LINK_STEP,
-        submitFlowKeyboard(ctx, { topRows: [[Markup.button.callback("Skip", "skip_external_link")]] }),
-      );
+      await ctx.reply(MSG_LINK_STEP, skipOptionalLinkKeyboard());
       return ctx.wizard.next();
     },
     // 6 — optional link + persist item
@@ -630,12 +602,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       clearCurrentItem(s);
       await ctx.reply(
         "✅ Line saved.\n\n➕ Add another achievement, or tap Preview to check everything before submit.",
-        submitFlowKeyboard(ctx, {
-          topRows: [
-            [Markup.button.callback("Add another item", "flow_add_more")],
-            [Markup.button.callback("Preview and submit", "flow_preview")],
-          ],
-        }),
+        addAnotherItemKeyboard(),
       );
       return ctx.wizard.next();
     },
@@ -679,15 +646,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
         const s = st(ctx);
         const blocks = s.previewBlocks ?? [];
         if (blocks.length === 0) {
-          await ctx.reply(
-            "No items yet. Add at least one achievement.",
-            submitFlowKeyboard(ctx, {
-              topRows: [
-                [Markup.button.callback("Add another item", "flow_add_more")],
-                [Markup.button.callback("Preview and submit", "flow_preview")],
-              ],
-            }),
-          );
+          await ctx.reply("No items yet. Add at least one achievement.", addAnotherItemKeyboard());
           return;
         }
 
@@ -706,17 +665,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
           "",
           "✅ Tap Submit if everything looks correct, or Cancel to stop.",
         ].join("\n\n");
-        await ctx.reply(
-          summary,
-          submitFlowKeyboard(ctx, {
-            topRows: [
-              [
-                Markup.button.callback("Submit", "confirm_submit"),
-                Markup.button.callback("Cancel", "wizard_cancel"),
-              ],
-            ],
-          }),
-        );
+        await ctx.reply(summary, previewSubmitKeyboard());
         return ctx.wizard.next();
       }
 
