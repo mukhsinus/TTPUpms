@@ -3,10 +3,7 @@ import type { CategoryCatalogEntry } from "./types/session";
 
 const CANCEL_ROW = [Markup.button.callback("Cancel", "wizard_cancel")];
 
-const SUBMIT_FLOW_NAV_ROW = [
-  Markup.button.callback("🔄 Change category", "flow_change_category"),
-  Markup.button.callback("Cancel", "wizard_cancel"),
-];
+const SUBMIT_FLOW_NAV_ROW = [Markup.button.callback("Cancel", "wizard_cancel")];
 
 export const mainMenuKeyboard = () =>
   Markup.inlineKeyboard([
@@ -137,5 +134,4 @@ export const addAnotherItemKeyboard = () =>
 export const previewSubmitKeyboard = () =>
   Markup.inlineKeyboard([
     [Markup.button.callback("Submit", "confirm_submit"), Markup.button.callback("Cancel", "wizard_cancel")],
-    [Markup.button.callback("🔄 Change category", "flow_change_category")],
   ]);
