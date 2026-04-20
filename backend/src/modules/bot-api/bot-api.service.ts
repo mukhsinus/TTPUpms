@@ -58,13 +58,7 @@ interface UserRow {
 /** Bot list row: submission envelope + first line item (no user identity). */
 export interface BotSubmissionListRow {
   id: string;
-  /** Headline: first item title, else submission `title`. */
-  title: string;
-  category: string | null;
-  subcategory: string | null;
-  description: string | null;
-  link: string | null;
-  hasFile: boolean;
+  items: BotSubmitDraftItemSummary[];
   status: string;
   totalPoints: string;
   createdAt: string;
@@ -891,6 +885,23 @@ export class BotApiService {
         );
       }
 
+      const persistedCountResult = await client.query<{ c: string }>(
+        `
+        SELECT COUNT(*)::text AS c
+        FROM submission_items
+        WHERE submission_id = $1
+        `,
+        [created.id],
+      );
+      const persistedCount = Number(persistedCountResult.rows[0]?.c ?? "0");
+      if (persistedCount !== prepared.length) {
+        throw new ServiceError(
+          500,
+          `Atomic bot submission mismatch: expected ${prepared.length} items, persisted ${persistedCount}.`,
+          "INTERNAL_SERVER_ERROR",
+        );
+      }
+
       await this.submissionsRepository.updateStatus(
         {
           id: created.id,
@@ -1357,46 +1368,42 @@ export class BotApiService {
   async getUserSubmissions(telegramId: string): Promise<BotSubmissionListRow[]> {
     const user = await this.findOrCreateUserByTelegramId(telegramId);
 
-    const result = await this.app.db.query<BotSubmissionListRow>(
+    const result = await this.app.db.query<{
+      id: string;
+      status: string;
+      totalPoints: string;
+      createdAt: string;
+      items_json: unknown;
+    }>(
       `
       SELECT
         s.id,
-        COALESCE(
-          NULLIF(BTRIM(fi.item_title), ''),
-          NULLIF(BTRIM(s.title), ''),
-          '—'
-        ) AS title,
-        fi.category_name AS category,
-        COALESCE(
-          NULLIF(BTRIM(fi.subcategory_label), ''),
-          NULLIF(BTRIM(fi.subcategory_slug), '')
-        ) AS subcategory,
-        fi.item_description AS description,
-        CASE
-          WHEN fi.external_link IS NOT NULL AND BTRIM(fi.external_link) <> '' THEN BTRIM(fi.external_link)
-          ELSE NULL
-        END AS link,
-        COALESCE(fi.has_file, false) AS "hasFile",
         s.status::text AS status,
         s.total_score::text AS "totalPoints",
-        s.created_at AS "createdAt"
+        s.created_at AS "createdAt",
+        COALESCE(items.items_json, '[]'::jsonb) AS items_json
       FROM submissions s
       LEFT JOIN LATERAL (
         SELECT
-          si.title AS item_title,
-          c.name AS category_name,
-          cs.label AS subcategory_label,
-          cs.slug AS subcategory_slug,
-          si.description AS item_description,
-          si.external_link,
-          (si.proof_file_url IS NOT NULL AND BTRIM(si.proof_file_url) <> '') AS has_file
+          jsonb_agg(
+            jsonb_build_object(
+              'title', si.title,
+              'category', COALESCE(c.name, '—'),
+              'subcategory', COALESCE(NULLIF(BTRIM(cs.label), ''), NULLIF(BTRIM(cs.slug), ''), '—'),
+              'description', COALESCE(NULLIF(BTRIM(si.description), ''), '—'),
+              'link', CASE
+                WHEN si.external_link IS NOT NULL AND BTRIM(si.external_link) <> '' THEN BTRIM(si.external_link)
+                ELSE NULL
+              END,
+              'hasFile', (si.proof_file_url IS NOT NULL AND BTRIM(si.proof_file_url) <> '')
+            )
+            ORDER BY si.created_at ASC, si.id ASC
+          ) AS items_json
         FROM submission_items si
         LEFT JOIN categories c ON c.id = si.category_id
         LEFT JOIN category_subcategories cs ON cs.id = si.subcategory_id
         WHERE si.submission_id = s.id
-        ORDER BY si.created_at ASC, si.id ASC
-        LIMIT 1
-      ) fi ON true
+      ) items ON true
       WHERE s.user_id = $1
       ORDER BY s.created_at DESC
       LIMIT 10
@@ -1404,7 +1411,37 @@ export class BotApiService {
       [user.id],
     );
 
-    return result.rows;
+    const toSummaryItems = (raw: unknown): BotSubmitDraftItemSummary[] => {
+      if (!Array.isArray(raw)) {
+        return [];
+      }
+      const out: BotSubmitDraftItemSummary[] = [];
+      for (const item of raw) {
+        if (typeof item !== "object" || item === null) {
+          continue;
+        }
+        const row = item as Record<string, unknown>;
+        const title = typeof row.title === "string" && row.title.trim() ? row.title.trim() : "—";
+        const category = typeof row.category === "string" && row.category.trim() ? row.category.trim() : "—";
+        const subcategory =
+          typeof row.subcategory === "string" && row.subcategory.trim() ? row.subcategory.trim() : "—";
+        const description =
+          typeof row.description === "string" && row.description.trim() ? row.description.trim() : "—";
+        const link =
+          typeof row.link === "string" && row.link.trim().length > 0 ? row.link.trim() : null;
+        const hasFile = Boolean(row.hasFile);
+        out.push({ title, category, subcategory, description, link, hasFile });
+      }
+      return out;
+    };
+
+    return result.rows.map((row) => ({
+      id: row.id,
+      items: toSummaryItems(row.items_json),
+      status: row.status,
+      totalPoints: row.totalPoints,
+      createdAt: row.createdAt,
+    }));
   }
 
   async getUserApprovedPoints(telegramId: string): Promise<number> {

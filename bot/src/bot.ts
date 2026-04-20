@@ -191,17 +191,23 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
         item.status === "draft"
           ? "Status: draft (not submitted)"
           : `Status: ${item.status}`;
-      const block = [
-        `${index + 1}. ${item.title}`,
-        `   Category: ${noSnake(item.category)}`,
-        `   Subcategory: ${noSnake(item.subcategory)}`,
-        `   Description: ${item.description ?? "—"}`,
-      ];
-      if (item.link) {
-        block.push(`   Link: ${item.link}`);
-      }
-      if (item.hasFile) {
-        block.push("   File: attached");
+      const block = [`${index + 1}. Submission #${item.id.slice(0, 8)}`];
+      if (item.items.length === 0) {
+        block.push("   Items: —");
+      } else {
+        for (let i = 0; i < item.items.length; i += 1) {
+          const line = item.items[i]!;
+          block.push(`   Item ${i + 1}: ${line.title}`);
+          block.push(`      Category: ${noSnake(line.category)}`);
+          block.push(`      Subcategory: ${noSnake(line.subcategory)}`);
+          block.push(`      Description: ${line.description ?? "—"}`);
+          if (line.link) {
+            block.push(`      Link: ${line.link}`);
+          }
+          if (line.hasFile) {
+            block.push("      File: attached");
+          }
+        }
       }
       block.push(`   ${statusLine}`, `   Points: ${item.totalPoints}`, `   Created: ${new Date(item.createdAt).toLocaleDateString("en-US")}`);
       return block.join("\n");

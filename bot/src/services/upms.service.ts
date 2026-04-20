@@ -21,12 +21,7 @@ interface BotApiUserRow {
 
 interface BotApiSubmissionRow {
   id: string;
-  title: string;
-  category: string | null;
-  subcategory: string | null;
-  description: string | null;
-  link: string | null;
-  hasFile: boolean;
+  items: SubmitDraftSuccessItem[];
   status: string;
   totalPoints: string;
   createdAt: string;
