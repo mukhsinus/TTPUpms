@@ -7,7 +7,6 @@ import {
   previewSubmitKeyboard,
   skipOptionalLinkKeyboard,
   submitFlowNavKeyboard,
-  subcategoryPickerKeyboard,
 } from "../keyboards";
 import type { UpmsService } from "../services/upms.service";
 import type { BotContext, CategoryCatalogEntry, PendingSubmissionItem, SubmitFlowState } from "../types/session";
@@ -48,31 +47,148 @@ const MSG_LINK_STEP =
   "• GitHub repo\n" +
   "• Official results page";
 
-const MSG_SUBCATEGORY_PROMPT =
-  "🎯 Choose the specific type\n\nPlease choose a specific type of achievement for this category:";
-
 const CHANGE_CATEGORY_TEXT = "change category";
 
 function isChangeCategoryText(text: string | undefined): boolean {
   return (text ?? "").trim().toLowerCase() === CHANGE_CATEGORY_TEXT;
 }
 
-/** Backend submission validation requires `metadata.place` for this subcategory slug. */
-const SUB_SLUG_REQUIRING_PLACE_METADATA = "olympiad_participation";
+const CATEGORY_CODES_REQUIRING_PLACE_METADATA = new Set(["internal_competitions", "olympiads"]);
+
+interface BotCategoryCardOverride {
+  headline: string;
+  subtitle?: string;
+  pointsLines: string[];
+}
+
+const CATEGORY_CARD_OVERRIDES: Record<string, BotCategoryCardOverride> = {
+  internal_competitions: {
+    headline:
+      "🏆 Successful participation in internal competitions aimed at developing students' practical skills",
+    subtitle:
+      "(MS Office skills, AI prompt engineering, communication, leadership, presentation, pitching, speed typing, etc.)",
+    pointsLines: [
+      "Based on the results of internal competitions:",
+      "🥇 1st place — 5 points",
+      "🥈 2nd place — 4 points",
+      "🥉 3rd place — 3 points",
+    ],
+  },
+  scientific_activity: {
+    headline:
+      "🔬 Scientific activity: patents, research articles, inventions/MVPs, software development, conference presentations, participation in scientific projects",
+    pointsLines: [
+      "Available points:",
+      "• Patent — 10 points",
+      "• DGUs (Indexed journals of higher category) — 6 points",
+      "• Articles in international scientific journals — 8 points",
+      "• Articles in local scientific journals — 5 points",
+      "• MVP — 1-8 points",
+      "• Software development — 1-7 points",
+      "• Conference presentations — 4 points",
+      "• Participation in scientific, innovative, or applied projects — 4 points",
+    ],
+  },
+  student_initiatives: {
+    headline: "🎓 Initiatives aimed at improving student life",
+    subtitle: "(organizing study courses to support students' academic progress)",
+    pointsLines: [
+      "Scoring:",
+      "Based on the recommendation of the Student Union, up to a maximum of 5 points may be awarded for each course conducted.",
+    ],
+  },
+  it_certificates: {
+    headline: "💻 Internationally recognized IT certificates",
+    subtitle: "(Google, Oracle, Cisco, etc.)",
+    pointsLines: [
+      "Scoring:",
+      "• Google Professional / Cisco CCNP — 9-10 points",
+      "• Cisco Associate / Oracle Associate — 7-8 points",
+      "• Entry-level certificates (MOS, ICDL) — 5-6 points",
+    ],
+  },
+  language_certificates: {
+    headline: "🌍 Language proficiency certificates",
+    subtitle: "(IELTS, TOEFL, HSK, TestDaF, etc.)",
+    pointsLines: [
+      "Scoring:",
+      "• IELTS 8.0+ / TOEFL 110+ or equivalent — 7 points",
+      "• IELTS 7.0–7.5 / TOEFL 90–109 or equivalent — 6 points",
+      "• IELTS 6.0–6.5 / TOEFL 70–89 or equivalent — 5 points",
+    ],
+  },
+  standardized_tests: {
+    headline: "📘 International standardized tests",
+    subtitle: "(SAT, GRE, GMAT, etc.)",
+    pointsLines: [
+      "Scoring:",
+      "• SAT 1400+, GRE 160+, GMAT 700+ — 7 points",
+      "• SAT 1300–1400, GRE 150–160, GMAT 650–700 — 6 points",
+      "• SAT 1200–1300, GRE 140–150, GMAT 600–650 — 5 points",
+    ],
+  },
+  educational_activity: {
+    headline:
+      "📚 Active participation in improving the university's educational and methodological activities",
+    subtitle:
+      "(textbooks, study guides, exam questions, content creation, video lessons, digital materials, peer-learning)",
+    pointsLines: [
+      "Scoring:",
+      "Based on the recommendation of the Educational and Methodological Department, a maximum of 7 points may be awarded.",
+    ],
+  },
+  olympiads: {
+    headline: "🏅 Winning in subject Olympiads, hackathons, and competitions",
+    subtitle: "In national and international subject Olympiads and hackathons:",
+    pointsLines: [
+      "• 1st place — 10 points",
+      "• 2nd place — 8 points",
+      "• 3rd place — 6 points",
+    ],
+  },
+  volunteering: {
+    headline: "🤝 Volunteer activities",
+    pointsLines: [
+      "Scoring:",
+      "• Based on the recommendation of the Student Union — maximum 5 points",
+      "• Internships in university departments on a voluntary basis — 1–10 points",
+    ],
+  },
+  work_experience: {
+    headline: "💼 Professional work experience in the relevant field for at least 3 months",
+    pointsLines: [
+      "Scoring:",
+      "• Working for more than 1 year — 10 points",
+      "• Working for 6 months to 1 year — 8 points",
+      "• Working for 3 to 6 months — 5 points",
+    ],
+  },
+};
+
+function normalizedCategoryCode(category: CategoryCatalogEntry): string {
+  return (category.code || category.name || "").trim().toLowerCase();
+}
+
+function categoryRequiresPlacementMetadata(category: CategoryCatalogEntry): boolean {
+  return CATEGORY_CODES_REQUIRING_PLACE_METADATA.has(normalizedCategoryCode(category));
+}
 
 function buildCategoryIntroMessage(
   category: CategoryCatalogEntry,
   options?: { includeTitlePrompt?: boolean },
 ): string {
   const includeTitlePrompt = options?.includeTitlePrompt ?? true;
-  const desc = category.description ?? "";
-  const what = category.whatCounts ?? "";
-  const scoring = category.scoring ?? "";
-  let msg =
-    `📂 ${category.title}\n\n` +
-    `${desc}\n\n` +
-    `💡 What counts:\n${what}\n\n` +
-    `🏆 Scoring:\n${scoring}`;
+  const override = CATEGORY_CARD_OVERRIDES[normalizedCategoryCode(category)];
+  const msgParts = override
+    ? [override.headline, override.subtitle ?? "", override.pointsLines.join("\n")].filter(Boolean)
+    : [
+        `📂 ${category.title}`,
+        category.description ?? "",
+        `💡 What counts:\n${category.whatCounts ?? ""}`,
+        `🏆 Scoring:\n${category.scoring ?? ""}`,
+      ].filter((part) => part.trim().length > 0);
+
+  let msg = msgParts.join("\n\n");
   if (includeTitlePrompt) {
     msg +=
       `\n\n✏️ Now enter a short title for your achievement:\n\n` +
@@ -91,14 +207,11 @@ function prettifySnake(s: string): string {
 function formatSubmissionSuccessSummary(item: {
   title: string;
   category: string;
-  subcategory: string;
   description: string;
   link: string | null;
   hasFile: boolean;
 }): string {
   const catLine = item.category?.includes("_") ? prettifySnake(item.category) : item.category;
-  const subRaw = item.subcategory?.trim();
-  const subLine = subRaw ? (subRaw.includes("_") ? prettifySnake(subRaw) : subRaw) : "—";
   const lines = [
     "Your achievement has been submitted and is under review.",
     "",
@@ -106,7 +219,6 @@ function formatSubmissionSuccessSummary(item: {
     "",
     `Title: ${item.title}`,
     `Category: ${catLine}`,
-    `Subcategory: ${subLine}`,
     `Description: ${item.description}`,
   ];
   if (item.link) {
@@ -120,19 +232,6 @@ function formatSubmissionSuccessSummary(item: {
 
 function st(ctx: BotContext): SubmitFlowState {
   return ctx.wizard.state as SubmitFlowState;
-}
-
-function categoryHasSubcategories(entry: CategoryCatalogEntry): boolean {
-  return entry.hasSubcategories ?? entry.subcategories.length > 0;
-}
-
-/** Single selectable line whose scoring uses placement metadata (matches UPMS submission rules). */
-function catalogUsesPlaceMetadataSubcategory(category: CategoryCatalogEntry): boolean {
-  return (
-    categoryHasSubcategories(category) &&
-    category.subcategories.length === 1 &&
-    category.subcategories[0].slug === SUB_SLUG_REQUIRING_PLACE_METADATA
-  );
 }
 
 function resetFlowState(s: SubmitFlowState): void {
@@ -260,11 +359,7 @@ function formatItemBlock(s: SubmitFlowState, externalLink: string | null): strin
           ? "🏅 Placement: 3rd place"
           : null;
   const catLine = `📂 Category: ${s.categoryDisplayTitle ?? s.categoryName ?? "—"}`;
-  const subLine =
-    s.subcategoryLabel && String(s.subcategoryLabel).trim() !== ""
-      ? `🎯 Subcategory: ${s.subcategoryLabel}`
-      : null;
-  const body = [catLine, ...(subLine ? [subLine] : []), `📌 Title: ${s.title ?? "—"}`];
+  const body = [catLine, `📌 Title: ${s.title ?? "—"}`];
   if (placeLine) {
     body.push(placeLine);
   }
@@ -403,40 +498,28 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
 
       botFlowStep(ctx.from?.id, "category_selected", {
         categoryCode: selected.code ?? selected.name,
-        hasSubcategories: categoryHasSubcategories(selected),
+        hasSubcategories: false,
       });
+      delete s.subcategorySlug;
+      delete s.subcategoryLabel;
+      delete s.itemMetadata;
 
-      if (!categoryHasSubcategories(selected)) {
-        delete s.subcategorySlug;
-        delete s.subcategoryLabel;
-        delete s.itemMetadata;
-        botFlowStep(ctx.from?.id, "subcategory_skipped", { categoryCode: selected.code ?? selected.name });
-        await ctx.reply(buildCategoryIntroMessage(selected, { includeTitlePrompt: true }), submitFlowNavKeyboard());
-        return ctx.wizard.selectStep(3);
-      }
-
-      await ctx.reply(buildCategoryIntroMessage(selected, { includeTitlePrompt: false }), submitFlowNavKeyboard());
-
-      if (catalogUsesPlaceMetadataSubcategory(selected)) {
-        const only = selected.subcategories[0]!;
-        s.subcategorySlug = only.slug;
-        s.subcategoryLabel = only.title.trim() || "Type";
-        delete s.itemMetadata;
+      if (categoryRequiresPlacementMetadata(selected)) {
         botFlowStep(ctx.from?.id, "placement_prompt", {
           categoryCode: selected.code ?? selected.name,
-          subcategorySlug: only.slug,
         });
         await ctx.reply(
           "🥇 Pick your placement (1st, 2nd, or 3rd) using the buttons below.",
           olympiadPlacementKeyboard(),
         );
-        return ctx.wizard.next();
+        return ctx.wizard.selectStep(2);
       }
 
-      await ctx.reply(MSG_SUBCATEGORY_PROMPT, subcategoryPickerKeyboard(selected.subcategories));
-      return ctx.wizard.next();
+      botFlowStep(ctx.from?.id, "subcategory_removed", { categoryCode: selected.code ?? selected.name });
+      await ctx.reply(buildCategoryIntroMessage(selected, { includeTitlePrompt: true }), submitFlowNavKeyboard());
+      return ctx.wizard.selectStep(3);
     },
-    // 2 — subcategory (or olympiad placement)
+    // 2 — optional placement metadata (no subcategory step)
     async (ctx) => {
       if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "wizard_cancel") {
         await ctx.answerCbQuery();
@@ -460,70 +543,32 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
       const categories = s.categories ?? [];
       const cat = categories.find((c) => c.id === s.categoryId);
 
-      if (cat && s.subcategorySlug === SUB_SLUG_REQUIRING_PLACE_METADATA) {
-        if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data.startsWith("place_")) {
-          await ctx.answerCbQuery();
-          const placeNum = Number(ctx.callbackQuery.data.replace("place_", ""));
-          if (![1, 2, 3].includes(placeNum)) {
-            await ctx.reply("Invalid placement.");
-            return;
-          }
-          s.itemMetadata = { place: placeNum };
-          botFlowStep(ctx.from?.id, "placement_selected", { place: placeNum });
-          await ctx.reply(buildCategoryIntroMessage(cat, { includeTitlePrompt: true }), submitFlowNavKeyboard());
-          return ctx.wizard.next();
-        }
-
-        if (
-          !ctx.callbackQuery ||
-          !("data" in ctx.callbackQuery) ||
-          !ctx.callbackQuery.data.startsWith("sub_")
-        ) {
-          await ctx.reply("🥇 Tap 1st, 2nd, or 3rd place below.", olympiadPlacementKeyboard());
-          return;
-        }
-      }
-
-      if (!ctx.callbackQuery || !("data" in ctx.callbackQuery)) {
-        await ctx.reply("👆 Please tap one of the type buttons below.");
-        return;
-      }
-
-      const data = ctx.callbackQuery.data;
-      if (!data.startsWith("sub_")) {
-        await ctx.answerCbQuery();
-        await ctx.reply("👆 Please use the type buttons for this category.");
-        return;
-      }
-
-      const slug = data.replace("sub_", "");
-      const sub = cat?.subcategories.find((x) => x.slug === slug);
-      if (!sub) {
-        await ctx.answerCbQuery();
-        await ctx.reply("That type is not valid here. Tap a button from the list above.");
-        return;
-      }
-
-      await ctx.answerCbQuery();
-      s.subcategorySlug = sub.slug;
-      s.subcategoryLabel = sub.title.trim() || "Type";
-
-      botFlowStep(ctx.from?.id, "subcategory_selected", { categoryCode: cat?.code ?? cat?.name, subcategorySlug: slug });
-
-      if (cat && slug === SUB_SLUG_REQUIRING_PLACE_METADATA) {
-        delete s.itemMetadata;
-        botFlowStep(ctx.from?.id, "placement_prompt", { categoryCode: cat?.code ?? cat?.name, subcategorySlug: slug });
-        await ctx.reply("🥇 Pick your placement (1st, 2nd, or 3rd) below.", olympiadPlacementKeyboard());
-        return;
-      }
-
       if (!cat) {
         await ctx.reply("Session error. Start again from the menu.", mainMenuKeyboard());
         await leaveWithMenu(ctx);
         return;
       }
+
+      if (!categoryRequiresPlacementMetadata(cat)) {
+        await ctx.reply(buildCategoryIntroMessage(cat, { includeTitlePrompt: true }), submitFlowNavKeyboard());
+        return ctx.wizard.selectStep(3);
+      }
+
+      if (!ctx.callbackQuery || !("data" in ctx.callbackQuery) || !ctx.callbackQuery.data.startsWith("place_")) {
+        await ctx.reply("🥇 Tap 1st, 2nd, or 3rd place below.", olympiadPlacementKeyboard());
+        return;
+      }
+
+      await ctx.answerCbQuery();
+      const placeNum = Number(ctx.callbackQuery.data.replace("place_", ""));
+      if (![1, 2, 3].includes(placeNum)) {
+        await ctx.reply("Invalid placement.");
+        return;
+      }
+      s.itemMetadata = { place: placeNum };
+      botFlowStep(ctx.from?.id, "placement_selected", { place: placeNum });
       await ctx.reply(buildCategoryIntroMessage(cat, { includeTitlePrompt: true }), submitFlowNavKeyboard());
-      return ctx.wizard.next();
+      return ctx.wizard.selectStep(3);
     },
     // 3 — title
     async (ctx) => {

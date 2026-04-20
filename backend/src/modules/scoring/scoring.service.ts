@@ -35,7 +35,26 @@ interface SubmissionItemScoreRow {
 
 interface CategoryCapRow {
   name: string;
-  max_points: string;
+  code: string | null;
+  max_points: string | null;
+  max_score: string | null;
+}
+
+const CATEGORY_SCORE_CAP_FALLBACKS: Record<string, number> = {
+  internal_competitions: 5,
+  scientific_activity: 10,
+  student_initiatives: 5,
+  it_certificates: 10,
+  language_certificates: 7,
+  standardized_tests: 7,
+  educational_activity: 7,
+  olympiads: 10,
+  volunteering: 10,
+  work_experience: 10,
+};
+
+function normalizeCategoryKey(value: string | null | undefined): string {
+  return (value ?? "").trim().toLowerCase();
 }
 
 /**
@@ -120,14 +139,25 @@ export class ScoringService {
   private async loadCategoryCaps(): Promise<Map<string, number>> {
     const result = await this.app.db.query<CategoryCapRow>(
       `
-      SELECT name, max_points
+      SELECT name, code::text, max_points::text, max_score::text
       FROM categories
       `,
     );
 
     const map = new Map<string, number>();
     for (const row of result.rows) {
-      map.set(row.name, Number(row.max_points));
+      const nameKey = normalizeCategoryKey(row.name);
+      const codeKey = normalizeCategoryKey(row.code);
+      const parsed =
+        row.max_points !== null
+          ? Number(row.max_points)
+          : row.max_score !== null
+            ? Number(row.max_score)
+            : CATEGORY_SCORE_CAP_FALLBACKS[nameKey] ?? CATEGORY_SCORE_CAP_FALLBACKS[codeKey];
+      if (!Number.isFinite(parsed)) {
+        continue;
+      }
+      map.set(row.name, parsed);
     }
     return map;
   }

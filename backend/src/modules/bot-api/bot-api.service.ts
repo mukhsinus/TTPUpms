@@ -135,6 +135,10 @@ export interface BotCategoryCatalogEntry {
 const TEN_MB = 10 * 1024 * 1024;
 const ALLOWED_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
 const ALLOWED_MIME_TYPES_ARRAY = [...ALLOWED_MIME_TYPES];
+const BOT_DEFAULT_SUBCATEGORY_BY_CATEGORY_NAME: Record<string, string> = {
+  internal_competitions: "faculty_level",
+  olympiads: "olympiad_participation",
+};
 
 function toSafeFilename(filename: string): string {
   return filename.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -986,11 +990,37 @@ export class BotApiService {
     }
 
     const slug = subcategory?.trim() ?? "";
-    if (!slug) {
+    if (slug) {
+      return slug;
+    }
+
+    const categoryName = await this.submissionItemsRepository.resolveCategoryName(categoryId);
+    const preferredSlug = categoryName ? BOT_DEFAULT_SUBCATEGORY_BY_CATEGORY_NAME[categoryName] : undefined;
+    if (preferredSlug) {
+      const preferredId = await this.submissionItemsRepository.findSubcategoryIdBySlug(categoryId, preferredSlug);
+      if (preferredId) {
+        this.app.log.info(
+          { category_id: categoryId, category_name: categoryName, selected_subcategory: preferredSlug },
+          "Bot omitted subcategory; defaulted to preferred subcategory",
+        );
+        return preferredSlug;
+      }
+    }
+
+    const firstSubcategoryId = await this.submissionItemsRepository.findFirstSubcategoryIdForCategory(categoryId);
+    if (!firstSubcategoryId) {
       throw new BotApiHttpError(400, "Subcategory is required for this category", "VALIDATION_ERROR");
     }
 
-    return slug;
+    const firstSlug = await this.submissionItemsRepository.findSubcategorySlugById(firstSubcategoryId);
+    if (!firstSlug) {
+      throw new BotApiHttpError(400, "Subcategory is required for this category", "VALIDATION_ERROR");
+    }
+    this.app.log.info(
+      { category_id: categoryId, category_name: categoryName, selected_subcategory: firstSlug },
+      "Bot omitted subcategory; defaulted to first subcategory",
+    );
+    return firstSlug;
   }
 
   async createStudentSubmissionFromBot(input: {

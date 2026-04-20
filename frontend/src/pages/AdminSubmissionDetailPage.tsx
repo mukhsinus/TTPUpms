@@ -12,6 +12,23 @@ import { Input } from "../components/ui/Input";
 import { SubmissionDetailSkeleton } from "../components/ui/PageSkeletons";
 import { normalizeRole } from "../lib/rbac";
 
+const CATEGORY_SCORE_CAP_FALLBACKS: Record<string, number> = {
+  internal_competitions: 5,
+  scientific_activity: 10,
+  student_initiatives: 5,
+  it_certificates: 10,
+  language_certificates: 7,
+  standardized_tests: 7,
+  educational_activity: 7,
+  olympiads: 10,
+  volunteering: 10,
+  work_experience: 10,
+};
+
+function normalizeCategoryKey(value: string | null | undefined): string {
+  return (value ?? "").trim().toLowerCase();
+}
+
 export function AdminSubmissionDetailPage(): ReactElement {
   const navigate = useNavigate();
   const toast = useToast();
@@ -32,6 +49,7 @@ export function AdminSubmissionDetailPage(): ReactElement {
   >([]);
   const role = normalizeRole(api.getSessionUser()?.role ?? "student");
   const isSuperadmin = role === "superadmin";
+  const [categoryCaps, setCategoryCaps] = useState<Record<string, number>>({});
 
   const reload = useCallback(async (): Promise<void> => {
     if (!submissionId) {
@@ -77,8 +95,31 @@ export function AdminSubmissionDetailPage(): ReactElement {
     };
   }, [submissionId, isSuperadmin]);
 
+  useEffect(() => {
+    void (async () => {
+      try {
+        const categories = await api.getCategories();
+        const next: Record<string, number> = {};
+        for (const category of categories) {
+          const key = normalizeCategoryKey(category.name);
+          if (key && Number.isFinite(category.maxScore)) {
+            next[key] = category.maxScore;
+          }
+        }
+        setCategoryCaps(next);
+      } catch {
+        // Keep fallback map only.
+      }
+    })();
+  }, []);
+
   const submission = detail?.submission;
   const canModerate = submission?.status === "pending";
+  const totalAllowedScore = (detail?.items ?? []).reduce((sum, item) => {
+    const key = normalizeCategoryKey(item.categoryName ?? item.categoryCode ?? "");
+    const cap = categoryCaps[key] ?? CATEGORY_SCORE_CAP_FALLBACKS[key];
+    return sum + (Number.isFinite(cap) ? cap : 0);
+  }, 0);
 
   const onApprove = async (): Promise<void> => {
     if (!submissionId) {
@@ -92,6 +133,15 @@ export function AdminSubmissionDetailPage(): ReactElement {
 
     if (trimmed.length > 0 && (Number.isNaN(body.score as number) || (body.score as number) < 0)) {
       setActionError("Score must be a non-negative number, or leave empty to use each line’s proposed score.");
+      return;
+    }
+    if (
+      trimmed.length > 0 &&
+      Number.isFinite(totalAllowedScore) &&
+      totalAllowedScore > 0 &&
+      Number(body.score) > totalAllowedScore
+    ) {
+      setActionError(`Allowed range: 0-${totalAllowedScore.toFixed(2)}`);
       return;
     }
 
@@ -218,11 +268,16 @@ export function AdminSubmissionDetailPage(): ReactElement {
             <p className="muted" style={{ marginTop: 0 }}>
               Optional total score: split evenly across all line items. Leave empty to use each item’s proposed score.
             </p>
+            <p className="muted" style={{ marginTop: 0 }}>
+              Allowed range: 0-
+              {Number.isFinite(totalAllowedScore) && totalAllowedScore > 0 ? totalAllowedScore.toFixed(2) : "?"}
+            </p>
             <label className="item-review-field">
               <span>Score (optional)</span>
               <Input
                 type="number"
                 min={0}
+                max={Number.isFinite(totalAllowedScore) && totalAllowedScore > 0 ? totalAllowedScore : undefined}
                 step="0.01"
                 value={approveScore}
                 disabled={busy}

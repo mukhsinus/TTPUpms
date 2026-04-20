@@ -16,6 +16,23 @@ import type { Submission, SubmissionItem } from "../types";
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const ALLOWED_MIME = new Set(["application/pdf", "image/jpeg", "image/png"]);
 
+const CATEGORY_SCORE_CAP_FALLBACKS: Record<string, number> = {
+  internal_competitions: 5,
+  scientific_activity: 10,
+  student_initiatives: 5,
+  it_certificates: 10,
+  language_certificates: 7,
+  standardized_tests: 7,
+  educational_activity: 7,
+  olympiads: 10,
+  volunteering: 10,
+  work_experience: 10,
+};
+
+function normalizeCategoryKey(value: string | null | undefined): string {
+  return (value ?? "").trim().toLowerCase();
+}
+
 function displayItemStatus(item: SubmissionItem): string {
   if (item.status) return item.status;
   if (item.reviewDecision === "approved") return "approved";
@@ -76,6 +93,7 @@ export function SubmissionDetailPage(): ReactElement {
   const [workflowBusy, setWorkflowBusy] = useState(false);
   const [finalizeDecision, setFinalizeDecision] = useState<"approved" | "rejected" | "needs_revision">("approved");
   const [finalizeComment, setFinalizeComment] = useState("");
+  const [categoryCaps, setCategoryCaps] = useState<Record<string, number>>({});
 
   const sessionUser = api.getSessionUser();
   const canReview = canAccessReviewerRoutes(sessionUser);
@@ -107,6 +125,24 @@ export function SubmissionDetailPage(): ReactElement {
       }
     })();
   }, [submissionId]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const categories = await api.getCategories();
+        const next: Record<string, number> = {};
+        for (const category of categories) {
+          const key = normalizeCategoryKey(category.name);
+          if (key && Number.isFinite(category.maxScore)) {
+            next[key] = category.maxScore;
+          }
+        }
+        setCategoryCaps(next);
+      } catch {
+        // Keep fallback map only.
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     const next: Record<string, { score: string; comment: string }> = {};
@@ -175,9 +211,16 @@ export function SubmissionDetailPage(): ReactElement {
     if (!submissionId || !canReview) return;
     const draft = itemDrafts[item.id];
     const isFixed = item.categoryType === "fixed";
+    const categoryKey = normalizeCategoryKey(item.category);
+    const capFromApi = categoryCaps[categoryKey];
+    const cap = Number.isFinite(capFromApi) ? capFromApi : CATEGORY_SCORE_CAP_FALLBACKS[categoryKey];
     const score = Number(draft?.score ?? "");
     if (!isFixed && (Number.isNaN(score) || score < 0)) {
       setActionError("Enter a valid score for this item.");
+      return;
+    }
+    if (!isFixed && Number.isFinite(cap) && score > cap) {
+      setActionError(`Allowed range: 0-${cap}`);
       return;
     }
 
@@ -379,6 +422,15 @@ export function SubmissionDetailPage(): ReactElement {
                         <Input
                           type="number"
                           min={0}
+                          max={
+                            Number.isFinite(
+                              categoryCaps[normalizeCategoryKey(item.category)] ??
+                                CATEGORY_SCORE_CAP_FALLBACKS[normalizeCategoryKey(item.category)],
+                            )
+                              ? (categoryCaps[normalizeCategoryKey(item.category)] ??
+                                  CATEGORY_SCORE_CAP_FALLBACKS[normalizeCategoryKey(item.category)])
+                              : undefined
+                          }
                           step="0.01"
                           value={itemDrafts[item.id]?.score ?? ""}
                           disabled={savingItemId === item.id}
@@ -389,6 +441,12 @@ export function SubmissionDetailPage(): ReactElement {
                             }))
                           }
                         />
+                        <small className="muted">
+                          Allowed range: 0-
+                          {categoryCaps[normalizeCategoryKey(item.category)] ??
+                            CATEGORY_SCORE_CAP_FALLBACKS[normalizeCategoryKey(item.category)] ??
+                            "?"}
+                        </small>
                       </label>
                       <label className="item-review-field">
                         <span>Comment</span>

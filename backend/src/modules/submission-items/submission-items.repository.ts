@@ -12,8 +12,10 @@ interface SubmissionOwnerRow {
 }
 
 interface CategoryBoundsRow {
-  min_score: string;
-  max_score: string;
+  min_score: string | null;
+  max_score: string | null;
+  category_name: string | null;
+  category_code: string | null;
 }
 
 interface SubmissionItemRow {
@@ -128,6 +130,23 @@ const itemFromJoin = `
 
 type DbExecutor = FastifyInstance["db"] | PoolClient;
 
+const CATEGORY_SCORE_CAP_FALLBACKS: Record<string, number> = {
+  internal_competitions: 5,
+  scientific_activity: 10,
+  student_initiatives: 5,
+  it_certificates: 10,
+  language_certificates: 7,
+  standardized_tests: 7,
+  educational_activity: 7,
+  olympiads: 10,
+  volunteering: 10,
+  work_experience: 10,
+};
+
+function normalizeCategoryKey(value: string | null | undefined): string {
+  return (value ?? "").trim().toLowerCase();
+}
+
 export class SubmissionItemsRepository {
   constructor(private readonly app: FastifyInstance) {}
 
@@ -170,8 +189,10 @@ export class SubmissionItemsRepository {
     const result = await this.app.db.query<CategoryBoundsRow>(
       `
       SELECT
-        COALESCE(min_score, 0)::text AS min_score,
-        COALESCE(max_points, max_score, 0)::text AS max_score
+        min_score::text AS min_score,
+        COALESCE(max_points, max_score)::text AS max_score,
+        name::text AS category_name,
+        code::text AS category_code
       FROM categories
       WHERE id = $1
       `,
@@ -183,9 +204,19 @@ export class SubmissionItemsRepository {
       return null;
     }
 
+    const categoryKey =
+      normalizeCategoryKey(row.category_name) || normalizeCategoryKey(row.category_code);
+    const minScoreRaw = row.min_score !== null ? Number(row.min_score) : 0;
+    const maxScoreRaw = row.max_score !== null ? Number(row.max_score) : CATEGORY_SCORE_CAP_FALLBACKS[categoryKey];
+    if (!Number.isFinite(minScoreRaw) || !Number.isFinite(maxScoreRaw)) {
+      return null;
+    }
+    const minScore = Math.max(0, minScoreRaw);
+    const maxScore = Math.max(minScore, maxScoreRaw);
+
     return {
-      minScore: Number(row.min_score),
-      maxScore: Number(row.max_score),
+      minScore,
+      maxScore,
     };
   }
 

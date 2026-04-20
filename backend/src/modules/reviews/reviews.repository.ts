@@ -48,6 +48,23 @@ interface ReviewAssignmentRow {
   id: string;
 }
 
+const CATEGORY_SCORE_CAP_FALLBACKS: Record<string, number> = {
+  internal_competitions: 5,
+  scientific_activity: 10,
+  student_initiatives: 5,
+  it_certificates: 10,
+  language_certificates: 7,
+  standardized_tests: 7,
+  educational_activity: 7,
+  olympiads: 10,
+  volunteering: 10,
+  work_experience: 10,
+};
+
+function normalizeCategoryKey(value: string | null | undefined): string {
+  return (value ?? "").trim().toLowerCase();
+}
+
 export interface ReviewSubmissionEntity {
   id: string;
   userId: string;
@@ -327,11 +344,20 @@ export class ReviewsRepository {
   }
 
   async findCategoryBoundsForItem(itemId: string): Promise<{ minScore: number; maxScore: number } | null> {
-    const result = await this.app.db.query<{ min_score: string | null; max_score: string | null }>(
+    const result = await this.app.db.query<{
+      category_id: string | null;
+      min_score: string | null;
+      max_score: string | null;
+      category_name: string | null;
+      category_code: string | null;
+    }>(
       `
       SELECT
-        COALESCE(cs.min_points, c.min_score, 0)::text AS min_score,
-        COALESCE(cs.max_points, c.max_points, c.max_score, 0)::text AS max_score
+        si.category_id::text AS category_id,
+        cs.min_points::text AS min_score,
+        COALESCE(cs.max_points, c.max_points, c.max_score)::text AS max_score,
+        c.name::text AS category_name,
+        c.code::text AS category_code
       FROM submission_items si
       LEFT JOIN categories c ON c.id = si.category_id
       LEFT JOIN category_subcategories cs ON cs.id = si.subcategory_id
@@ -341,13 +367,42 @@ export class ReviewsRepository {
     );
 
     const row = result.rows[0];
-    if (!row || row.min_score === null || row.max_score === null) {
+    if (!row) {
       return null;
     }
 
+    const categoryKey =
+      normalizeCategoryKey(row.category_name) || normalizeCategoryKey(row.category_code);
+    const fallbackMax = CATEGORY_SCORE_CAP_FALLBACKS[categoryKey];
+    let maxScoreRaw = row.max_score !== null ? Number(row.max_score) : fallbackMax;
+    if (
+      row.category_id &&
+      Number.isFinite(fallbackMax) &&
+      (!Number.isFinite(maxScoreRaw) || maxScoreRaw <= 0)
+    ) {
+      await this.app.db.query(
+        `
+        UPDATE public.categories
+        SET
+          max_points = $2::numeric,
+          max_score = GREATEST(COALESCE(max_score, 0), $2::numeric)
+        WHERE id = $1::uuid
+          AND COALESCE(max_points, 0) <= 0
+        `,
+        [row.category_id, fallbackMax],
+      );
+      maxScoreRaw = fallbackMax;
+    }
+    const minScoreRaw = row.min_score !== null ? Number(row.min_score) : 0;
+    if (!Number.isFinite(minScoreRaw) || !Number.isFinite(maxScoreRaw)) {
+      return null;
+    }
+    const minScore = Math.max(0, minScoreRaw);
+    const maxScore = Math.max(minScore, maxScoreRaw);
+
     return {
-      minScore: Number(row.min_score),
-      maxScore: Number(row.max_score),
+      minScore,
+      maxScore,
     };
   }
 
