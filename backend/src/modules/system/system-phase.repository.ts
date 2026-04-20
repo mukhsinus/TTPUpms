@@ -17,12 +17,55 @@ interface UserBriefRow {
 }
 
 export class SystemPhaseRepository {
+  private ensureSettingsTablePromise: Promise<void> | null = null;
+
   constructor(private readonly app: FastifyInstance) {}
+
+  private async ensureSettingsTable(): Promise<void> {
+    if (this.ensureSettingsTablePromise) {
+      await this.ensureSettingsTablePromise;
+      return;
+    }
+    this.ensureSettingsTablePromise = (async () => {
+      await this.app.db.query(
+        `
+        CREATE TABLE IF NOT EXISTS public.system_settings (
+          key text PRIMARY KEY,
+          value text,
+          updated_at timestamptz NOT NULL DEFAULT NOW()
+        )
+        `,
+      );
+      await this.app.db.query(
+        `
+        CREATE INDEX IF NOT EXISTS idx_system_settings_updated_at
+        ON public.system_settings (updated_at DESC)
+        `,
+      );
+      await this.app.db.query(
+        `
+        INSERT INTO public.system_settings (key, value, updated_at)
+        VALUES
+          ('project_phase', 'submission', NOW()),
+          ('submission_deadline', NULL, NOW()),
+          ('evaluation_deadline', NULL, NOW())
+        ON CONFLICT (key) DO NOTHING
+        `,
+      );
+    })();
+    try {
+      await this.ensureSettingsTablePromise;
+    } catch (error) {
+      this.ensureSettingsTablePromise = null;
+      throw error;
+    }
+  }
 
   async getSettings(keys: string[]): Promise<Map<string, SettingRow>> {
     if (keys.length === 0) {
       return new Map();
     }
+    await this.ensureSettingsTable();
     const result = await this.app.db.query<SettingRow>(
       `
       SELECT key, value, updated_at
@@ -55,6 +98,7 @@ export class SystemPhaseRepository {
     actorUserId: string | null;
     changedAtIso: string;
   }): Promise<void> {
+    await this.ensureSettingsTable();
     const client = await this.app.db.connect();
     try {
       await client.query("BEGIN");
@@ -74,6 +118,7 @@ export class SystemPhaseRepository {
     submissionDeadline: string | null;
     evaluationDeadline: string | null;
   }): Promise<void> {
+    await this.ensureSettingsTable();
     const client = await this.app.db.connect();
     try {
       await client.query("BEGIN");

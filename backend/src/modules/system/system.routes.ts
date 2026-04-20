@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { authMiddleware } from "../../middleware/auth.middleware";
 import { requireAdmin } from "../../middleware/admin.middleware";
@@ -23,7 +23,7 @@ const updateDeadlinesBodySchema = z
 export async function systemRoutes(app: FastifyInstance): Promise<void> {
   const service = new SystemPhaseService(app);
 
-  app.get("/phase", async (_request, reply) => {
+  const sendPhaseState = async (_request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     const state = await service.getPhaseState();
     reply.send(
       success({
@@ -40,7 +40,10 @@ export async function systemRoutes(app: FastifyInstance): Promise<void> {
         lastChangedAt: state.lastChangedAt,
       }),
     );
-  });
+  };
+
+  app.get("/phase", sendPhaseState);
+  app.get("/system/phase", sendPhaseState);
 
   app.patch(
     "/admin/system/phase",
