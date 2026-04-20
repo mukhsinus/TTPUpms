@@ -120,13 +120,7 @@ export interface AdminActivitySummaryRow {
 
 export type AdminSearchSuggestionKind =
   | "student_id"
-  | "student_name"
-  | "submission_id"
-  | "category"
-  | "subgroup"
-  | "faculty"
-  | "teacher"
-  | "telegram_username";
+  | "title";
 
 export interface AdminSearchSuggestionRow {
   kind: AdminSearchSuggestionKind;
@@ -800,95 +794,23 @@ export class AdminRepository {
           AND upper(regexp_replace(u.student_id::text, '\\s+', '', 'g')) LIKE i.normalized_prefix ESCAPE '\\'
         LIMIT (SELECT lim FROM input)
       ),
-      student_name_hits AS (
-        SELECT DISTINCT
-          'student_name'::text AS kind,
-          COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), '')) AS value,
-          COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), '')) AS label,
-          u.student_id::text AS meta
-        FROM public.users u, input i
-        WHERE COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), '')) ILIKE i.pattern ESCAPE '\\'
-        LIMIT (SELECT lim FROM input)
-      ),
-      submission_id_hits AS (
+      title_hits AS (
         SELECT
-          'submission_id'::text AS kind,
-          s.id::text AS value,
-          s.id::text AS label,
-          COALESCE(NULLIF(BTRIM(s.title), ''), 'Submission') AS meta
+          'title'::text AS kind,
+          s.title::text AS value,
+          s.title::text AS label,
+          u.student_id::text AS meta
         FROM public.submissions s, input i
-        WHERE s.id::text ILIKE i.pattern ESCAPE '\\'
+        LEFT JOIN public.users u ON u.id = s.user_id
+        WHERE COALESCE(s.title, '') ILIKE i.pattern ESCAPE '\\'
         ORDER BY s.created_at DESC
-        LIMIT (SELECT lim FROM input)
-      ),
-      category_hits AS (
-        SELECT DISTINCT
-          'category'::text AS kind,
-          COALESCE(NULLIF(BTRIM(c.title::text), ''), c.name) AS value,
-          COALESCE(NULLIF(BTRIM(c.title::text), ''), c.name) AS label,
-          c.code::text AS meta
-        FROM public.categories c, input i
-        WHERE COALESCE(c.title::text, c.name, '') ILIKE i.pattern ESCAPE '\\'
-           OR COALESCE(c.code::text, '') ILIKE i.pattern ESCAPE '\\'
-        LIMIT (SELECT lim FROM input)
-      ),
-      subgroup_hits AS (
-        SELECT DISTINCT
-          'subgroup'::text AS kind,
-          COALESCE(NULLIF(BTRIM(cs.label::text), ''), cs.slug) AS value,
-          COALESCE(NULLIF(BTRIM(cs.label::text), ''), cs.slug) AS label,
-          NULL::text AS meta
-        FROM public.category_subcategories cs, input i
-        WHERE COALESCE(cs.label::text, cs.slug, '') ILIKE i.pattern ESCAPE '\\'
-        LIMIT (SELECT lim FROM input)
-      ),
-      faculty_hits AS (
-        SELECT DISTINCT
-          'faculty'::text AS kind,
-          u.faculty::text AS value,
-          u.faculty::text AS label,
-          NULL::text AS meta
-        FROM public.users u, input i
-        WHERE COALESCE(u.faculty, '') ILIKE i.pattern ESCAPE '\\'
-        LIMIT (SELECT lim FROM input)
-      ),
-      teacher_hits AS (
-        SELECT DISTINCT
-          'teacher'::text AS kind,
-          COALESCE(si.metadata->>'teacher', si.metadata->>'teacher_name', si.metadata->>'supervisor') AS value,
-          COALESCE(si.metadata->>'teacher', si.metadata->>'teacher_name', si.metadata->>'supervisor') AS label,
-          NULL::text AS meta
-        FROM public.submission_items si, input i
-        WHERE COALESCE(si.metadata->>'teacher', si.metadata->>'teacher_name', si.metadata->>'supervisor', '') ILIKE i.pattern ESCAPE '\\'
-        LIMIT (SELECT lim FROM input)
-      ),
-      telegram_hits AS (
-        SELECT DISTINCT
-          'telegram_username'::text AS kind,
-          u.telegram_username::text AS value,
-          CONCAT('@', u.telegram_username::text) AS label,
-          COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), '')) AS meta
-        FROM public.users u, input i
-        WHERE COALESCE(u.telegram_username, '') ILIKE i.pattern ESCAPE '\\'
         LIMIT (SELECT lim FROM input)
       )
       SELECT kind::text, value::text, label::text, meta::text
       FROM (
         SELECT * FROM student_id_hits
         UNION ALL
-        SELECT * FROM student_name_hits
-        UNION ALL
-        SELECT * FROM submission_id_hits
-        UNION ALL
-        SELECT * FROM category_hits
-        UNION ALL
-        SELECT * FROM subgroup_hits
-        UNION ALL
-        SELECT * FROM faculty_hits
-        UNION ALL
-        SELECT * FROM teacher_hits
-        UNION ALL
-        SELECT * FROM telegram_hits
+        SELECT * FROM title_hits
       ) all_hits
       WHERE value IS NOT NULL AND BTRIM(value) <> ''
       LIMIT $3::int

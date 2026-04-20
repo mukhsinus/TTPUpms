@@ -477,13 +477,7 @@ export interface AdminSubmissionDetailPayload {
 
 export type AdminSearchSuggestionKind =
   | "student_id"
-  | "student_name"
-  | "submission_id"
-  | "category"
-  | "subgroup"
-  | "faculty"
-  | "teacher"
-  | "telegram_username";
+  | "title";
 
 export interface AdminSearchSuggestion {
   kind: AdminSearchSuggestionKind;

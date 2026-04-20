@@ -19,6 +19,7 @@ import { useNavigate } from "react-router-dom";
 import i18nInstance from "../i18n";
 import { api, type AdminDashboardPayload, type AdminRecentActivityItem, type SuperadminDashboardPayload } from "../lib/api";
 import { isAdminPanelRole, normalizeRole } from "../lib/rbac";
+import { isLikelyStudentId, normalizeStudentId } from "../lib/student-id";
 import { useToast } from "../contexts/ToastContext";
 import { EmptyState } from "../components/ui/EmptyState";
 import { DashboardStatsSkeleton, TableSkeleton } from "../components/ui/PageSkeletons";
@@ -302,9 +303,10 @@ export function DashboardPage(): ReactElement {
     };
 
     const openStudentSearch = (): void => {
-      const studentId = window.prompt(t("searchStudentPrompt"));
-      if (!studentId?.trim()) return;
-      navigate(`/submissions?search=${encodeURIComponent(studentId.trim())}`);
+      const raw = window.prompt(t("searchStudentPrompt"));
+      if (!raw?.trim()) return;
+      const query = isLikelyStudentId(raw) ? normalizeStudentId(raw) : raw.trim();
+      navigate(`/submissions?search=${encodeURIComponent(query)}`);
     };
 
     const handleRefresh = async (): Promise<void> => {

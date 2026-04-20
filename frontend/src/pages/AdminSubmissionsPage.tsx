@@ -2,7 +2,7 @@ import type { TFunction } from "i18next";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { ClipboardList } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   api,
   type AdminModerationStatus,
@@ -106,7 +106,12 @@ function deriveDateRange(
 export function AdminSubmissionsPage(): ReactElement {
   const { t } = useTranslation("submissions");
   const navigate = useNavigate();
+  const location = useLocation();
   const requestSeq = useRef(0);
+  const initialSearchFromUrl = useMemo(
+    () => new URLSearchParams(location.search).get("search")?.trim() ?? "",
+    [location.search],
+  );
   const [items, setItems] = useState<AdminSubmissionListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [pendingCount, setPendingCount] = useState(0);
@@ -117,12 +122,21 @@ export function AdminSubmissionsPage(): ReactElement {
   const [datePreset, setDatePreset] = useState<DatePreset>("last7");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
-  const [searchInput, setSearchInput] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [searchInput, setSearchInput] = useState(initialSearchFromUrl);
+  const [debouncedSearch, setDebouncedSearch] = useState(initialSearchFromUrl);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [studentOverview, setStudentOverview] = useState<AdminStudentOverviewPayload | null>(null);
+
+  useEffect(() => {
+    if (initialSearchFromUrl === searchInput) {
+      return;
+    }
+    setPage(1);
+    setSearchInput(initialSearchFromUrl);
+    setDebouncedSearch(initialSearchFromUrl);
+  }, [initialSearchFromUrl, searchInput]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -198,13 +212,7 @@ export function AdminSubmissionsPage(): ReactElement {
   const mapSuggestion = useCallback((item: AdminSearchSuggestion, index: number): SearchAutocompleteSuggestion => {
     const typeLabelMap: Record<AdminSearchSuggestion["kind"], string> = {
       student_id: "Student ID",
-      student_name: "Student",
-      submission_id: "Submission ID",
-      category: "Category",
-      subgroup: "Subgroup",
-      faculty: "Faculty",
-      teacher: "Teacher",
-      telegram_username: "Telegram",
+      title: "Title",
     };
     const typeLabel = typeLabelMap[item.kind] ?? "Result";
     return {
