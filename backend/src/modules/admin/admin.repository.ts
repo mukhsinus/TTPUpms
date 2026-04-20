@@ -800,8 +800,9 @@ export class AdminRepository {
           s.title::text AS value,
           s.title::text AS label,
           u.student_id::text AS meta
-        FROM public.submissions s, input i
+        FROM public.submissions s
         LEFT JOIN public.users u ON u.id = s.user_id
+        CROSS JOIN input i
         WHERE COALESCE(s.title, '') ILIKE i.pattern ESCAPE '\\'
         ORDER BY s.created_at DESC
         LIMIT (SELECT lim FROM input)
