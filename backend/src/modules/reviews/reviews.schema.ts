@@ -35,7 +35,7 @@ export type ReviewItemBody = {
   comment?: string;
 };
 
-/** Normalizes flexible field names to ReviewItemBody. Score may be omitted for fixed categories (rule-based). */
+/** Normalizes flexible field names to ReviewItemBody. */
 export function parseReviewItemBody(body: unknown): ReviewItemBody {
   const raw = reviewItemBodyFlexibleSchema.parse(body);
   const score = raw.approved_score ?? raw.score;

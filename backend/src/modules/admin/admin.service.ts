@@ -1051,19 +1051,43 @@ export class AdminService {
 
   /** Prefer signed URLs so private buckets work in the admin browser; fall back to public URL. */
   private async displayUrlForStoragePath(objectPath: string): Promise<string | null> {
-    const bucket = env.STORAGE_BUCKET;
-    const signed = await this.app.supabaseAdmin.storage
-      .from(bucket)
-      .createSignedUrl(objectPath, env.STORAGE_SIGNED_URL_TTL_SECONDS);
-    if (!signed.error && signed.data?.signedUrl) {
-      return signed.data.signedUrl;
+    const candidateBuckets = Array.from(
+      new Set(
+        [
+          env.STORAGE_BUCKET,
+          "chat-attachment",
+          "chat-attachments",
+          "submission-files",
+        ]
+          .map((value) => value.trim())
+          .filter((value) => value.length > 0),
+      ),
+    );
+
+    let hadNonMissingError = false;
+    for (const bucket of candidateBuckets) {
+      const signed = await this.app.supabaseAdmin.storage
+        .from(bucket)
+        .createSignedUrl(objectPath, env.STORAGE_SIGNED_URL_TTL_SECONDS);
+      if (!signed.error && signed.data?.signedUrl) {
+        return signed.data.signedUrl;
+      }
+      if (isStorageObjectMissingError(signed.error)) {
+        continue;
+      }
+      hadNonMissingError = true;
+      this.app.log.warn(
+        { err: signed.error, objectPath, bucket },
+        "Signed URL failed for admin file; using public URL",
+      );
+      return this.getPublicUrlForObjectPath(objectPath, bucket);
     }
-    if (isStorageObjectMissingError(signed.error)) {
-      this.app.log.warn({ objectPath }, "Proof object missing in storage");
-      return null;
-    }
-    this.app.log.warn({ err: signed.error, objectPath }, "Signed URL failed for admin file; using public URL");
-    return this.getPublicUrlForObjectPath(objectPath, bucket);
+
+    this.app.log.warn(
+      { objectPath, bucketsTried: candidateBuckets, hadNonMissingError },
+      "Proof object missing in storage",
+    );
+    return null;
   }
 
   private async resolveItemProofFileUrlAsync(
@@ -1113,12 +1137,15 @@ export class AdminService {
 
   private async mapItemAsync(row: AdminItemRow): Promise<Record<string, unknown>> {
     const categoryTitle = row.category_title ?? row.category_name;
+    const proofFileUrl = await this.resolveItemProofFileUrlAsync(row.proof_file_url, row.submission_user_id);
+    const proofFileMissing = Boolean(row.proof_file_url?.trim()) && !proofFileUrl;
     return {
       id: row.id,
       submissionId: row.submission_id,
       title: row.title,
       description: row.description,
-      proofFileUrl: await this.resolveItemProofFileUrlAsync(row.proof_file_url, row.submission_user_id),
+      proofFileUrl,
+      proofFileMissing,
       externalLink: row.external_link,
       proposedScore: numOrNull(row.proposed_score),
       approvedScore: numOrNull(row.approved_score),
@@ -1185,11 +1212,14 @@ export class AdminService {
   }
 
   private async mapFileAsync(row: AdminFileRow): Promise<Record<string, unknown>> {
+    const fileUrl = await this.resolveFilesRowPublicUrlAsync(row);
+    const missingInStorage = Boolean(row.storage_path?.trim() || row.file_url?.trim()) && !fileUrl;
     return {
       id: row.id,
       submissionId: row.submission_id,
       submissionItemId: row.submission_item_id,
-      fileUrl: await this.resolveFilesRowPublicUrlAsync(row),
+      fileUrl,
+      missingInStorage,
       originalFilename: row.original_filename,
       mimeType: row.mime_type,
       createdAt: row.created_at,

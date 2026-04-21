@@ -192,16 +192,15 @@ export function AdminSubmissionDetailPage(): ReactElement {
       return;
     }
     const draft = itemDrafts[item.id];
-    const isFixed = item.categoryType === "fixed";
     const score = Number(draft?.score ?? "");
     const categoryKey = normalizeCategoryKey(item.categoryCode ?? item.categoryName ?? "");
     const capFromApi = categoryCaps[categoryKey];
     const cap = Number.isFinite(capFromApi) ? capFromApi : CATEGORY_SCORE_CAP_FALLBACKS[categoryKey];
-    if (!isFixed && (Number.isNaN(score) || score < 0)) {
+    if (Number.isNaN(score) || score < 0) {
       setActionError("Enter a valid non-negative score for this item.");
       return;
     }
-    if (!isFixed && Number.isFinite(cap) && score > cap) {
+    if (Number.isFinite(cap) && score > cap) {
       setActionError(`Allowed range: 0-${cap}`);
       return;
     }
@@ -211,7 +210,7 @@ export function AdminSubmissionDetailPage(): ReactElement {
       setActionError(null);
       const updated = await api.reviewSubmissionLineItem({
         itemId: item.id,
-        ...(isFixed ? {} : { approved_score: score }),
+        approved_score: score,
         status: decision,
         reviewer_comment: draft?.comment?.trim() || undefined,
       });
@@ -372,16 +371,16 @@ export function AdminSubmissionDetailPage(): ReactElement {
                   </p>
                 ) : null}
                 {item.proofFileUrl ? <SubmissionItemProof proofFileUrl={item.proofFileUrl} /> : null}
+                {!item.proofFileUrl && item.proofFileMissing ? (
+                  <p className="muted">
+                    <strong>Proof:</strong> file was submitted, but it is missing in storage.
+                  </p>
+                ) : null}
                 {canModerateItems ? (
                   <div className="item-review-panel">
                     <p className="muted item-review-heading">
                       <strong>Item moderation</strong>
                     </p>
-                    {item.categoryType === "fixed" ? (
-                      <p className="muted">
-                        Fixed category: score is applied automatically by scoring rules.
-                      </p>
-                    ) : null}
                     <label className="item-review-field">
                       <span>Approved score</span>
                       <Input
@@ -398,7 +397,7 @@ export function AdminSubmissionDetailPage(): ReactElement {
                         }
                         step="0.01"
                         value={itemDrafts[item.id]?.score ?? ""}
-                        disabled={savingItemId === item.id || item.categoryType === "fixed"}
+                        disabled={savingItemId === item.id}
                         onChange={(event) =>
                           setItemDrafts((drafts) => ({
                             ...drafts,
@@ -411,13 +410,11 @@ export function AdminSubmissionDetailPage(): ReactElement {
                         }
                       />
                       <small className="muted">
-                        {item.categoryType === "fixed"
-                          ? "Auto score from rules"
-                          : `Allowed range: 0-${
-                              categoryCaps[normalizeCategoryKey(item.categoryCode ?? item.categoryName)] ??
-                              CATEGORY_SCORE_CAP_FALLBACKS[normalizeCategoryKey(item.categoryCode ?? item.categoryName)] ??
-                              "?"
-                            }`}
+                        {`Allowed range: 0-${
+                          categoryCaps[normalizeCategoryKey(item.categoryCode ?? item.categoryName)] ??
+                          CATEGORY_SCORE_CAP_FALLBACKS[normalizeCategoryKey(item.categoryCode ?? item.categoryName)] ??
+                          "?"
+                        }`}
                       </small>
                     </label>
                     <label className="item-review-field">
@@ -475,6 +472,8 @@ export function AdminSubmissionDetailPage(): ReactElement {
                       <a href={f.fileUrl} target="_blank" rel="noopener noreferrer">
                         Open
                       </a>
+                    ) : f.missingInStorage ? (
+                      "Missing in storage"
                     ) : (
                       "—"
                     )}

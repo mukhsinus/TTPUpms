@@ -11,7 +11,6 @@ import { AuditLogRepository } from "../audit/audit-log.repository";
 import { NotificationService } from "../notifications/notification.service";
 import { SubmissionItemsRepository } from "../submission-items/submission-items.repository";
 import { SubmissionItemsService } from "../submission-items/submission-items.service";
-import { ScoringRulesRepository } from "../scoring/scoring-rules.repository";
 import { SubmissionsRepository } from "../submissions/submissions.repository";
 import { SubmissionsService } from "../submissions/submissions.service";
 import { UsersRepository } from "../users/users.repository";
@@ -263,7 +262,6 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
   );
   const submissionItemsRepository = new SubmissionItemsRepository(app);
   const submissionItemsService = new SubmissionItemsService(submissionItemsRepository, usersRepository);
-  const scoringRulesRepository = new ScoringRulesRepository(app);
   const service = new BotApiService(
     app,
     audit,
@@ -273,7 +271,6 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
     usersRepository,
     submissionsRepository,
     submissionItemsRepository,
-    scoringRulesRepository,
     notifications,
   );
 

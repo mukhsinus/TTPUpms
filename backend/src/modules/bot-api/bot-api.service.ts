@@ -15,11 +15,7 @@ import {
 import type { SubmissionItemsService } from "../submission-items/submission-items.service";
 import {
   normalizeMetadata,
-  resolveFixedPointsFromRules,
-  resolveFixedProposedScore,
-  roundScore2,
 } from "../scoring/scoring-metadata";
-import type { ScoringRulesRepository } from "../scoring/scoring-rules.repository";
 import type { SubmissionsRepository } from "../submissions/submissions.repository";
 import { MAX_ACTIVE_SUBMISSIONS_PER_USER } from "../submissions/submission-quota";
 import type { SubmissionsService } from "../submissions/submissions.service";
@@ -242,7 +238,6 @@ export class BotApiService {
     private readonly usersRepository: UsersRepository,
     private readonly submissionsRepository: SubmissionsRepository,
     private readonly submissionItemsRepository: SubmissionItemsRepository,
-    private readonly scoringRulesRepository: ScoringRulesRepository,
     private readonly notifications: NotificationService,
   ) {}
 
@@ -891,12 +886,6 @@ export class BotApiService {
         throw toBotApiError(e);
       }
 
-      const proposedScore = await this.computeProposedScoreAtInsert({
-        categoryId: it.categoryId,
-        subcategoryId,
-        metadata,
-      });
-
       prepared.push({
         categoryId: it.categoryId,
         subcategoryId,
@@ -905,7 +894,7 @@ export class BotApiService {
         proofFileUrl: proofPath,
         externalLink,
         metadata,
-        proposedScore,
+        proposedScore: null,
       });
     }
 
@@ -1008,47 +997,6 @@ export class BotApiService {
     } finally {
       client.release();
     }
-  }
-
-  private async computeProposedScoreAtInsert(input: {
-    categoryId: string;
-    subcategoryId: string | null;
-    metadata: Record<string, unknown>;
-  }): Promise<number | null> {
-    const typeRaw = await this.submissionItemsRepository.findCategoryScoringType(input.categoryId);
-    const type = (typeRaw ?? "").toLowerCase();
-    if (type === "manual" || type === "expert" || type === "range") {
-      return null;
-    }
-    if (type !== "fixed") {
-      return null;
-    }
-
-    const bounds = await this.submissionItemsRepository.findCategoryBounds(input.categoryId);
-    if (!bounds || !input.subcategoryId) {
-      return null;
-    }
-
-    const rules = await this.scoringRulesRepository.findRulesBySubcategoryId(input.subcategoryId);
-    if (rules.length > 0) {
-      const matched = resolveFixedPointsFromRules(input.metadata, rules);
-      if (matched !== null) {
-        return roundScore2(matched);
-      }
-      return null;
-    }
-
-    const categoryScoring = await this.scoringRulesRepository.findCategoryScoringBand(
-      input.categoryId,
-      input.subcategoryId,
-    );
-    const fallback = resolveFixedProposedScore({
-      metadata: input.metadata,
-      scoringRules: [],
-      categoryScoring,
-      bounds,
-    });
-    return roundScore2(fallback);
   }
 
   private async resolveBotSubcategorySlug(

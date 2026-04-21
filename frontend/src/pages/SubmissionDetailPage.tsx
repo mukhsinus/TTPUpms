@@ -210,16 +210,15 @@ export function SubmissionDetailPage(): ReactElement {
   const submitItemReview = async (item: SubmissionItem, decision: "approved" | "rejected"): Promise<void> => {
     if (!submissionId || !canReview) return;
     const draft = itemDrafts[item.id];
-    const isFixed = item.categoryType === "fixed";
     const categoryKey = normalizeCategoryKey(item.category);
     const capFromApi = categoryCaps[categoryKey];
     const cap = Number.isFinite(capFromApi) ? capFromApi : CATEGORY_SCORE_CAP_FALLBACKS[categoryKey];
     const score = Number(draft?.score ?? "");
-    if (!isFixed && (Number.isNaN(score) || score < 0)) {
+    if (Number.isNaN(score) || score < 0) {
       setActionError("Enter a valid score for this item.");
       return;
     }
-    if (!isFixed && Number.isFinite(cap) && score > cap) {
+    if (Number.isFinite(cap) && score > cap) {
       setActionError(`Allowed range: 0-${cap}`);
       return;
     }
@@ -229,7 +228,7 @@ export function SubmissionDetailPage(): ReactElement {
       setSavingItemId(item.id);
       const updated = await api.patchReviewItem({
         itemId: item.id,
-        ...(isFixed ? {} : { approved_score: score }),
+        approved_score: score,
         status: decision,
         reviewer_comment: draft?.comment?.trim() || undefined,
       });

@@ -457,6 +457,7 @@ export interface AdminSubmissionDetailPayload {
     title: string;
     description: string | null;
     proofFileUrl: string | null;
+    proofFileMissing?: boolean;
     externalLink: string | null;
     proposedScore: number | null;
     approvedScore: number | null;
@@ -484,6 +485,7 @@ export interface AdminSubmissionDetailPayload {
   files: Array<{
     id: string;
     fileUrl: string | null;
+    missingInStorage?: boolean;
     originalFilename: string;
     mimeType: string | null;
     submissionItemId: string | null;

@@ -4,7 +4,6 @@ import { idempotencyOnSend, idempotencyPreHandler } from "../../middleware/idemp
 import { allowRoles } from "../../middleware/role.middleware";
 import { AuditLogRepository } from "../audit/audit-log.repository";
 import { NotificationService } from "../notifications/notification.service";
-import { ScoringRulesRepository } from "../scoring/scoring-rules.repository";
 import { ReviewsController } from "./reviews.controller";
 import { ReviewsRepository } from "./reviews.repository";
 import { ReviewsService } from "./reviews.service";
@@ -12,9 +11,8 @@ import { ReviewsService } from "./reviews.service";
 export async function reviewsRoutes(app: FastifyInstance): Promise<void> {
   const repository = new ReviewsRepository(app);
   const notifications = new NotificationService(app);
-  const scoringRules = new ScoringRulesRepository(app);
   const audit = new AuditLogRepository(app);
-  const service = new ReviewsService(repository, notifications, audit, scoringRules, app.log);
+  const service = new ReviewsService(repository, notifications, audit, app.log);
   const controller = new ReviewsController(service);
   const reviewerGuard = allowRoles(["reviewer", "admin", "superadmin"]);
   const onSendIdempotency = idempotencyOnSend(app);

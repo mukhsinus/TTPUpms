@@ -7,8 +7,6 @@ import type {
 import type { CompleteSubmissionReviewBody, ReviewItemBody } from "./reviews.schema";
 import type { AuditLogRepository } from "../audit/audit-log.repository";
 import type { NotificationService } from "../notifications/notification.service";
-import type { ScoringRulesRepository } from "../scoring/scoring-rules.repository";
-import { resolveFixedPointsFromRules } from "../scoring/scoring-metadata";
 import {
   assertValidTransition,
   REVIEW_ACTIVE_STATUSES,
@@ -22,7 +20,6 @@ export class ReviewsService {
     private readonly repository: ReviewsRepository,
     private readonly notifications: NotificationService,
     private readonly audit: AuditLogRepository,
-    private readonly scoringRules: ScoringRulesRepository,
     private readonly log: FastifyBaseLogger,
   ) {}
 
@@ -79,50 +76,16 @@ export class ReviewsService {
       throw new ServiceError(404, "Submission item not found");
     }
 
-    const scoringKind: "fixed" | "range" | "expert" =
-      item.categoryType === "manual" ? "expert" : (item.categoryType as "fixed" | "range" | "expert");
-    let finalScore = body.score;
-    let scoringSource: "rules" | "proposed" | "reviewer" | null = null;
-
-    if (scoringKind === "fixed") {
-      const rules = item.subcategoryId
-        ? await this.scoringRules.findRulesBySubcategoryId(item.subcategoryId)
-        : [];
-      const resolved = resolveFixedPointsFromRules(item.metadata, rules);
-      if (resolved !== null) {
-        if (finalScore !== undefined && finalScore !== resolved) {
-          throw new ServiceError(
-            400,
-            `Score for fixed categories must equal ${resolved} (rule-based)`,
-            "VALIDATION_ERROR",
-          );
-        }
-        finalScore = resolved;
-        scoringSource = "rules";
-      } else if (finalScore !== undefined && Number.isFinite(finalScore)) {
-        scoringSource = "reviewer";
-      } else if (item.proposedScore !== null && Number.isFinite(item.proposedScore)) {
-        finalScore = item.proposedScore;
-        scoringSource = "proposed";
-      } else {
-        throw new ServiceError(
-          400,
-          "score is required when no automatic rule applies for this item.",
-          "VALIDATION_ERROR",
-        );
-      }
-    } else {
-      if (finalScore === undefined || !Number.isFinite(finalScore)) {
-        throw new ServiceError(
-          400,
-          "score is required for range and expert categories",
-          "VALIDATION_ERROR",
-        );
-      }
-      scoringSource = "reviewer";
+    const finalScore = body.score;
+    if (finalScore === undefined || !Number.isFinite(finalScore)) {
+      throw new ServiceError(
+        400,
+        "score is required for item moderation",
+        "VALIDATION_ERROR",
+      );
     }
 
-    await this.assertValidItemScore(item, finalScore, scoringKind);
+    await this.assertValidItemScore(item, finalScore);
 
     if (submission.status === "submitted") {
       assertValidTransition("submitted", "review");
@@ -133,8 +96,8 @@ export class ReviewsService {
       submissionId,
       itemId,
       score: finalScore,
-      scoringKind,
-      source: scoringSource,
+      scoringKind: item.categoryType === "manual" ? "expert" : item.categoryType,
+      source: "reviewer",
     });
 
     const reviewedItem = await this.repository.reviewSubmissionItemLocked({
@@ -210,7 +173,6 @@ export class ReviewsService {
   private async assertValidItemScore(
     item: ReviewSubmissionItemEntity,
     score: number,
-    scoringKind: "fixed" | "range" | "expert",
   ): Promise<void> {
     if (!Number.isFinite(score)) {
       throw new ServiceError(400, "Score must be a finite number.", "VALIDATION_ERROR");
@@ -233,18 +195,6 @@ export class ReviewsService {
       );
     }
 
-    if (
-      scoringKind !== "fixed" &&
-      item.proposedScore !== null &&
-      Number.isFinite(item.proposedScore) &&
-      score > item.proposedScore
-    ) {
-      throw new ServiceError(
-        400,
-        `Score cannot exceed the proposed maximum (${item.proposedScore})`,
-        "VALIDATION_ERROR",
-      );
-    }
   }
 
   private async assertReviewerAccess(
