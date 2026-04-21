@@ -16,14 +16,6 @@ const PAGE_SIZE = 5;
 
 type ProfT = TFunction<"profile">;
 
-const PERMISSION_KEYS_BASE = ["approveSubmissions", "rejectSubmissions", "exportCsv"] as const;
-const PERMISSION_KEYS_SUPER = [
-  ...PERMISSION_KEYS_BASE,
-  "manageAdmins",
-  "viewAuditLogs",
-  "securityApprovals",
-] as const;
-
 function formatJoinDate(iso: string | null | undefined, lang: string, emDash: string): string {
   if (!iso) {
     return emDash;
@@ -81,11 +73,6 @@ function actionLabel(action: AdminProfilePayload["recentActions"][number]["actio
   return action.replaceAll("_", " ");
 }
 
-function roleLabel(role: string, t: ProfT): string {
-  const key = `role_${role}` as const;
-  return t(key, { defaultValue: role });
-}
-
 export function ProfilePage(): ReactElement {
   const { t, i18n } = useTranslation("profile");
   const navigate = useNavigate();
@@ -128,13 +115,6 @@ export function ProfilePage(): ReactElement {
   useEffect(() => {
     void load(false);
   }, [load]);
-
-  const permissionKeys = useMemo(() => {
-    if (!payload) {
-      return [];
-    }
-    return payload.identity.role === "superadmin" ? [...PERMISSION_KEYS_SUPER] : [...PERMISSION_KEYS_BASE];
-  }, [payload]);
 
   const emailChanged = useMemo(() => {
     const current = payload?.identity.email?.trim().toLowerCase() ?? "";
@@ -195,19 +175,19 @@ export function ProfilePage(): ReactElement {
 
   return (
     <section className="dashboard-stack profile-page">
-      <Card title={t("title")} subtitle={t("subtitle")}>
-        {error ? (
+      {error ? (
+        <Card>
           <div className="profile-inline-error">
             <p className="error">{error}</p>
             <Button type="button" variant="secondary" onClick={() => void load(true)}>
               {t("retry")}
             </Button>
           </div>
-        ) : null}
-      </Card>
+        </Card>
+      ) : null}
 
-      <div className="profile-top-grid">
-        <Card title={t("identity")}>
+      <Card title={t("identity")} subtitle={t("subtitle")}>
+        <div className="profile-account-grid">
           <div className="profile-identity">
             <label className="item-review-field">
               <span>{t("fullName")}</span>
@@ -241,20 +221,8 @@ export function ProfilePage(): ReactElement {
               </label>
             ) : null}
             <div className="profile-kv">
-              <span>{t("role")}</span>
-              <strong className="status-chip status-chip-resolved">{roleLabel(payload.identity.role, t)}</strong>
-            </div>
-            <div className="profile-kv">
-              <span>{t("internalId")}</span>
-              <strong>{payload.identity.adminCode}</strong>
-            </div>
-            <div className="profile-kv">
               <span>{t("joined")}</span>
               <strong>{formatJoinDate(payload.identity.joinedAt, i18n.language, em)}</strong>
-            </div>
-            <div className="profile-kv">
-              <span>{t("lastLogin")}</span>
-              <strong>{formatJoinDate(payload.identity.lastLoginAt, i18n.language, em)}</strong>
             </div>
             <div className="profile-security-actions">
               <Button
@@ -300,33 +268,26 @@ export function ProfilePage(): ReactElement {
               ) : null}
             </div>
           </div>
-        </Card>
 
-        <Card title={t("security")}>
-          <div className="profile-security-stack">
+          <aside className="profile-security-panel" aria-label={t("security")}>
+            <div className="profile-security-panel-head">
+              <h3>{t("security")}</h3>
+              <p className="muted">{t("password")}</p>
+            </div>
             <div className="profile-kv">
               <span>{t("password")}</span>
               <strong>{t("passwordMasked")}</strong>
             </div>
+            <div className="profile-security-line muted">
+              <ShieldCheck size={14} aria-hidden />
+              <span>{t("passwordHintLine")}</span>
+            </div>
             <Button type="button" variant="primary" onClick={() => setShowPasswordModal(true)}>
               {t("changePassword")}
             </Button>
-          </div>
-        </Card>
-      </div>
-
-      <div className="profile-top-grid">
-        <Card title={t("permissions")}>
-          <div className="profile-permissions">
-            {permissionKeys.map((key) => (
-              <div className="profile-permission-row" key={key}>
-                <span aria-label={t("yesMark")}>✅</span>
-                <span>{t(key)}</span>
-              </div>
-            ))}
-          </div>
-        </Card>
-      </div>
+          </aside>
+        </div>
+      </Card>
 
       <Card title={t("performanceStats")}>
         <div className="profile-stats-grid">

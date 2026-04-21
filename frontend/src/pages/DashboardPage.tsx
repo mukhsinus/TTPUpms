@@ -467,11 +467,6 @@ export function DashboardPage(): ReactElement {
 
     return (
       <section className="dashboard-stack ops-dashboard">
-        <Card className="ops-header-card">
-          <h2 className="ops-title">{t("title")}</h2>
-          <p className="ops-subtitle">{t("subtitleModeration")}</p>
-        </Card>
-
         <div className={`stats-grid stats-grid-four ops-kpis ${kpiPulse ? "kpi-refresh-pulse" : ""}`}>
           <Card className="stat-card stat-card-primary">
             <div className="stat-card-header">

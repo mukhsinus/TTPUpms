@@ -1851,11 +1851,6 @@ body {
   max-width: 60%;
 }
 
-.profile-page .profile-permission-row span:last-child {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
 .profile-page .profile-stat-card span {
   overflow-wrap: anywhere;
 }
@@ -1877,18 +1872,36 @@ body {
   overflow-wrap: anywhere;
 }
 
-.profile-top-grid {
+.profile-account-grid {
   display: grid;
   gap: var(--space-4);
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr);
+  align-items: start;
 }
 
 .profile-identity,
-.profile-permissions,
-.profile-security-stack,
 .profile-activity-list {
   display: grid;
   gap: var(--space-3);
+}
+
+.profile-security-panel {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 14px;
+  background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+  display: grid;
+  gap: var(--space-3);
+}
+
+.profile-security-panel-head h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: #0f172a;
+}
+
+.profile-security-panel-head p {
+  margin: 2px 0 0;
 }
 
 .profile-identity-name {
@@ -1906,13 +1919,6 @@ body {
 
 .profile-kv span {
   color: #64748b;
-}
-
-.profile-permission-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: #0f172a;
 }
 
 .profile-stats-grid {
@@ -2100,7 +2106,7 @@ body {
     grid-template-columns: 1fr;
   }
 
-  .profile-top-grid {
+  .profile-account-grid {
     grid-template-columns: 1fr;
   }
 }
