@@ -199,8 +199,9 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
       } else {
         for (let i = 0; i < item.items.length; i += 1) {
           const line = item.items[i]!;
-          block.push(`   Item ${i + 1}: ${line.title}`);
-          block.push(`      Category: ${line.categoryTitle || noSnake(line.category)}`);
+          const categoryLabel = noSnake(line.categoryTitle || line.category);
+          block.push(`   Achievement ${i + 1}: ${line.title}`);
+          block.push(`      Category: ${categoryLabel}`);
           block.push(`      Subcategory: ${noSnake(line.subcategory)}`);
           block.push(`      Status: ${prettyStatus(line.status)}`);
           block.push(`      Score: ${line.approvedScore ?? 0}`);
