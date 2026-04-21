@@ -30,10 +30,10 @@
   "updating": "Yangilanmoqda…",
   "passwordUpdated": "Parol yangilandi",
   "passwordMismatch": "Parollar mos kelmaydi.",
-  "passwordMin": "Kamida 10 belgi: harf, raqam va maxsus belgilar.",
+  "passwordMin": "Tavsiya: xavfsizlik uchun kamida 6 belgi ishlating.",
   "passwordTooWeak": "Yangi parol juda zaif.",
   "passwordUpdateFailed": "Parolni yangilab bo'lmadi",
-  "passwordHintLine": "Kamida 10 belgi: harf, raqam va maxsus belgilar.",
+  "passwordHintLine": "Tavsiya: kamida 6 belgi ishlating.",
   "approveSubmissions": "Arizalarni tasdiqlash",
   "rejectSubmissions": "Arizalarni rad etish",
   "exportCsv": "PDF hisobot eksporti",
@@ -79,5 +79,7 @@
   "deviceWindows": "Windows",
   "deviceIphone": "iPhone",
   "deviceAndroid": "Android",
-  "modalChangePasswordTitle": "Parolni almashtirish"
+  "modalChangePasswordTitle": "Parolni almashtirish",
+  "showPassword": "Parolni ko'rsatish",
+  "hidePassword": "Parolni yashirish"
 }

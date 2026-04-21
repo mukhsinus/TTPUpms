@@ -30,10 +30,10 @@
   "updating": "Обновление…",
   "passwordUpdated": "Пароль обновлён",
   "passwordMismatch": "Пароли не совпадают.",
-  "passwordMin": "Не менее 10 символов: буквы, цифры и спецсимволы.",
+  "passwordMin": "Рекомендация: от 6 символов для лучшей безопасности.",
   "passwordTooWeak": "Новый пароль слишком слабый.",
   "passwordUpdateFailed": "Не удалось обновить пароль",
-  "passwordHintLine": "Не менее 10 символов: буквы, цифры и спецсимволы.",
+  "passwordHintLine": "Рекомендация: используйте не менее 6 символов.",
   "approveSubmissions": "Одобрение заявок",
   "rejectSubmissions": "Отклонение заявок",
   "exportCsv": "Экспорт PDF-отчета",
@@ -79,5 +79,7 @@
   "deviceWindows": "Windows",
   "deviceIphone": "iPhone",
   "deviceAndroid": "Android",
-  "modalChangePasswordTitle": "Смена пароля"
+  "modalChangePasswordTitle": "Смена пароля",
+  "showPassword": "Показать пароль",
+  "hidePassword": "Скрыть пароль"
 }

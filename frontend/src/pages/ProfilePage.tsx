@@ -1,6 +1,6 @@
 import type { TFunction } from "i18next";
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
-import { ShieldCheck, UserCircle2 } from "lucide-react";
+import { Eye, EyeOff, ShieldCheck, UserCircle2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { api, type AdminProfilePayload } from "../lib/api";
@@ -15,24 +15,6 @@ import { TableSkeleton } from "../components/ui/PageSkeletons";
 const PAGE_SIZE = 5;
 
 type ProfT = TFunction<"profile">;
-
-function formatJoinDate(iso: string | null | undefined, lang: string, emDash: string): string {
-  if (!iso) {
-    return emDash;
-  }
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) {
-    return emDash;
-  }
-  const base = lang.split("-")[0] ?? "en";
-  if (base === "ru") {
-    return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", year: "numeric" }).format(date);
-  }
-  if (base === "uz") {
-    return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" }).format(date);
-  }
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(date);
-}
 
 function relativeTime(value: string, t: ProfT): string {
   const deltaMs = Date.now() - new Date(value).getTime();
@@ -74,7 +56,7 @@ function actionLabel(action: AdminProfilePayload["recentActions"][number]["actio
 }
 
 export function ProfilePage(): ReactElement {
-  const { t, i18n } = useTranslation("profile");
+  const { t } = useTranslation("profile");
   const navigate = useNavigate();
   const toast = useToast();
   const [loading, setLoading] = useState(true);
@@ -92,6 +74,12 @@ export function ProfilePage(): ReactElement {
     currentPassword: "",
     newPassword: "",
     confirmPassword: "",
+  });
+  const [passwordVisible, setPasswordVisible] = useState({
+    emailConfirm: false,
+    current: false,
+    next: false,
+    confirm: false,
   });
 
   const load = useCallback(async (forceRefresh = false) => {
@@ -132,8 +120,6 @@ export function ProfilePage(): ReactElement {
 
   const canSaveIdentity =
     dirty && emailValid && (!emailChanged || identityForm.currentPasswordForEmail.trim().length > 0) && !saveBusy;
-
-  const em = t("emDash");
 
   if (loading && !payload) {
     return (
@@ -186,10 +172,10 @@ export function ProfilePage(): ReactElement {
         </Card>
       ) : null}
 
-      <Card title={t("identity")} subtitle={t("subtitle")}>
+      <Card title={t("identity")}>
         <div className="profile-account-grid">
           <div className="profile-identity">
-            <label className="item-review-field">
+            <label className="item-review-field profile-identity-field-short">
               <span>{t("fullName")}</span>
               <Input
                 value={identityForm.fullName}
@@ -198,7 +184,7 @@ export function ProfilePage(): ReactElement {
                 aria-label={t("fullName")}
               />
             </label>
-            <label className="item-review-field">
+            <label className="item-review-field profile-identity-field-short">
               <span>{t("email")}</span>
               <Input
                 value={identityForm.email}
@@ -209,25 +195,32 @@ export function ProfilePage(): ReactElement {
             </label>
             {!emailValid ? <p className="error">{t("emailInvalid")}</p> : null}
             {emailChanged ? (
-              <label className="item-review-field">
+              <label className="item-review-field profile-identity-field-short">
                 <span>{t("currentPasswordForEmail")}</span>
-                <Input
-                  type="password"
-                  value={identityForm.currentPasswordForEmail}
-                  onChange={(e) => setIdentityForm((prev) => ({ ...prev, currentPasswordForEmail: e.target.value }))}
-                  placeholder={t("placeholderConfirmEmailPassword")}
-                  autoComplete="current-password"
-                />
+                <div className="password-input-wrap">
+                  <Input
+                    type={passwordVisible.emailConfirm ? "text" : "password"}
+                    value={identityForm.currentPasswordForEmail}
+                    onChange={(e) => setIdentityForm((prev) => ({ ...prev, currentPasswordForEmail: e.target.value }))}
+                    placeholder={t("placeholderConfirmEmailPassword")}
+                    autoComplete="current-password"
+                  />
+                  <button
+                    type="button"
+                    className="password-visibility-btn"
+                    aria-label={passwordVisible.emailConfirm ? t("hidePassword") : t("showPassword")}
+                    onClick={() => setPasswordVisible((prev) => ({ ...prev, emailConfirm: !prev.emailConfirm }))}
+                  >
+                    {passwordVisible.emailConfirm ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
               </label>
             ) : null}
-            <div className="profile-kv">
-              <span>{t("joined")}</span>
-              <strong>{formatJoinDate(payload.identity.joinedAt, i18n.language, em)}</strong>
-            </div>
-            <div className="profile-security-actions">
+            <div className="profile-identity-actions">
               <Button
                 type="button"
                 variant="primary"
+                className="profile-primary-action profile-primary-action-wide"
                 disabled={!canSaveIdentity}
                 onClick={async () => {
                   try {
@@ -269,20 +262,27 @@ export function ProfilePage(): ReactElement {
             </div>
           </div>
 
-          <aside className="profile-security-panel" aria-label={t("security")}>
-            <div className="profile-security-panel-head">
-              <h3>{t("security")}</h3>
-              <p className="muted">{t("password")}</p>
+          <aside className="profile-security-column" aria-label={t("security")}>
+            <div className="profile-security-panel">
+              <div className="profile-security-panel-row profile-security-panel-row-top">
+                <div className="profile-kv">
+                  <span>{t("password")}</span>
+                  <strong>{t("passwordMasked")}</strong>
+                </div>
+              </div>
+              <div className="profile-security-panel-row profile-security-panel-row-bottom">
+                <div className="profile-security-line muted">
+                  <ShieldCheck size={14} aria-hidden />
+                  <span>{t("passwordHintLine")}</span>
+                </div>
+              </div>
             </div>
-            <div className="profile-kv">
-              <span>{t("password")}</span>
-              <strong>{t("passwordMasked")}</strong>
-            </div>
-            <div className="profile-security-line muted">
-              <ShieldCheck size={14} aria-hidden />
-              <span>{t("passwordHintLine")}</span>
-            </div>
-            <Button type="button" variant="primary" onClick={() => setShowPasswordModal(true)}>
+            <Button
+              type="button"
+              variant="primary"
+              className="profile-primary-action profile-primary-action-wide"
+              onClick={() => setShowPasswordModal(true)}
+            >
               {t("changePassword")}
             </Button>
           </aside>
@@ -344,30 +344,60 @@ export function ProfilePage(): ReactElement {
             <h3 id="profile-pwd-title">{t("modalChangePasswordTitle")}</h3>
             <label className="item-review-field">
               <span>{t("currentPassword")}</span>
-              <Input
-                type="password"
-                value={passwordForm.currentPassword}
-                onChange={(e) => setPasswordForm((prev) => ({ ...prev, currentPassword: e.target.value }))}
-                autoComplete="current-password"
-              />
+              <div className="password-input-wrap">
+                <Input
+                  type={passwordVisible.current ? "text" : "password"}
+                  value={passwordForm.currentPassword}
+                  onChange={(e) => setPasswordForm((prev) => ({ ...prev, currentPassword: e.target.value }))}
+                  autoComplete="current-password"
+                />
+                <button
+                  type="button"
+                  className="password-visibility-btn"
+                  aria-label={passwordVisible.current ? t("hidePassword") : t("showPassword")}
+                  onClick={() => setPasswordVisible((prev) => ({ ...prev, current: !prev.current }))}
+                >
+                  {passwordVisible.current ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
             </label>
             <label className="item-review-field">
               <span>{t("newPassword")}</span>
-              <Input
-                type="password"
-                value={passwordForm.newPassword}
-                onChange={(e) => setPasswordForm((prev) => ({ ...prev, newPassword: e.target.value }))}
-                autoComplete="new-password"
-              />
+              <div className="password-input-wrap">
+                <Input
+                  type={passwordVisible.next ? "text" : "password"}
+                  value={passwordForm.newPassword}
+                  onChange={(e) => setPasswordForm((prev) => ({ ...prev, newPassword: e.target.value }))}
+                  autoComplete="new-password"
+                />
+                <button
+                  type="button"
+                  className="password-visibility-btn"
+                  aria-label={passwordVisible.next ? t("hidePassword") : t("showPassword")}
+                  onClick={() => setPasswordVisible((prev) => ({ ...prev, next: !prev.next }))}
+                >
+                  {passwordVisible.next ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
             </label>
             <label className="item-review-field">
               <span>{t("confirmPassword")}</span>
-              <Input
-                type="password"
-                value={passwordForm.confirmPassword}
-                onChange={(e) => setPasswordForm((prev) => ({ ...prev, confirmPassword: e.target.value }))}
-                autoComplete="new-password"
-              />
+              <div className="password-input-wrap">
+                <Input
+                  type={passwordVisible.confirm ? "text" : "password"}
+                  value={passwordForm.confirmPassword}
+                  onChange={(e) => setPasswordForm((prev) => ({ ...prev, confirmPassword: e.target.value }))}
+                  autoComplete="new-password"
+                />
+                <button
+                  type="button"
+                  className="password-visibility-btn"
+                  aria-label={passwordVisible.confirm ? t("hidePassword") : t("showPassword")}
+                  onClick={() => setPasswordVisible((prev) => ({ ...prev, confirm: !prev.confirm }))}
+                >
+                  {passwordVisible.confirm ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
             </label>
             <div className="profile-security-line muted">
               <ShieldCheck size={14} aria-hidden />
@@ -382,11 +412,6 @@ export function ProfilePage(): ReactElement {
                 variant="primary"
                 disabled={pwdBusy}
                 onClick={async () => {
-                  const strong = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{10,}$/.test(passwordForm.newPassword);
-                  if (!strong) {
-                    toast.error(t("passwordTooWeak"));
-                    return;
-                  }
                   if (passwordForm.newPassword !== passwordForm.confirmPassword) {
                     toast.error(t("passwordMismatch"));
                     return;

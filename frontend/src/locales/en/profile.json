@@ -30,10 +30,10 @@
   "updating": "Updating…",
   "passwordUpdated": "Password updated successfully",
   "passwordMismatch": "Password confirmation does not match.",
-  "passwordMin": "Use at least 10 characters with mixed letters, numbers, and symbols.",
+  "passwordMin": "Recommendation: use at least 6 characters for better security.",
   "passwordTooWeak": "New password is too weak.",
   "passwordUpdateFailed": "Failed to update password",
-  "passwordHintLine": "Use at least 10 characters with mixed letters, numbers, and symbols.",
+  "passwordHintLine": "Recommendation: use at least 6 characters.",
   "approveSubmissions": "Approve submissions",
   "rejectSubmissions": "Reject submissions",
   "exportCsv": "Export PDF report",
@@ -79,5 +79,7 @@
   "deviceWindows": "Windows",
   "deviceIphone": "iPhone",
   "deviceAndroid": "Android",
-  "modalChangePasswordTitle": "Change password"
+  "modalChangePasswordTitle": "Change password",
+  "showPassword": "Show password",
+  "hidePassword": "Hide password"
 }
