@@ -117,7 +117,7 @@ export interface AdminActivityRow {
   submission_id: string | null;
   submission_title: string | null;
   submission_submitted_at: string | null;
-  action: "approved" | "rejected" | "edited_score" | "reopened" | "login";
+  action: string;
   created_at: string;
 }
 
@@ -422,16 +422,27 @@ export class AdminRepository {
       WITH base AS (
         SELECT
           CASE
-            WHEN al.action = 'admin_moderation_approve' THEN 'approved'
-            WHEN al.action = 'admin_moderation_reject' THEN 'rejected'
-            WHEN al.action = 'admin_override_score' THEN 'edited_score'
-            WHEN al.action = 'admin_override_status'
-              AND COALESCE(al.new_values->>'status', '') IN ('submitted', 'review', 'needs_revision') THEN 'reopened'
-            WHEN al.action = 'admin_override_status'
-              AND COALESCE(al.new_values->>'status', '') = 'approved' THEN 'approved'
-            WHEN al.action = 'admin_override_status'
-              AND COALESCE(al.new_values->>'status', '') = 'rejected' THEN 'rejected'
-            WHEN al.action = 'login' THEN 'login'
+            WHEN al.action = 'admin_moderation_approve' THEN 'moderation_submission_approved'
+            WHEN al.action = 'admin_moderation_reject' THEN 'moderation_submission_rejected'
+            WHEN al.action = 'admin_override_score' THEN 'moderation_submission_score_overridden'
+            WHEN al.action = 'admin_override_status' THEN 'moderation_submission_status_overridden'
+            WHEN al.action = 'review_completed'
+              AND COALESCE(al.new_values->>'decision', '') = 'approved' THEN 'moderation_submission_approved'
+            WHEN al.action = 'review_completed'
+              AND COALESCE(al.new_values->>'decision', '') = 'rejected' THEN 'moderation_submission_rejected'
+            WHEN al.action IN (
+              'moderation_item_approved',
+              'moderation_item_rejected',
+              'moderation_item_score_changed',
+              'moderation_item_comment_changed',
+              'moderation_submission_approved',
+              'moderation_submission_rejected',
+              'moderation_submission_status_overridden',
+              'moderation_submission_score_overridden',
+              'project_phase_changed',
+              'project_deadlines_changed',
+              'student_profile_updated'
+            ) THEN al.action
             ELSE NULL
           END AS action
         FROM public.audit_logs al
@@ -490,16 +501,27 @@ export class AdminRepository {
             )
           ) AS submission_submitted_at,
           CASE
-            WHEN al.action = 'admin_moderation_approve' THEN 'approved'
-            WHEN al.action = 'admin_moderation_reject' THEN 'rejected'
-            WHEN al.action = 'admin_override_score' THEN 'edited_score'
-            WHEN al.action = 'admin_override_status'
-              AND COALESCE(al.new_values->>'status', '') IN ('submitted', 'review', 'needs_revision') THEN 'reopened'
-            WHEN al.action = 'admin_override_status'
-              AND COALESCE(al.new_values->>'status', '') = 'approved' THEN 'approved'
-            WHEN al.action = 'admin_override_status'
-              AND COALESCE(al.new_values->>'status', '') = 'rejected' THEN 'rejected'
-            WHEN al.action = 'login' THEN 'login'
+            WHEN al.action = 'admin_moderation_approve' THEN 'moderation_submission_approved'
+            WHEN al.action = 'admin_moderation_reject' THEN 'moderation_submission_rejected'
+            WHEN al.action = 'admin_override_score' THEN 'moderation_submission_score_overridden'
+            WHEN al.action = 'admin_override_status' THEN 'moderation_submission_status_overridden'
+            WHEN al.action = 'review_completed'
+              AND COALESCE(al.new_values->>'decision', '') = 'approved' THEN 'moderation_submission_approved'
+            WHEN al.action = 'review_completed'
+              AND COALESCE(al.new_values->>'decision', '') = 'rejected' THEN 'moderation_submission_rejected'
+            WHEN al.action IN (
+              'moderation_item_approved',
+              'moderation_item_rejected',
+              'moderation_item_score_changed',
+              'moderation_item_comment_changed',
+              'moderation_submission_approved',
+              'moderation_submission_rejected',
+              'moderation_submission_status_overridden',
+              'moderation_submission_score_overridden',
+              'project_phase_changed',
+              'project_deadlines_changed',
+              'student_profile_updated'
+            ) THEN al.action
             ELSE NULL
           END AS action,
           al.created_at
@@ -542,16 +564,27 @@ export class AdminRepository {
       WITH base AS (
         SELECT
           CASE
-            WHEN al.action = 'admin_moderation_approve' THEN 'approved'
-            WHEN al.action = 'admin_moderation_reject' THEN 'rejected'
-            WHEN al.action = 'admin_override_score' THEN 'edited_score'
-            WHEN al.action = 'admin_override_status'
-              AND COALESCE(al.new_values->>'status', '') IN ('submitted', 'review', 'needs_revision') THEN 'reopened'
-            WHEN al.action = 'admin_override_status'
-              AND COALESCE(al.new_values->>'status', '') = 'approved' THEN 'approved'
-            WHEN al.action = 'admin_override_status'
-              AND COALESCE(al.new_values->>'status', '') = 'rejected' THEN 'rejected'
-            WHEN al.action = 'login' THEN 'login'
+            WHEN al.action = 'admin_moderation_approve' THEN 'moderation_submission_approved'
+            WHEN al.action = 'admin_moderation_reject' THEN 'moderation_submission_rejected'
+            WHEN al.action = 'admin_override_score' THEN 'moderation_submission_score_overridden'
+            WHEN al.action = 'admin_override_status' THEN 'moderation_submission_status_overridden'
+            WHEN al.action = 'review_completed'
+              AND COALESCE(al.new_values->>'decision', '') = 'approved' THEN 'moderation_submission_approved'
+            WHEN al.action = 'review_completed'
+              AND COALESCE(al.new_values->>'decision', '') = 'rejected' THEN 'moderation_submission_rejected'
+            WHEN al.action IN (
+              'moderation_item_approved',
+              'moderation_item_rejected',
+              'moderation_item_score_changed',
+              'moderation_item_comment_changed',
+              'moderation_submission_approved',
+              'moderation_submission_rejected',
+              'moderation_submission_status_overridden',
+              'moderation_submission_score_overridden',
+              'project_phase_changed',
+              'project_deadlines_changed',
+              'student_profile_updated'
+            ) THEN al.action
             ELSE NULL
           END AS action
         FROM public.audit_logs al
@@ -559,8 +592,12 @@ export class AdminRepository {
       )
       SELECT
         COUNT(*)::text AS total_actions,
-        COUNT(*) FILTER (WHERE action = 'approved')::text AS approvals,
-        COUNT(*) FILTER (WHERE action = 'rejected')::text AS rejects
+        COUNT(*) FILTER (
+          WHERE action IN ('moderation_item_approved', 'moderation_submission_approved')
+        )::text AS approvals,
+        COUNT(*) FILTER (
+          WHERE action IN ('moderation_item_rejected', 'moderation_submission_rejected')
+        )::text AS rejects
       FROM base
       WHERE action IS NOT NULL
       `,
@@ -642,16 +679,27 @@ export class AdminRepository {
             )
           ) AS submission_submitted_at,
           CASE
-            WHEN al.action = 'admin_moderation_approve' THEN 'approved'
-            WHEN al.action = 'admin_moderation_reject' THEN 'rejected'
-            WHEN al.action = 'admin_override_score' THEN 'edited_score'
-            WHEN al.action = 'admin_override_status'
-              AND COALESCE(al.new_values->>'status', '') IN ('submitted', 'review', 'needs_revision') THEN 'reopened'
-            WHEN al.action = 'admin_override_status'
-              AND COALESCE(al.new_values->>'status', '') = 'approved' THEN 'approved'
-            WHEN al.action = 'admin_override_status'
-              AND COALESCE(al.new_values->>'status', '') = 'rejected' THEN 'rejected'
-            WHEN al.action = 'login' THEN 'login'
+            WHEN al.action = 'admin_moderation_approve' THEN 'moderation_submission_approved'
+            WHEN al.action = 'admin_moderation_reject' THEN 'moderation_submission_rejected'
+            WHEN al.action = 'admin_override_score' THEN 'moderation_submission_score_overridden'
+            WHEN al.action = 'admin_override_status' THEN 'moderation_submission_status_overridden'
+            WHEN al.action = 'review_completed'
+              AND COALESCE(al.new_values->>'decision', '') = 'approved' THEN 'moderation_submission_approved'
+            WHEN al.action = 'review_completed'
+              AND COALESCE(al.new_values->>'decision', '') = 'rejected' THEN 'moderation_submission_rejected'
+            WHEN al.action IN (
+              'moderation_item_approved',
+              'moderation_item_rejected',
+              'moderation_item_score_changed',
+              'moderation_item_comment_changed',
+              'moderation_submission_approved',
+              'moderation_submission_rejected',
+              'moderation_submission_status_overridden',
+              'moderation_submission_score_overridden',
+              'project_phase_changed',
+              'project_deadlines_changed',
+              'student_profile_updated'
+            ) THEN al.action
             ELSE NULL
           END AS action,
           al.created_at
@@ -695,16 +743,27 @@ export class AdminRepository {
       WITH base AS (
         SELECT
           CASE
-            WHEN al.action = 'admin_moderation_approve' THEN 'approved'
-            WHEN al.action = 'admin_moderation_reject' THEN 'rejected'
-            WHEN al.action = 'admin_override_score' THEN 'edited_score'
-            WHEN al.action = 'admin_override_status'
-              AND COALESCE(al.new_values->>'status', '') IN ('submitted', 'review', 'needs_revision') THEN 'reopened'
-            WHEN al.action = 'admin_override_status'
-              AND COALESCE(al.new_values->>'status', '') = 'approved' THEN 'approved'
-            WHEN al.action = 'admin_override_status'
-              AND COALESCE(al.new_values->>'status', '') = 'rejected' THEN 'rejected'
-            WHEN al.action = 'login' THEN 'login'
+            WHEN al.action = 'admin_moderation_approve' THEN 'moderation_submission_approved'
+            WHEN al.action = 'admin_moderation_reject' THEN 'moderation_submission_rejected'
+            WHEN al.action = 'admin_override_score' THEN 'moderation_submission_score_overridden'
+            WHEN al.action = 'admin_override_status' THEN 'moderation_submission_status_overridden'
+            WHEN al.action = 'review_completed'
+              AND COALESCE(al.new_values->>'decision', '') = 'approved' THEN 'moderation_submission_approved'
+            WHEN al.action = 'review_completed'
+              AND COALESCE(al.new_values->>'decision', '') = 'rejected' THEN 'moderation_submission_rejected'
+            WHEN al.action IN (
+              'moderation_item_approved',
+              'moderation_item_rejected',
+              'moderation_item_score_changed',
+              'moderation_item_comment_changed',
+              'moderation_submission_approved',
+              'moderation_submission_rejected',
+              'moderation_submission_status_overridden',
+              'moderation_submission_score_overridden',
+              'project_phase_changed',
+              'project_deadlines_changed',
+              'student_profile_updated'
+            ) THEN al.action
             ELSE NULL
           END AS action
         FROM public.audit_logs al

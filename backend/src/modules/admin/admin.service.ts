@@ -158,7 +158,7 @@ export class AdminService {
     }>;
     recentActivity: Array<{
       id: string;
-      action: "approved" | "rejected" | "edited_score" | "reopened" | "login";
+      action: string;
       adminId: string;
       adminName: string;
       adminEmail: string | null;
@@ -216,7 +216,7 @@ export class AdminService {
     }>;
     recentActivity: Array<{
       id: string;
-      action: "approved" | "rejected" | "edited_score" | "reopened" | "login";
+      action: string;
       adminId: string;
       adminName: string;
       adminEmail: string | null;
@@ -273,7 +273,7 @@ export class AdminService {
     totals: { totalActions: number; approvals: number; rejects: number };
     recentActivity: Array<{
       id: string;
-      action: "approved" | "rejected" | "edited_score" | "reopened" | "login";
+      action: string;
       adminId: string;
       adminName: string;
       adminEmail: string | null;
@@ -714,7 +714,7 @@ export class AdminService {
 
   private mapActivityRow(row: AdminActivityRow): {
     id: string;
-    action: "approved" | "rejected" | "edited_score" | "reopened" | "login";
+    action: string;
     adminId: string;
     adminName: string;
     adminEmail: string | null;

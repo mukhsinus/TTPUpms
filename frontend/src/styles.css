@@ -807,6 +807,17 @@ body {
   color: #334155;
 }
 
+.item-review-field input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.item-review-field input[type="number"]::-webkit-outer-spin-button,
+.item-review-field input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 .item-review-comment {
   min-height: 72px;
   resize: vertical;

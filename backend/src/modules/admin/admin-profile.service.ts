@@ -78,7 +78,7 @@ export class AdminProfileService {
     };
     recentActions: Array<{
       id: string;
-      action: "approved" | "rejected" | "edited_score" | "reopened" | "login";
+      action: string;
       studentId: string | null;
       submissionId: string | null;
       submissionTitle: string | null;

@@ -54,11 +54,31 @@ function relativeTime(value: string, t: ProfT): string {
 }
 
 function actionLabel(action: AdminProfilePayload["recentActions"][number]["action"], t: ProfT): string {
-  if (action === "approved") return t("actionApproved");
-  if (action === "rejected") return t("actionRejected");
-  if (action === "edited_score") return t("actionEditedScore");
-  if (action === "reopened") return t("actionReopened");
-  return t("actionLogin");
+  if (action === "moderation_item_approved" || action === "moderation_submission_approved") {
+    return t("actionApproved");
+  }
+  if (action === "moderation_item_rejected" || action === "moderation_submission_rejected") {
+    return t("actionRejected");
+  }
+  if (action === "moderation_item_score_changed" || action === "moderation_submission_score_overridden") {
+    return t("actionEditedScore");
+  }
+  if (action === "moderation_item_comment_changed") {
+    return "Comment updated";
+  }
+  if (action === "moderation_submission_status_overridden") {
+    return "Status overridden";
+  }
+  if (action === "project_phase_changed") {
+    return "Project phase changed";
+  }
+  if (action === "project_deadlines_changed") {
+    return "Project deadlines changed";
+  }
+  if (action === "student_profile_updated") {
+    return "Student profile updated";
+  }
+  return action.replaceAll("_", " ");
 }
 
 function roleLabel(role: string, t: ProfT): string {

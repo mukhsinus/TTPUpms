@@ -49,11 +49,31 @@ function formatRelativeTime(value: string, t: DashT): string {
 }
 
 function formatActivityAction(action: AdminRecentActivityItem["action"], t: DashT): string {
-  if (action === "approved") return t("activityApproved");
-  if (action === "rejected") return t("activityRejected");
-  if (action === "edited_score") return t("activityEditedScore");
-  if (action === "reopened") return t("activityReopened");
-  return t("activityLogin");
+  if (action === "moderation_item_approved" || action === "moderation_submission_approved") {
+    return t("activityApproved");
+  }
+  if (action === "moderation_item_rejected" || action === "moderation_submission_rejected") {
+    return t("activityRejected");
+  }
+  if (action === "moderation_item_score_changed" || action === "moderation_submission_score_overridden") {
+    return t("activityEditedScore");
+  }
+  if (action === "moderation_item_comment_changed") {
+    return "Comment updated";
+  }
+  if (action === "moderation_submission_status_overridden") {
+    return "Status overridden";
+  }
+  if (action === "project_phase_changed") {
+    return "Project phase changed";
+  }
+  if (action === "project_deadlines_changed") {
+    return "Project deadlines changed";
+  }
+  if (action === "student_profile_updated") {
+    return "Student profile updated";
+  }
+  return action.replaceAll("_", " ");
 }
 
 function formatDateTime(value: string, t: DashT): string {
