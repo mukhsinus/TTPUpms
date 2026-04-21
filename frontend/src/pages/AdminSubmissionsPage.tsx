@@ -54,16 +54,22 @@ function humanizeCategoryLabel(raw: string | null | undefined): string {
 }
 
 function categoryCellLabel(row: AdminSubmissionListItem, t: SubT): string {
-  const title = row.categoryTitle?.trim();
-  if (title) {
-    return title;
+  const formatCategory = (value: string | null | undefined): string => {
+    const source = value?.trim();
+    if (!source) {
+      return "";
+    }
+    const slug = source.replace(/[^a-zA-Z0-9]+/g, "_").toLowerCase();
+    return t(`category_${slug}`, { defaultValue: humanizeCategoryLabel(source) });
+  };
+
+  const fromTitle = formatCategory(row.categoryTitle);
+  if (fromTitle) {
+    return fromTitle;
   }
-  const code = row.categoryCode?.trim();
-  if (!code) {
-    return t("emDash");
-  }
-  const slug = code.replace(/[^a-zA-Z0-9]+/g, "_").toLowerCase();
-  return t(`category_${slug}`, { defaultValue: humanizeCategoryLabel(code) });
+
+  const fromCode = formatCategory(row.categoryCode);
+  return fromCode || t("emDash");
 }
 
 function formatUser(row: AdminSubmissionListItem, t: SubT): string {
@@ -272,10 +278,20 @@ export function AdminSubmissionsPage(): ReactElement {
   const showing = items.length;
   const isFilteredEmpty = !loading && !error && total === 0;
 
+  const initials = (value: string): string => {
+    const parts = value
+      .trim()
+      .split(/\s+/g)
+      .filter(Boolean);
+    const first = parts[0]?.[0] ?? value.trim()[0] ?? "?";
+    const second = parts.length > 1 ? parts[1]?.[0] : value.trim()[1];
+    return (first + (second ?? "")).toUpperCase();
+  };
+
   return (
-    <section className="dashboard-stack">
-      <Card>
-        <div className="table-toolbar moderation-queue-toolbar">
+    <section className="dashboard-stack admin-submissions-page">
+      <Card className="admin-submissions-controls">
+        <div className="table-toolbar moderation-queue-toolbar admin-submissions-toolbar">
           <SearchAutocomplete
             value={searchInput}
             onChange={(next) => {
@@ -394,7 +410,7 @@ export function AdminSubmissionsPage(): ReactElement {
         ) : null}
       </Card>
 
-      <Card>
+      <Card className="admin-submissions-table-card">
         {loading ? (
           <TableSkeleton rows={10} cols={8} />
         ) : isFilteredEmpty ? (
@@ -432,7 +448,16 @@ export function AdminSubmissionsPage(): ReactElement {
                     className="clickable-row"
                     onClick={() => navigate(`/submissions/${row.id}`)}
                   >
-                    <td>{formatUser(row, t)}</td>
+                    <td>
+                      <div className="admin-student-cell">
+                        <div className="admin-student-avatar" aria-hidden>
+                          {initials(formatUser(row, t))}
+                        </div>
+                        <div className="admin-student-info">
+                          <strong>{formatUser(row, t)}</strong>
+                        </div>
+                      </div>
+                    </td>
                     <td>{row.studentId?.trim() || t("emDash")}</td>
                     <td>{categoryCellLabel(row, t)}</td>
                     <td className="submission-title-cell">{row.title}</td>
@@ -447,6 +472,7 @@ export function AdminSubmissionsPage(): ReactElement {
                       <Button
                         type="button"
                         variant="secondary"
+                        className="admin-review-btn"
                         onClick={(event) => {
                           event.stopPropagation();
                           navigate(`/submissions/${row.id}`);
@@ -459,15 +485,15 @@ export function AdminSubmissionsPage(): ReactElement {
                 ))}
               </tbody>
             </Table>
-            <div className="pagination-bar">
-              <span className="muted">{t("paginationPage", { page, total: totalPages })}</span>
-              <div className="pagination-actions">
-                <Button type="button" variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+            <div className="pagination-bar admin-pagination">
+              <span className="muted admin-pagination-label">{t("paginationPage", { page, total: totalPages })}</span>
+              <div className="pagination-actions admin-pagination-actions">
+                <Button type="button" variant="ghost" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
                   {t("previous")}
                 </Button>
                 <Button
                   type="button"
-                  variant="secondary"
+                  variant="ghost"
                   disabled={page >= totalPages}
                   onClick={() => setPage((p) => p + 1)}
                 >
