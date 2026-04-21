@@ -21,7 +21,7 @@ import { TableSkeleton } from "../components/ui/PageSkeletons";
 import { SearchAutocomplete, type SearchAutocompleteSuggestion } from "../components/ui/SearchAutocomplete";
 import { isLikelyStudentId, normalizeStudentId } from "../lib/student-id";
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 7;
 const SEARCH_DEBOUNCE_MS = 320;
 
 type DatePreset = "today" | "last7" | "last30" | "custom";
@@ -274,7 +274,7 @@ export function AdminSubmissionsPage(): ReactElement {
 
   return (
     <section className="dashboard-stack">
-      <Card title={t("title")} subtitle={t("subtitleAdmin")}>
+      <Card>
         <div className="table-toolbar moderation-queue-toolbar">
           <SearchAutocomplete
             value={searchInput}
