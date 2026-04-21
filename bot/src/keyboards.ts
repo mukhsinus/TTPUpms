@@ -126,7 +126,7 @@ export const skipOptionalLinkKeyboard = () =>
 
 export const addAnotherItemKeyboard = () =>
   Markup.inlineKeyboard([
-    [Markup.button.callback("Add another item", "flow_add_more")],
+    [Markup.button.callback("Add one more achievement", "flow_add_more")],
     [Markup.button.callback("Preview and submit", "flow_preview")],
     SUBMIT_FLOW_NAV_ROW,
   ]);
