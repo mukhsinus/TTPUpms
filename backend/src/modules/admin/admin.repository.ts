@@ -3,7 +3,12 @@ import type { PoolClient } from "pg";
 import { getPostgresDriverErrorFields } from "../../utils/pg-http-map";
 import { isLikelyStudentId, normalizeStudentId } from "../../utils/student-id";
 import { ServiceError } from "../../utils/service-error";
-import type { AdminModerationStatus, AdminSubmissionsQuery } from "./admin.schema";
+import type {
+  AdminModerationStatus,
+  AdminStudentsQuery,
+  AdminSubmissionsQuery,
+  AdminUpdateStudentBody,
+} from "./admin.schema";
 
 export interface AdminSubmissionListRow {
   id: string;
@@ -52,7 +57,10 @@ export interface AdminItemRow {
   external_link: string | null;
   proposed_score: string | null;
   approved_score: string | null;
+  reviewer_comment: string | null;
   status: string;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
   category_code: string | null;
   category_name: string | null;
   category_title: string | null;
@@ -139,6 +147,40 @@ export interface AdminStudentOverviewRow {
   pending_submissions: string;
   approved_submissions: string;
   rejected_submissions: string;
+  total_approved_score: string;
+}
+
+export interface AdminStudentListRow {
+  id: string;
+  full_name: string | null;
+  student_full_name: string | null;
+  telegram_username: string | null;
+  telegram_id: string | null;
+  degree: string | null;
+  faculty: string | null;
+  student_id: string | null;
+  registration_date: string;
+  last_activity_at: string;
+  total_achievements_submitted: string;
+  total_approved_score: string;
+}
+
+export interface AdminStudentDetailRow {
+  id: string;
+  full_name: string | null;
+  student_full_name: string | null;
+  telegram_username: string | null;
+  telegram_id: string | null;
+  degree: string | null;
+  faculty: string | null;
+  student_id: string | null;
+  email: string | null;
+  is_profile_completed: boolean;
+  created_at: string;
+  updated_at: string;
+  last_activity_at: string;
+  total_achievements_submitted: string;
+  total_submissions: string;
   total_approved_score: string;
 }
 
@@ -238,6 +280,43 @@ function buildAdminSubmissionFilters(query: AdminSubmissionsQuery): { whereSql: 
       params.push(pattern);
       p += 1;
     }
+  }
+
+  return { whereSql: `WHERE ${conditions.join(" AND ")}`, params };
+}
+
+function buildAdminStudentsFilters(query: AdminStudentsQuery): { whereSql: string; params: unknown[] } {
+  const params: unknown[] = [];
+  const conditions: string[] = ["u.role::text = 'student'", "u.telegram_id IS NOT NULL"];
+  let p = 1;
+
+  if (query.search?.trim()) {
+    const raw = query.search.trim().slice(0, 200);
+    const escaped = raw.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+    const pattern = `%${escaped}%`;
+    const normalized = normalizeStudentId(raw);
+    conditions.push(
+      `(
+        COALESCE(u.student_full_name::text, u.full_name::text, '') ILIKE $${p} ESCAPE '\\'
+        OR COALESCE(u.student_id::text, '') ILIKE $${p} ESCAPE '\\'
+        OR COALESCE(u.telegram_username::text, '') ILIKE $${p} ESCAPE '\\'
+        OR upper(regexp_replace(COALESCE(u.student_id::text, ''), '\\s+', '', 'g')) = $${p + 1}
+      )`,
+    );
+    params.push(pattern, normalized);
+    p += 2;
+  }
+
+  if (query.faculty?.trim()) {
+    conditions.push(`COALESCE(u.faculty::text, '') ILIKE $${p} ESCAPE '\\'`);
+    params.push(`%${query.faculty.trim().replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_")}%`);
+    p += 1;
+  }
+
+  if (query.degree) {
+    conditions.push(`u.degree::text = $${p}`);
+    params.push(query.degree);
+    p += 1;
   }
 
   return { whereSql: `WHERE ${conditions.join(" AND ")}`, params };
@@ -852,6 +931,168 @@ export class AdminRepository {
     return result.rows[0] ?? null;
   }
 
+  async countStudents(query: AdminStudentsQuery): Promise<number> {
+    const { whereSql, params } = buildAdminStudentsFilters(query);
+    const result = await this.app.db.query<{ c: string }>(
+      `
+      SELECT COUNT(*)::text AS c
+      FROM public.users u
+      ${whereSql}
+      `,
+      params,
+    );
+    return Number(result.rows[0]?.c ?? "0");
+  }
+
+  async listStudents(query: AdminStudentsQuery): Promise<AdminStudentListRow[]> {
+    const { whereSql, params } = buildAdminStudentsFilters(query);
+    const offset = (query.page - 1) * query.pageSize;
+    const limitParam = params.length + 1;
+    const offsetParam = params.length + 2;
+    params.push(query.pageSize, offset);
+
+    let orderBy = "u.created_at DESC, u.id ASC";
+    if (query.sort === "oldest") {
+      orderBy = "u.created_at ASC, u.id ASC";
+    } else if (query.sort === "name") {
+      orderBy = "COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), '')) ASC NULLS LAST, u.created_at DESC";
+    }
+
+    const result = await this.app.db.query<AdminStudentListRow>(
+      `
+      SELECT
+        u.id::text AS id,
+        u.full_name::text AS full_name,
+        u.student_full_name::text AS student_full_name,
+        u.telegram_username::text AS telegram_username,
+        u.telegram_id::text AS telegram_id,
+        u.degree::text AS degree,
+        u.faculty::text AS faculty,
+        u.student_id::text AS student_id,
+        u.created_at::timestamptz::text AS registration_date,
+        COALESCE(activity.last_activity_at, u.updated_at)::timestamptz::text AS last_activity_at,
+        COALESCE(activity.total_achievements_submitted, 0)::text AS total_achievements_submitted,
+        COALESCE(activity.total_approved_score, 0)::text AS total_approved_score
+      FROM public.users u
+      LEFT JOIN LATERAL (
+        SELECT
+          MAX(COALESCE(s.updated_at, s.submitted_at, s.created_at)) AS last_activity_at,
+          COALESCE(COUNT(si.id), 0) AS total_achievements_submitted,
+          COALESCE(SUM(s.total_score) FILTER (WHERE s.status = 'approved'), 0) AS total_approved_score
+        FROM public.submissions s
+        LEFT JOIN public.submission_items si ON si.submission_id = s.id
+        WHERE s.user_id = u.id
+      ) activity ON true
+      ${whereSql}
+      ORDER BY ${orderBy}
+      LIMIT $${limitParam}::int OFFSET $${offsetParam}::int
+      `,
+      params,
+    );
+    return result.rows;
+  }
+
+  async findStudentById(studentId: string): Promise<AdminStudentDetailRow | null> {
+    const result = await this.app.db.query<AdminStudentDetailRow>(
+      `
+      SELECT
+        u.id::text AS id,
+        u.full_name::text AS full_name,
+        u.student_full_name::text AS student_full_name,
+        u.telegram_username::text AS telegram_username,
+        u.telegram_id::text AS telegram_id,
+        u.degree::text AS degree,
+        u.faculty::text AS faculty,
+        u.student_id::text AS student_id,
+        u.email::text AS email,
+        u.is_profile_completed,
+        u.created_at::timestamptz::text AS created_at,
+        u.updated_at::timestamptz::text AS updated_at,
+        COALESCE(activity.last_activity_at, u.updated_at)::timestamptz::text AS last_activity_at,
+        COALESCE(activity.total_achievements_submitted, 0)::text AS total_achievements_submitted,
+        COALESCE(activity.total_submissions, 0)::text AS total_submissions,
+        COALESCE(activity.total_approved_score, 0)::text AS total_approved_score
+      FROM public.users u
+      LEFT JOIN LATERAL (
+        SELECT
+          MAX(COALESCE(s.updated_at, s.submitted_at, s.created_at)) AS last_activity_at,
+          COALESCE(COUNT(si.id), 0) AS total_achievements_submitted,
+          COALESCE(COUNT(DISTINCT s.id), 0) AS total_submissions,
+          COALESCE(SUM(s.total_score) FILTER (WHERE s.status = 'approved'), 0) AS total_approved_score
+        FROM public.submissions s
+        LEFT JOIN public.submission_items si ON si.submission_id = s.id
+        WHERE s.user_id = u.id
+      ) activity ON true
+      WHERE u.id = $1::uuid
+        AND u.role::text = 'student'
+        AND u.telegram_id IS NOT NULL
+      LIMIT 1
+      `,
+      [studentId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async updateStudentById(studentId: string, body: AdminUpdateStudentBody): Promise<void> {
+    const duplicate = await this.app.db.query<{ id: string }>(
+      `
+      SELECT u.id::text
+      FROM public.users u
+      WHERE u.id <> $1::uuid
+        AND upper(regexp_replace(COALESCE(u.student_id::text, ''), '\\s+', '', 'g')) = $2
+      LIMIT 1
+      `,
+      [studentId, body.student_id],
+    );
+    if (duplicate.rows[0]) {
+      throw new ServiceError(409, "Student ID already exists", "DUPLICATE_STUDENT_ID");
+    }
+    if (body.email && body.email.trim()) {
+      const duplicateEmail = await this.app.db.query<{ id: string }>(
+        `
+        SELECT u.id::text
+        FROM public.users u
+        WHERE u.id <> $1::uuid
+          AND lower(COALESCE(u.email::text, '')) = lower($2::text)
+        LIMIT 1
+        `,
+        [studentId, body.email.trim()],
+      );
+      if (duplicateEmail.rows[0]) {
+        throw new ServiceError(409, "Email already exists", "DUPLICATE_EMAIL");
+      }
+    }
+
+    const params: unknown[] = [studentId, body.full_name, body.degree, body.faculty, body.student_id];
+    let emailSql = "";
+    if (body.email !== undefined) {
+      params.push(body.email ? body.email.trim().toLowerCase() : null);
+      emailSql = `, email = $${params.length}::citext`;
+    }
+
+    const result = await this.app.db.query(
+      `
+      UPDATE public.users
+      SET
+        student_full_name = $2,
+        full_name = $2,
+        degree = $3::text,
+        faculty = $4,
+        student_id = $5,
+        is_profile_completed = true
+        ${emailSql},
+        updated_at = NOW()
+      WHERE id = $1::uuid
+        AND role::text = 'student'
+        AND telegram_id IS NOT NULL
+      `,
+      params,
+    );
+    if (result.rowCount !== 1) {
+      throw new ServiceError(404, "Student not found");
+    }
+  }
+
   async findSubmissionById(submissionId: string): Promise<AdminSubmissionDetailRow | null> {
     const result = await this.app.db.query<AdminSubmissionDetailRow>(
       `
@@ -943,12 +1184,15 @@ export class AdminRepository {
         si.external_link,
         si.proposed_score::text AS proposed_score,
         si.approved_score::text AS approved_score,
+        si.reviewer_comment::text AS reviewer_comment,
         si.status::text AS status,
+        si.reviewed_by::text AS reviewed_by,
+        si.reviewed_at AS reviewed_at,
         c.code AS category_code,
         c.name AS category_name,
         COALESCE(
-          NULLIF(btrim(c.title::text), ''),
-          initcap(regexp_replace(c.name, '_', ' ', 'g'))
+          NULLIF(BTRIM(c.title::text), ''),
+          initcap(regexp_replace(COALESCE(c.name, c.code, 'unknown_category'), '[_-]+', ' ', 'g'))
         ) AS category_title,
         cs.slug AS subcategory_slug,
         cs.label AS subcategory_label,

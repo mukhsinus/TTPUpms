@@ -9,9 +9,12 @@ import {
   adminDashboardQuerySchema,
   adminRejectBodySchema,
   adminSearchSuggestionsQuerySchema,
+  adminStudentIdParamsSchema,
   adminSubmissionIdParamsSchema,
   adminStudentOverviewQuerySchema,
+  adminStudentsQuerySchema,
   adminSubmissionsQuerySchema,
+  adminUpdateStudentBodySchema,
 } from "./admin.schema";
 
 export class AdminController {
@@ -100,6 +103,51 @@ export class AdminController {
       const query = adminStudentOverviewQuerySchema.parse(request.query);
       const data = await this.service.getStudentOverview(query.studentId);
       reply.send(success(data));
+    } catch (error) {
+      this.handleError(reply, error);
+    }
+  };
+
+  listStudents = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!request.user) {
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
+      return;
+    }
+    try {
+      const query = adminStudentsQuerySchema.parse(request.query);
+      const data = await this.service.listStudents(query);
+      reply.header("Cache-Control", "private, max-age=10, stale-while-revalidate=20");
+      reply.send(success(data));
+    } catch (error) {
+      this.handleError(reply, error);
+    }
+  };
+
+  getStudentById = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!request.user) {
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
+      return;
+    }
+    try {
+      const params = adminStudentIdParamsSchema.parse(request.params);
+      const data = await this.service.getStudentById(params.id);
+      reply.header("Cache-Control", "private, max-age=10, stale-while-revalidate=30");
+      reply.send(success(data));
+    } catch (error) {
+      this.handleError(reply, error);
+    }
+  };
+
+  updateStudentById = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!request.user) {
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
+      return;
+    }
+    try {
+      const params = adminStudentIdParamsSchema.parse(request.params);
+      const body = adminUpdateStudentBodySchema.parse(request.body ?? {});
+      const data = await this.service.updateStudentById(params.id, body);
+      reply.status(200).send(success(data));
     } catch (error) {
       this.handleError(reply, error);
     }

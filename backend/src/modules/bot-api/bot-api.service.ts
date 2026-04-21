@@ -68,10 +68,13 @@ export interface BotSubmissionListRow {
 export interface BotSubmitDraftItemSummary {
   title: string;
   category: string;
+  categoryTitle: string;
   subcategory: string;
   description: string;
   link: string | null;
   hasFile: boolean;
+  status: "pending" | "approved" | "rejected";
+  approvedScore: number | null;
 }
 
 export interface BotSubmitDraftResult {
@@ -575,13 +578,18 @@ export class BotApiService {
     const sub = isPlaceholder
       ? "—"
       : (item.subcategoryLabel ?? item.subcategory ?? "").trim() || "—";
+    const status: "pending" | "approved" | "rejected" =
+      item.status === "approved" || item.status === "rejected" ? item.status : "pending";
     return {
       title: item.title,
       category: item.category,
+      categoryTitle: item.category.replace(/[_-]+/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase()),
       subcategory: sub,
       description: (item.description ?? "").trim() || "—",
       link,
       hasFile: Boolean(item.proofFileUrl && item.proofFileUrl.trim() !== ""),
+      status,
+      approvedScore: item.approvedScore ?? null,
     };
   }
 
@@ -1389,13 +1397,19 @@ export class BotApiService {
             jsonb_build_object(
               'title', si.title,
               'category', COALESCE(c.name, '—'),
+              'categoryTitle', COALESCE(
+                NULLIF(BTRIM(c.title::text), ''),
+                initcap(regexp_replace(COALESCE(c.name, c.code, 'unknown_category'), '[_-]+', ' ', 'g'))
+              ),
               'subcategory', COALESCE(NULLIF(BTRIM(cs.label), ''), NULLIF(BTRIM(cs.slug), ''), '—'),
               'description', COALESCE(NULLIF(BTRIM(si.description), ''), '—'),
               'link', CASE
                 WHEN si.external_link IS NOT NULL AND BTRIM(si.external_link) <> '' THEN BTRIM(si.external_link)
                 ELSE NULL
               END,
-              'hasFile', (si.proof_file_url IS NOT NULL AND BTRIM(si.proof_file_url) <> '')
+              'hasFile', (si.proof_file_url IS NOT NULL AND BTRIM(si.proof_file_url) <> ''),
+              'status', si.status::text,
+              'approvedScore', si.approved_score
             )
             ORDER BY si.created_at ASC, si.id ASC
           ) AS items_json
@@ -1423,6 +1437,10 @@ export class BotApiService {
         const row = item as Record<string, unknown>;
         const title = typeof row.title === "string" && row.title.trim() ? row.title.trim() : "—";
         const category = typeof row.category === "string" && row.category.trim() ? row.category.trim() : "—";
+        const categoryTitle =
+          typeof row.categoryTitle === "string" && row.categoryTitle.trim()
+            ? row.categoryTitle.trim()
+            : category.replace(/[_-]+/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase());
         const subcategory =
           typeof row.subcategory === "string" && row.subcategory.trim() ? row.subcategory.trim() : "—";
         const description =
@@ -1430,7 +1448,26 @@ export class BotApiService {
         const link =
           typeof row.link === "string" && row.link.trim().length > 0 ? row.link.trim() : null;
         const hasFile = Boolean(row.hasFile);
-        out.push({ title, category, subcategory, description, link, hasFile });
+        const statusRaw = typeof row.status === "string" ? row.status : "pending";
+        const status: "pending" | "approved" | "rejected" =
+          statusRaw === "approved" || statusRaw === "rejected" ? statusRaw : "pending";
+        const approvedScore =
+          typeof row.approvedScore === "number"
+            ? row.approvedScore
+            : typeof row.approvedScore === "string" && row.approvedScore.trim()
+              ? Number(row.approvedScore)
+              : null;
+        out.push({
+          title,
+          category,
+          categoryTitle,
+          subcategory,
+          description,
+          link,
+          hasFile,
+          status,
+          approvedScore: Number.isFinite(approvedScore) ? approvedScore : null,
+        });
       }
       return out;
     };

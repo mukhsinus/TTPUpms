@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeStudentId } from "../../utils/student-id";
 
 /** Normalized moderation status exposed on admin APIs (maps from DB workflow states). */
 export const adminModerationStatusSchema = z.enum(["pending", "approved", "rejected"]);
@@ -24,6 +25,27 @@ export const adminSearchSuggestionsQuerySchema = z.object({
 
 export const adminStudentOverviewQuerySchema = z.object({
   studentId: z.string().trim().min(1).max(64),
+});
+
+export const adminStudentsQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  search: z.string().trim().min(1).max(200).optional(),
+  faculty: z.string().trim().min(1).max(200).optional(),
+  degree: z.enum(["bachelor", "master"]).optional(),
+  sort: z.enum(["newest", "oldest", "name"]).default("newest"),
+});
+
+export const adminStudentIdParamsSchema = z.object({
+  id: z.string().uuid(),
+});
+
+export const adminUpdateStudentBodySchema = z.object({
+  full_name: z.string().trim().min(1).max(300),
+  degree: z.enum(["bachelor", "master"]),
+  faculty: z.string().trim().min(1).max(200),
+  student_id: z.string().trim().min(1).max(64).transform((v) => normalizeStudentId(v)),
+  email: z.string().trim().email().optional().nullable(),
 });
 
 export const adminSubmissionsQuerySchema = z.object({
@@ -60,3 +82,6 @@ export type AdminApproveBody = z.infer<typeof adminApproveBodySchema>;
 export type AdminRejectBody = z.infer<typeof adminRejectBodySchema>;
 export type AdminSearchSuggestionsQuery = z.infer<typeof adminSearchSuggestionsQuerySchema>;
 export type AdminStudentOverviewQuery = z.infer<typeof adminStudentOverviewQuerySchema>;
+export type AdminStudentsQuery = z.infer<typeof adminStudentsQuerySchema>;
+export type AdminStudentIdParams = z.infer<typeof adminStudentIdParamsSchema>;
+export type AdminUpdateStudentBody = z.infer<typeof adminUpdateStudentBodySchema>;

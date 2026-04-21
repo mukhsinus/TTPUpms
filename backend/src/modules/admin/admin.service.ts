@@ -21,6 +21,8 @@ import type {
   AdminSubmissionDetailRow,
   AdminSubmissionListRow,
   AdminStudentOverviewRow,
+  AdminStudentDetailRow,
+  AdminStudentListRow,
   AdminUserRow,
 } from "./admin.repository";
 import { AdminRepository } from "./admin.repository";
@@ -30,6 +32,8 @@ import type {
   AdminModerationStatus,
   AdminRejectBody,
   AdminSubmissionsQuery,
+  AdminStudentsQuery,
+  AdminUpdateStudentBody,
 } from "./admin.schema";
 
 export const ADMIN_PROCESSABLE_STATUSES = new Set<string>(["submitted", "review", "needs_revision"]);
@@ -50,6 +54,19 @@ function numOrNull(v: string | null | undefined): number | null {
   }
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+type ItemModerationStatus = "pending" | "approved" | "rejected";
+type SubmissionItemAggregateStatus = "pending" | "approved" | "partially_approved" | "rejected";
+
+function normalizeItemModerationStatus(value: string | null | undefined): ItemModerationStatus {
+  if (value === "approved") {
+    return "approved";
+  }
+  if (value === "rejected") {
+    return "rejected";
+  }
+  return "pending";
 }
 
 type DashboardQueueHealth = "healthy" | "moderate" | "overloaded";
@@ -353,6 +370,97 @@ export class AdminService {
     return this.mapStudentOverviewRow(row);
   }
 
+  async listStudents(query: AdminStudentsQuery): Promise<{
+    items: Array<{
+      id: string;
+      fullName: string;
+      telegramUsername: string | null;
+      telegramId: string | null;
+      degree: "bachelor" | "master" | null;
+      faculty: string | null;
+      studentId: string | null;
+      registrationDate: string;
+      lastActivityAt: string;
+      totalAchievementsSubmitted: number;
+      totalApprovedScore: number;
+    }>;
+    pagination: {
+      page: number;
+      pageSize: number;
+      total: number;
+      totalPages: number;
+      hasPrev: boolean;
+      hasNext: boolean;
+    };
+  }> {
+    const [total, rows] = await Promise.all([
+      this.repository.countStudents(query),
+      this.repository.listStudents(query),
+    ]);
+    const totalPages = Math.max(1, Math.ceil(total / query.pageSize));
+    return {
+      items: rows.map((row) => this.mapStudentListRow(row)),
+      pagination: {
+        page: query.page,
+        pageSize: query.pageSize,
+        total,
+        totalPages,
+        hasPrev: query.page > 1,
+        hasNext: query.page < totalPages,
+      },
+    };
+  }
+
+  async getStudentById(studentId: string): Promise<{
+    id: string;
+    fullName: string;
+    telegramUsername: string | null;
+    telegramId: string | null;
+    degree: "bachelor" | "master" | null;
+    faculty: string | null;
+    studentId: string | null;
+    email: string | null;
+    isProfileCompleted: boolean;
+    registrationDate: string;
+    updatedAt: string;
+    lastActivityAt: string;
+    totalAchievementsSubmitted: number;
+    totalSubmissions: number;
+    totalApprovedScore: number;
+  }> {
+    const row = await this.repository.findStudentById(studentId);
+    if (!row) {
+      throw new ServiceError(404, "Student not found");
+    }
+    return this.mapStudentDetailRow(row);
+  }
+
+  async updateStudentById(studentId: string, body: AdminUpdateStudentBody): Promise<{
+    id: string;
+    fullName: string;
+    telegramUsername: string | null;
+    telegramId: string | null;
+    degree: "bachelor" | "master" | null;
+    faculty: string | null;
+    studentId: string | null;
+    email: string | null;
+    isProfileCompleted: boolean;
+    registrationDate: string;
+    updatedAt: string;
+    lastActivityAt: string;
+    totalAchievementsSubmitted: number;
+    totalSubmissions: number;
+    totalApprovedScore: number;
+  }> {
+    await this.repository.updateStudentById(studentId, body);
+    const row = await this.repository.findStudentById(studentId);
+    if (!row) {
+      throw new ServiceError(404, "Student not found");
+    }
+    this.invalidateReadCaches();
+    return this.mapStudentDetailRow(row);
+  }
+
   private async buildSubmissionsList(query: AdminSubmissionsQuery): Promise<{
     items: ReturnType<AdminService["mapListRow"]>[];
     total: number;
@@ -473,6 +581,75 @@ export class AdminService {
     };
   }
 
+  private mapStudentListRow(row: AdminStudentListRow): {
+    id: string;
+    fullName: string;
+    telegramUsername: string | null;
+    telegramId: string | null;
+    degree: "bachelor" | "master" | null;
+    faculty: string | null;
+    studentId: string | null;
+    registrationDate: string;
+    lastActivityAt: string;
+    totalAchievementsSubmitted: number;
+    totalApprovedScore: number;
+  } {
+    const fullName = row.student_full_name?.trim() || row.full_name?.trim() || "—";
+    const degree =
+      row.degree === "bachelor" || row.degree === "master" ? row.degree : null;
+    return {
+      id: row.id,
+      fullName,
+      telegramUsername: row.telegram_username,
+      telegramId: row.telegram_id,
+      degree,
+      faculty: row.faculty,
+      studentId: row.student_id,
+      registrationDate: row.registration_date,
+      lastActivityAt: row.last_activity_at,
+      totalAchievementsSubmitted: Number(row.total_achievements_submitted ?? "0"),
+      totalApprovedScore: Number(row.total_approved_score ?? "0"),
+    };
+  }
+
+  private mapStudentDetailRow(row: AdminStudentDetailRow): {
+    id: string;
+    fullName: string;
+    telegramUsername: string | null;
+    telegramId: string | null;
+    degree: "bachelor" | "master" | null;
+    faculty: string | null;
+    studentId: string | null;
+    email: string | null;
+    isProfileCompleted: boolean;
+    registrationDate: string;
+    updatedAt: string;
+    lastActivityAt: string;
+    totalAchievementsSubmitted: number;
+    totalSubmissions: number;
+    totalApprovedScore: number;
+  } {
+    const degree =
+      row.degree === "bachelor" || row.degree === "master" ? row.degree : null;
+    return {
+      id: row.id,
+      fullName: row.student_full_name?.trim() || row.full_name?.trim() || "—",
+      telegramUsername: row.telegram_username,
+      telegramId: row.telegram_id,
+      degree,
+      faculty: row.faculty,
+      studentId: row.student_id,
+      email: row.email,
+      isProfileCompleted: row.is_profile_completed,
+      registrationDate: row.created_at,
+      updatedAt: row.updated_at,
+      lastActivityAt: row.last_activity_at,
+      totalAchievementsSubmitted: Number(row.total_achievements_submitted ?? "0"),
+      totalSubmissions: Number(row.total_submissions ?? "0"),
+      totalApprovedScore: Number(row.total_approved_score ?? "0"),
+    };
+  }
+
   private mapActivitySummary(row: AdminActivitySummaryRow): {
     totalActions: number;
     approvals: number;
@@ -516,6 +693,14 @@ export class AdminService {
   async getSubmissionDetail(submissionId: string): Promise<{
     submission: Record<string, unknown>;
     items: Record<string, unknown>[];
+    itemModeration: {
+      aggregateStatus: SubmissionItemAggregateStatus;
+      pendingCount: number;
+      approvedCount: number;
+      rejectedCount: number;
+      totalItems: number;
+      approvedLinesTotalScore: number;
+    };
     files: Record<string, unknown>[];
     link: string | null;
     user: Record<string, unknown> | null;
@@ -538,10 +723,12 @@ export class AdminService {
       Promise.all(items.map((it) => this.mapItemAsync(it))),
       Promise.all(files.map((f) => this.mapFileAsync(f))),
     ]);
+    const itemModeration = this.computeItemModerationSummary(items);
 
     return {
       submission: this.mapSubmissionDetail(submission),
       items: mappedItems,
+      itemModeration,
       files: mappedFiles,
       link: primaryLink,
       user: user ? this.mapUser(user) : null,
@@ -873,7 +1060,10 @@ export class AdminService {
       externalLink: row.external_link,
       proposedScore: numOrNull(row.proposed_score),
       approvedScore: numOrNull(row.approved_score),
-      status: row.status,
+      reviewerComment: row.reviewer_comment,
+      status: normalizeItemModerationStatus(row.status),
+      reviewedById: row.reviewed_by,
+      reviewedAt: row.reviewed_at,
       categoryCode: row.category_code,
       categoryName: row.category_name,
       categoryTitle,
@@ -881,6 +1071,53 @@ export class AdminService {
       subcategoryLabel: row.subcategory_label,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+    };
+  }
+
+  private computeItemModerationSummary(items: AdminItemRow[]): {
+    aggregateStatus: SubmissionItemAggregateStatus;
+    pendingCount: number;
+    approvedCount: number;
+    rejectedCount: number;
+    totalItems: number;
+    approvedLinesTotalScore: number;
+  } {
+    let pendingCount = 0;
+    let approvedCount = 0;
+    let rejectedCount = 0;
+    let approvedLinesTotalScore = 0;
+
+    for (const item of items) {
+      const status = normalizeItemModerationStatus(item.status);
+      if (status === "pending") {
+        pendingCount += 1;
+      } else if (status === "approved") {
+        approvedCount += 1;
+        approvedLinesTotalScore += numOrNull(item.approved_score) ?? 0;
+      } else {
+        rejectedCount += 1;
+      }
+    }
+
+    const totalItems = items.length;
+    let aggregateStatus: SubmissionItemAggregateStatus = "pending";
+    if (totalItems > 0 && pendingCount === 0) {
+      if (approvedCount === totalItems) {
+        aggregateStatus = "approved";
+      } else if (rejectedCount === totalItems) {
+        aggregateStatus = "rejected";
+      } else if (approvedCount > 0 && rejectedCount > 0) {
+        aggregateStatus = "partially_approved";
+      }
+    }
+
+    return {
+      aggregateStatus,
+      pendingCount,
+      approvedCount,
+      rejectedCount,
+      totalItems,
+      approvedLinesTotalScore: Number(approvedLinesTotalScore.toFixed(2)),
     };
   }
 

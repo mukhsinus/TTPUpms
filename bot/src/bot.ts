@@ -185,6 +185,7 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
 
     const noSnake = (s: string | null | undefined) =>
       s ? s.replace(/_/g, " ").replace(/\s+/g, " ").trim() : "—";
+    const prettyStatus = (s: string) => s[0]?.toUpperCase() + s.slice(1);
 
     const lines = submissions.map((item, index) => {
       const statusLine =
@@ -198,8 +199,10 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
         for (let i = 0; i < item.items.length; i += 1) {
           const line = item.items[i]!;
           block.push(`   Item ${i + 1}: ${line.title}`);
-          block.push(`      Category: ${noSnake(line.category)}`);
+          block.push(`      Category: ${line.categoryTitle || noSnake(line.category)}`);
           block.push(`      Subcategory: ${noSnake(line.subcategory)}`);
+          block.push(`      Status: ${prettyStatus(line.status)}`);
+          block.push(`      Score: ${line.approvedScore ?? 0}`);
           block.push(`      Description: ${line.description ?? "—"}`);
           if (line.link) {
             block.push(`      Link: ${line.link}`);
@@ -209,7 +212,11 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
           }
         }
       }
-      block.push(`   ${statusLine}`, `   Points: ${item.totalPoints}`, `   Created: ${new Date(item.createdAt).toLocaleDateString("en-US")}`);
+      block.push(
+        `   ${statusLine}`,
+        `   Total score added: ${item.totalPoints}`,
+        `   Created: ${new Date(item.createdAt).toLocaleDateString("en-US")}`,
+      );
       return block.join("\n");
     });
 

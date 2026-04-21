@@ -5,6 +5,7 @@ import {
   LogOut,
   ShieldAlert,
   UserCircle2,
+  UserRound,
   Users,
   X,
 } from "lucide-react";
@@ -47,6 +48,7 @@ export function AdminLayout({ children, onLogout }: AdminLayoutProps): ReactElem
     if (location.pathname.startsWith("/audit")) return "Audit Logs";
     if (location.pathname.startsWith("/security")) return "Security";
     if (location.pathname.startsWith("/reports")) return "Reports";
+    if (location.pathname.startsWith("/users")) return "Students";
     if (location.pathname.startsWith("/submissions/")) return "Submission detail";
     if (location.pathname.startsWith("/submissions")) return "Submissions";
     return "Dashboard";
@@ -131,6 +133,14 @@ export function AdminLayout({ children, onLogout }: AdminLayoutProps): ReactElem
           >
             <UserCircle2 size={16} />
             Profile
+          </NavLink>
+          <NavLink
+            to="/users"
+            onClick={navClose}
+            className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
+          >
+            <UserRound size={16} />
+            Students
           </NavLink>
           {isSuperadmin ? (
             <>

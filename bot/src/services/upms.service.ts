@@ -43,10 +43,13 @@ export interface BotSystemPhaseState {
 export interface SubmitDraftSuccessItem {
   title: string;
   category: string;
+  categoryTitle: string;
   subcategory: string;
   description: string;
   link: string | null;
   hasFile: boolean;
+  status: "pending" | "approved" | "rejected";
+  approvedScore: number | null;
 }
 
 export interface SubmitDraftSuccess {

@@ -10,17 +10,15 @@ function normalizeApiBaseUrl(rawValue: string | undefined): string {
     return "";
   }
 
-  const withoutTrailingSlash = trimmed.replace(/\/+$/, "");
-  if (/^https?:\/\//i.test(withoutTrailingSlash)) {
-    return withoutTrailingSlash;
+  let normalized = trimmed.replace(/\/+$/, "");
+  if (!/^https?:\/\//i.test(normalized) && /^[a-zA-Z0-9.-]+(?::\d+)?(?:\/.*)?$/.test(normalized)) {
+    // Common deployment mistake: host without scheme in VITE_API_URL.
+    normalized = `https://${normalized}`;
   }
 
-  // Common deployment mistake: host without scheme in VITE_API_URL.
-  if (/^[a-zA-Z0-9.-]+(?::\d+)?$/.test(withoutTrailingSlash)) {
-    return `https://${withoutTrailingSlash}`;
-  }
-
-  return withoutTrailingSlash;
+  // Frontend request paths already start with `/api/...`.
+  // If env is configured as `https://host/api`, collapse to `https://host`.
+  return normalized.replace(/\/api$/i, "");
 }
 
 const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_URL ?? import.meta.env.VITE_API_BASE_URL ?? "");
@@ -93,6 +91,13 @@ interface RequestResultOptions {
   skipUnauthorizedRedirect?: boolean;
   /** Attach `x-admin-session-id` for admin-panel auth bootstrap. */
   forceAdminSessionHeader?: boolean;
+}
+
+function buildApiUrl(path: string): string {
+  if (!API_BASE_URL) {
+    return path;
+  }
+  return `${API_BASE_URL}${path}`;
 }
 
 export { ApiError };
@@ -448,7 +453,10 @@ export interface AdminSubmissionDetailPayload {
     externalLink: string | null;
     proposedScore: number | null;
     approvedScore: number | null;
-    status: string;
+    reviewerComment?: string | null;
+    status: "pending" | "approved" | "rejected";
+    reviewedById?: string | null;
+    reviewedAt?: string | null;
     categoryCode: string | null;
     categoryName: string | null;
     categoryTitle?: string | null;
@@ -457,6 +465,14 @@ export interface AdminSubmissionDetailPayload {
     createdAt: string;
     updatedAt: string;
   }>;
+  itemModeration: {
+    aggregateStatus: "pending" | "approved" | "partially_approved" | "rejected";
+    pendingCount: number;
+    approvedCount: number;
+    rejectedCount: number;
+    totalItems: number;
+    approvedLinesTotalScore: number;
+  };
   files: Array<{
     id: string;
     fileUrl: string | null;
@@ -496,6 +512,52 @@ export interface AdminStudentOverviewPayload {
   pendingSubmissions: number;
   approvedSubmissions: number;
   rejectedSubmissions: number;
+  totalApprovedScore: number;
+}
+
+export type AdminStudentDegree = "bachelor" | "master";
+
+export interface AdminStudentListItem {
+  id: string;
+  fullName: string;
+  telegramUsername: string | null;
+  telegramId: string | null;
+  degree: AdminStudentDegree | null;
+  faculty: string | null;
+  studentId: string | null;
+  registrationDate: string;
+  lastActivityAt: string;
+  totalAchievementsSubmitted: number;
+  totalApprovedScore: number;
+}
+
+export interface AdminStudentsListPayload {
+  items: AdminStudentListItem[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+    hasPrev: boolean;
+    hasNext: boolean;
+  };
+}
+
+export interface AdminStudentDetailPayload {
+  id: string;
+  fullName: string;
+  telegramUsername: string | null;
+  telegramId: string | null;
+  degree: AdminStudentDegree | null;
+  faculty: string | null;
+  studentId: string | null;
+  email: string | null;
+  isProfileCompleted: boolean;
+  registrationDate: string;
+  updatedAt: string;
+  lastActivityAt: string;
+  totalAchievementsSubmitted: number;
+  totalSubmissions: number;
   totalApprovedScore: number;
 }
 
@@ -738,11 +800,10 @@ async function requestResult<T>(
     headers.set("x-admin-session-id", getOrCreateAdminSessionId());
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(buildApiUrl(path), {
     ...init,
     headers,
   });
-
   const rawText = await response.text();
   const parsed = parseUnknownResponseBody(rawText);
   const payload =
@@ -1010,11 +1071,39 @@ export const api = {
     });
   },
 
+  /** Admin/reviewer helper for item-level moderation in submission detail UIs. */
+  reviewSubmissionLineItem(input: {
+    itemId: string;
+    approved_score?: number;
+    status: "approved" | "rejected";
+    reviewer_comment?: string;
+  }): Promise<ReviewSubmissionItemResponse> {
+    return this.patchReviewItem(input).then((data) => {
+      adminSubmissionsCache.clear();
+      adminSubmissionsInFlight.clear();
+      if (data.submissionId) {
+        adminSubmissionDetailCache.delete(data.submissionId);
+        adminSubmissionDetailInFlight.delete(data.submissionId);
+      }
+      adminDashboardCache = null;
+      adminDashboardInFlight = null;
+      return data;
+    });
+  },
+
   /** POST /api/reviews/submissions/:id/start-review — submitted → review. */
   startSubmissionReview(submissionId: string): Promise<Submission> {
     return request<Submission>(`/api/reviews/submissions/${submissionId}/start-review`, {
       method: "POST",
       body: JSON.stringify({}),
+    }).then((data) => {
+      adminSubmissionDetailCache.delete(submissionId);
+      adminSubmissionDetailInFlight.delete(submissionId);
+      adminSubmissionsCache.clear();
+      adminSubmissionsInFlight.clear();
+      adminDashboardCache = null;
+      adminDashboardInFlight = null;
+      return data;
     });
   },
 
@@ -1030,6 +1119,14 @@ export const api = {
         decision: input.decision,
         comment: input.comment,
       }),
+    }).then((data) => {
+      adminSubmissionDetailCache.delete(input.submissionId);
+      adminSubmissionDetailInFlight.delete(input.submissionId);
+      adminSubmissionsCache.clear();
+      adminSubmissionsInFlight.clear();
+      adminDashboardCache = null;
+      adminDashboardInFlight = null;
+      return data;
     });
   },
 
@@ -1398,7 +1495,7 @@ export const api = {
     if (sessionUser && isAdminPanelRole(sessionUser)) {
       headers.set("x-admin-session-id", getOrCreateAdminSessionId());
     }
-    const response = await fetch(`${API_BASE_URL}${path}`, { method: "GET", headers });
+    const response = await fetch(buildApiUrl(path), { method: "GET", headers });
     if (!response.ok) {
       throw new ApiError(`CSV export failed (${response.status})`, response.status);
     }
@@ -1502,6 +1599,60 @@ export const api = {
     }
     const params = new URLSearchParams({ studentId: value });
     return request<AdminStudentOverviewPayload | null>(`/api/admin/submissions/student-overview?${params.toString()}`);
+  },
+
+  getAdminStudents(params: {
+    page?: number;
+    pageSize?: number;
+    search?: string;
+    faculty?: string;
+    degree?: AdminStudentDegree;
+    sort?: "newest" | "oldest" | "name";
+  }): Promise<AdminStudentsListPayload> {
+    const q = new URLSearchParams();
+    q.set("page", String(params.page ?? 1));
+    q.set("pageSize", String(params.pageSize ?? 20));
+    if (params.search?.trim()) {
+      q.set("search", params.search.trim());
+    }
+    if (params.faculty?.trim()) {
+      q.set("faculty", params.faculty.trim());
+    }
+    if (params.degree) {
+      q.set("degree", params.degree);
+    }
+    if (params.sort) {
+      q.set("sort", params.sort);
+    }
+    return request<AdminStudentsListPayload>(`/api/admin/students?${q.toString()}`);
+  },
+
+  getAdminStudentById(studentId: string): Promise<AdminStudentDetailPayload> {
+    return request<AdminStudentDetailPayload>(`/api/admin/students/${studentId}`);
+  },
+
+  updateAdminStudent(
+    studentId: string,
+    body: {
+      full_name: string;
+      degree: AdminStudentDegree;
+      faculty: string;
+      student_id: string;
+      email?: string | null;
+    },
+  ): Promise<AdminStudentDetailPayload> {
+    return request<AdminStudentDetailPayload>(`/api/admin/students/${studentId}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }).then((data) => {
+      adminSubmissionsCache.clear();
+      adminSubmissionsInFlight.clear();
+      adminSubmissionDetailCache.clear();
+      adminSubmissionDetailInFlight.clear();
+      adminDashboardCache = null;
+      adminDashboardInFlight = null;
+      return data;
+    });
   },
 
   getAdminSubmissionDetail(submissionId: string, options?: { forceRefresh?: boolean }): Promise<AdminSubmissionDetailPayload> {
