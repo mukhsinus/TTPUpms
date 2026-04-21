@@ -553,7 +553,7 @@ export class ReviewsRepository {
   async completeSubmissionReviewLocked(input: {
     submissionId: string;
     reviewerId: string;
-    decision: "approved" | "rejected" | "needs_revision";
+    decision: "approved" | "rejected";
     comment?: string;
   }): Promise<ReviewSubmissionEntity> {
     const client = await this.app.db.connect();

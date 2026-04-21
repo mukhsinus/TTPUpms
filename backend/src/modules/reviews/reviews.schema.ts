@@ -63,7 +63,7 @@ export function parseReviewItemBody(body: unknown): ReviewItemBody {
 }
 
 export const completeSubmissionReviewBodySchema = z.object({
-  decision: z.enum(["approved", "rejected", "needs_revision"]),
+  decision: z.enum(["approved", "rejected"]),
   comment: z.string().trim().max(5000).optional(),
 });
 

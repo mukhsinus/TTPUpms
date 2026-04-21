@@ -91,7 +91,7 @@ export function SubmissionDetailPage(): ReactElement {
   const [savingItemId, setSavingItemId] = useState<string | null>(null);
   const [itemDrafts, setItemDrafts] = useState<Record<string, { score: string; comment: string }>>({});
   const [workflowBusy, setWorkflowBusy] = useState(false);
-  const [finalizeDecision, setFinalizeDecision] = useState<"approved" | "rejected" | "needs_revision">("approved");
+  const [finalizeDecision, setFinalizeDecision] = useState<"approved" | "rejected">("approved");
   const [finalizeComment, setFinalizeComment] = useState("");
   const [categoryCaps, setCategoryCaps] = useState<Record<string, number>>({});
 
@@ -511,12 +511,11 @@ export function SubmissionDetailPage(): ReactElement {
                     value={finalizeDecision}
                     disabled={workflowBusy}
                     onChange={(event) =>
-                      setFinalizeDecision(event.target.value as "approved" | "rejected" | "needs_revision")
+                      setFinalizeDecision(event.target.value as "approved" | "rejected")
                     }
                   >
                     <option value="approved">Approved</option>
                     <option value="rejected">Rejected</option>
-                    <option value="needs_revision">Needs revision</option>
                   </select>
                 </label>
                 <label className="item-review-field">

@@ -239,8 +239,8 @@ export class ReviewsService {
     }
     const approvedCount = items.filter((item) => item.status === "approved").length;
     const rejectedCount = items.filter((item) => item.status === "rejected").length;
-    const decision: "approved" | "rejected" | "needs_revision" =
-      approvedCount === items.length ? "approved" : rejectedCount === items.length ? "rejected" : "needs_revision";
+    const decision: "approved" | "rejected" =
+      approvedCount > 0 ? "approved" : "rejected";
 
     try {
       const finalized = await this.repository.completeSubmissionReviewLocked({
@@ -286,7 +286,7 @@ export class ReviewsService {
     submissionId: string;
     userId: string;
     submissionTitle: string | null;
-    finalStatus: "approved" | "rejected" | "needs_revision";
+    finalStatus: "approved" | "rejected";
     overallScore: number;
   }): Promise<void> {
     const items = await this.repository.findSubmissionItems(input.submissionId);

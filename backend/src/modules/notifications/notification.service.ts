@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { env } from "../../config/env";
 
-type SubmissionNotificationStatus = "submitted" | "approved" | "rejected" | "needs_revision";
+type SubmissionNotificationStatus = "submitted" | "approved" | "rejected";
 
 export interface SubmissionModerationNotificationInput {
   userId: string;
@@ -15,7 +15,7 @@ export interface SubmissionItemsReviewedSummaryInput {
   userId: string;
   submissionId: string;
   submissionTitle: string | null;
-  finalStatus: "approved" | "rejected" | "needs_revision";
+  finalStatus: "approved" | "rejected";
   overallScore: number;
   items: Array<{
     title: string;
@@ -53,8 +53,7 @@ export class NotificationService {
     submissionId: string;
     status: SubmissionNotificationStatus;
   }): void {
-    const readableStatus =
-      input.status === "needs_revision" ? "Needs Revision" : input.status[0].toUpperCase() + input.status.slice(1);
+    const readableStatus = input.status[0].toUpperCase() + input.status.slice(1);
     const text = `Submission status updated: ${readableStatus}`;
     this.notifyUser(input.userId, text);
   }
@@ -75,12 +74,7 @@ export class NotificationService {
   }
 
   notifySubmissionItemsReviewedSummary(input: SubmissionItemsReviewedSummaryInput): void {
-    const finalStatusLabel =
-      input.finalStatus === "approved"
-        ? "Approved"
-        : input.finalStatus === "rejected"
-          ? "Rejected"
-          : "Needs revision";
+    const finalStatusLabel = input.finalStatus === "approved" ? "Approved" : "Rejected";
     const header = input.submissionTitle?.trim()
       ? `Your submission "${input.submissionTitle.trim()}" has been fully reviewed.`
       : "Your submission has been fully reviewed.";

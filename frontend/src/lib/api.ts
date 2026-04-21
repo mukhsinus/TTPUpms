@@ -1123,7 +1123,7 @@ export const api = {
   /** POST /api/reviews/submissions/:id/finalize — alias of /complete; review → outcome. */
   finalizeSubmissionReview(input: {
     submissionId: string;
-    decision: "approved" | "rejected" | "needs_revision";
+    decision: "approved" | "rejected";
     comment?: string;
   }): Promise<Submission> {
     return request<Submission>(`/api/reviews/submissions/${input.submissionId}/finalize`, {

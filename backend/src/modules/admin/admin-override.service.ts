@@ -88,7 +88,7 @@ export class AdminOverrideService {
       userAgent: actor.userAgent,
     });
 
-    if (body.status === "approved" || body.status === "rejected" || body.status === "needs_revision") {
+    if (body.status === "approved" || body.status === "rejected") {
       this.notifications.notifySubmissionStatusChanged({
         userId: submission.userId,
         submissionId,
