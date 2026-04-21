@@ -192,7 +192,8 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
         item.status === "draft"
           ? "Status: draft (not submitted)"
           : `Status: ${item.status}`;
-      const block = [`${index + 1}. Submission #${item.id.slice(0, 8)}`];
+      const title = item.title?.trim() ? item.title.trim() : `Submission #${item.id.slice(0, 8)}`;
+      const block = [`${index + 1}. ${title}`];
       if (item.items.length === 0) {
         block.push("   Items: —");
       } else {

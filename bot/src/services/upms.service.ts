@@ -21,6 +21,7 @@ interface BotApiUserRow {
 
 interface BotApiSubmissionRow {
   id: string;
+  title: string;
   items: SubmitDraftSuccessItem[];
   status: string;
   totalPoints: string;

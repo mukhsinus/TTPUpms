@@ -424,6 +424,10 @@ body {
   gap: 18px;
 }
 
+.detail-layout--single {
+  grid-template-columns: 1fr;
+}
+
 .detail-main,
 .detail-actions,
 .items-stack {

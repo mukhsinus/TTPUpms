@@ -59,6 +59,10 @@ export function isSafeSupabaseProofUrl(url: string): boolean {
 
 const PATH_WITH_SLASH = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/.+/i;
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 /**
  * Strips legacy `proofs/` folder segments from object keys. Objects are always read from `STORAGE_BUCKET`.
  */
@@ -71,6 +75,10 @@ export function normalizeLegacyStorageObjectPath(path: string): string {
   );
   // Legacy object keys sometimes duplicated a mistaken bucket name as a path prefix.
   p = p.replace(/^submission-files\//i, "");
+  const activeBucket = env.STORAGE_BUCKET.trim();
+  if (activeBucket.length > 0) {
+    p = p.replace(new RegExp(`^${escapeRegExp(activeBucket)}\/`, "i"), "");
+  }
   return p;
 }
 

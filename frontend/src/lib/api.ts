@@ -86,6 +86,13 @@ const ADMIN_LIST_CACHE_TTL_MS = 10_000;
 const ADMIN_DETAIL_CACHE_TTL_MS = 15_000;
 const ADMIN_SEARCH_SUGGESTION_CACHE_TTL_MS = 20_000;
 
+function createIdempotencyKey(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `idem-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 interface RequestResultOptions {
   /** When true, a 401 does not clear storage or navigate (e.g. login probe before token is stored). */
   skipUnauthorizedRedirect?: boolean;
@@ -457,6 +464,7 @@ export interface AdminSubmissionDetailPayload {
     status: "pending" | "approved" | "rejected";
     reviewedById?: string | null;
     reviewedAt?: string | null;
+    categoryType?: string | null;
     categoryCode: string | null;
     categoryName: string | null;
     categoryTitle?: string | null;
@@ -1095,6 +1103,9 @@ export const api = {
   startSubmissionReview(submissionId: string): Promise<Submission> {
     return request<Submission>(`/api/reviews/submissions/${submissionId}/start-review`, {
       method: "POST",
+      headers: {
+        "Idempotency-Key": createIdempotencyKey(),
+      },
       body: JSON.stringify({}),
     }).then((data) => {
       adminSubmissionDetailCache.delete(submissionId);
@@ -1115,6 +1126,9 @@ export const api = {
   }): Promise<Submission> {
     return request<Submission>(`/api/reviews/submissions/${input.submissionId}/finalize`, {
       method: "POST",
+      headers: {
+        "Idempotency-Key": createIdempotencyKey(),
+      },
       body: JSON.stringify({
         decision: input.decision,
         comment: input.comment,

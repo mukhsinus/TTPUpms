@@ -43,16 +43,27 @@ function humanizeCategoryLabel(raw: string | null | undefined): string {
   return normalized.replace(/\b\w/g, (ch) => ch.toUpperCase());
 }
 
+function displayCategoryLabel(raw: string | null | undefined): string {
+  const value = raw?.trim();
+  if (!value) {
+    return "—";
+  }
+  if (/[_-]/.test(value)) {
+    return humanizeCategoryLabel(value);
+  }
+  return value;
+}
+
 function resolveCategoryDisplay(item: AdminSubmissionDetailPayload["items"][number]): string {
   const title = item.categoryTitle?.trim();
   if (title) {
-    return title;
-  }
-  if (item.categoryCode?.trim()) {
-    return humanizeCategoryLabel(item.categoryCode);
+    return displayCategoryLabel(title);
   }
   if (item.categoryName?.trim()) {
-    return humanizeCategoryLabel(item.categoryName);
+    return displayCategoryLabel(item.categoryName);
+  }
+  if (item.categoryCode?.trim()) {
+    return displayCategoryLabel(item.categoryCode);
   }
   return "—";
 }
@@ -82,9 +93,6 @@ export function AdminSubmissionDetailPage(): ReactElement {
   const [busy, setBusy] = useState(false);
   const [savingItemId, setSavingItemId] = useState<string | null>(null);
   const [itemDrafts, setItemDrafts] = useState<Record<string, { score: string; comment: string }>>({});
-  const [finalizeDecision, setFinalizeDecision] = useState<"approved" | "rejected" | "needs_revision">("approved");
-  const [finalizeComment, setFinalizeComment] = useState("");
-  const [workflowBusy, setWorkflowBusy] = useState(false);
   const [assignmentAdminId, setAssignmentAdminId] = useState("");
   const [noteText, setNoteText] = useState("");
   const [notes, setNotes] = useState<
@@ -94,11 +102,13 @@ export function AdminSubmissionDetailPage(): ReactElement {
   const isSuperadmin = role === "superadmin";
   const [categoryCaps, setCategoryCaps] = useState<Record<string, number>>({});
 
-  const reload = useCallback(async (): Promise<void> => {
+  const reload = useCallback(async (options?: { forceRefresh?: boolean }): Promise<void> => {
     if (!submissionId) {
       return;
     }
-    const data = await api.getAdminSubmissionDetail(submissionId);
+    const data = await api.getAdminSubmissionDetail(submissionId, {
+      forceRefresh: options?.forceRefresh ?? false,
+    });
     setDetail(data);
     if (isSuperadmin) {
       const nextNotes = await api.getSubmissionInternalNotes(submissionId);
@@ -174,45 +184,6 @@ export function AdminSubmissionDetailPage(): ReactElement {
     submission?.workflowStatus === "review" ||
     submission?.workflowStatus === "needs_revision";
 
-  const startReview = async (): Promise<void> => {
-    if (!submissionId) {
-      return;
-    }
-    try {
-      setWorkflowBusy(true);
-      setActionError(null);
-      await api.startSubmissionReview(submissionId);
-      await reload();
-      toast.success("Review started");
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Could not start review");
-    } finally {
-      setWorkflowBusy(false);
-    }
-  };
-
-  const finalizeReview = async (): Promise<void> => {
-    if (!submissionId) {
-      return;
-    }
-    try {
-      setWorkflowBusy(true);
-      setActionError(null);
-      await api.finalizeSubmissionReview({
-        submissionId,
-        decision: finalizeDecision,
-        comment: finalizeComment.trim() || undefined,
-      });
-      setFinalizeComment("");
-      await reload();
-      toast.success("Review finalized");
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Could not finalize review");
-    } finally {
-      setWorkflowBusy(false);
-    }
-  };
-
   const submitItemReview = async (
     item: AdminSubmissionDetailPayload["items"][number],
     decision: "approved" | "rejected",
@@ -221,15 +192,16 @@ export function AdminSubmissionDetailPage(): ReactElement {
       return;
     }
     const draft = itemDrafts[item.id];
+    const isFixed = item.categoryType === "fixed";
     const score = Number(draft?.score ?? "");
     const categoryKey = normalizeCategoryKey(item.categoryCode ?? item.categoryName ?? "");
     const capFromApi = categoryCaps[categoryKey];
     const cap = Number.isFinite(capFromApi) ? capFromApi : CATEGORY_SCORE_CAP_FALLBACKS[categoryKey];
-    if (Number.isNaN(score) || score < 0) {
+    if (!isFixed && (Number.isNaN(score) || score < 0)) {
       setActionError("Enter a valid non-negative score for this item.");
       return;
     }
-    if (Number.isFinite(cap) && score > cap) {
+    if (!isFixed && Number.isFinite(cap) && score > cap) {
       setActionError(`Allowed range: 0-${cap}`);
       return;
     }
@@ -239,7 +211,7 @@ export function AdminSubmissionDetailPage(): ReactElement {
       setActionError(null);
       const updated = await api.reviewSubmissionLineItem({
         itemId: item.id,
-        approved_score: score,
+        ...(isFixed ? {} : { approved_score: score }),
         status: decision,
         reviewer_comment: draft?.comment?.trim() || undefined,
       });
@@ -252,7 +224,7 @@ export function AdminSubmissionDetailPage(): ReactElement {
           items: prev.items.map((entry) => (entry.id === item.id ? mergeReviewIntoAdminItem(entry, updated) : entry)),
         };
       });
-      await reload();
+      await reload({ forceRefresh: true });
       toast.success(decision === "approved" ? "Item approved" : "Item rejected");
     } catch (err) {
       const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : "Review failed";
@@ -306,7 +278,7 @@ export function AdminSubmissionDetailPage(): ReactElement {
   const user = detail.user;
 
   return (
-    <section className="detail-layout">
+    <section className="detail-layout detail-layout--single">
       <div className="detail-main">
         {actionError ? <p className="error submission-page-alert">{actionError}</p> : null}
         <Card>
@@ -372,7 +344,7 @@ export function AdminSubmissionDetailPage(): ReactElement {
           </Card>
         ) : null}
 
-        <Card title="Line items">
+        <Card title="Achievements">
           <div className="items-stack">
             {detail.items.map((item) => (
               <article className="item-card" key={item.id}>
@@ -387,16 +359,6 @@ export function AdminSubmissionDetailPage(): ReactElement {
                     : ""}
                 </p>
                 <p>{item.description?.trim() ? item.description : "—"}</p>
-                <p className="muted">
-                  <strong>Proposed score:</strong>{" "}
-                  {item.proposedScore !== null && Number.isFinite(item.proposedScore)
-                    ? item.proposedScore.toFixed(2)
-                    : "—"}
-                </p>
-                <p className="muted">
-                  <strong>Approved score:</strong>{" "}
-                  {item.approvedScore !== null && Number.isFinite(item.approvedScore) ? item.approvedScore.toFixed(2) : "—"}
-                </p>
                 {item.reviewerComment?.trim() ? (
                   <p className="muted">
                     <strong>Moderator comment:</strong> {item.reviewerComment}
@@ -415,6 +377,11 @@ export function AdminSubmissionDetailPage(): ReactElement {
                     <p className="muted item-review-heading">
                       <strong>Item moderation</strong>
                     </p>
+                    {item.categoryType === "fixed" ? (
+                      <p className="muted">
+                        Fixed category: score is applied automatically by scoring rules.
+                      </p>
+                    ) : null}
                     <label className="item-review-field">
                       <span>Approved score</span>
                       <Input
@@ -431,7 +398,7 @@ export function AdminSubmissionDetailPage(): ReactElement {
                         }
                         step="0.01"
                         value={itemDrafts[item.id]?.score ?? ""}
-                        disabled={savingItemId === item.id}
+                        disabled={savingItemId === item.id || item.categoryType === "fixed"}
                         onChange={(event) =>
                           setItemDrafts((drafts) => ({
                             ...drafts,
@@ -444,10 +411,13 @@ export function AdminSubmissionDetailPage(): ReactElement {
                         }
                       />
                       <small className="muted">
-                        Allowed range: 0-
-                        {categoryCaps[normalizeCategoryKey(item.categoryCode ?? item.categoryName)] ??
-                          CATEGORY_SCORE_CAP_FALLBACKS[normalizeCategoryKey(item.categoryCode ?? item.categoryName)] ??
-                          "?"}
+                        {item.categoryType === "fixed"
+                          ? "Auto score from rules"
+                          : `Allowed range: 0-${
+                              categoryCaps[normalizeCategoryKey(item.categoryCode ?? item.categoryName)] ??
+                              CATEGORY_SCORE_CAP_FALLBACKS[normalizeCategoryKey(item.categoryCode ?? item.categoryName)] ??
+                              "?"
+                            }`}
                       </small>
                     </label>
                     <label className="item-review-field">
@@ -699,67 +669,6 @@ export function AdminSubmissionDetailPage(): ReactElement {
         ) : null}
       </div>
 
-      <aside className="detail-actions">
-        <Card title="Moderation">
-          {submission.workflowStatus === "submitted" ? (
-            <div className="workflow-block">
-              <p className="muted workflow-hint">Start review to process line items one by one.</p>
-              <Button type="button" variant="primary" disabled={workflowBusy} onClick={() => void startReview()}>
-                {workflowBusy ? "Working…" : "Start review"}
-              </Button>
-            </div>
-          ) : null}
-          {submission.workflowStatus === "review" ? (
-            <div className="workflow-block workflow-finalize">
-              <p className="muted workflow-hint">
-                Finalize after all items are reviewed.
-                {itemModeration?.pendingCount
-                  ? ` Pending items: ${itemModeration.pendingCount}`
-                  : " All items reviewed."}
-              </p>
-              <label className="item-review-field">
-                <span>Final decision</span>
-                <select
-                  className="ui-input"
-                  value={finalizeDecision}
-                  disabled={workflowBusy || Boolean(itemModeration?.pendingCount)}
-                  onChange={(event) =>
-                    setFinalizeDecision(event.target.value as "approved" | "rejected" | "needs_revision")
-                  }
-                >
-                  <option value="approved">Approved</option>
-                  <option value="rejected">Rejected</option>
-                  <option value="needs_revision">Needs revision</option>
-                </select>
-              </label>
-              <label className="item-review-field">
-                <span>Comment (optional)</span>
-                <textarea
-                  className="ui-input item-review-comment"
-                  rows={3}
-                  value={finalizeComment}
-                  disabled={workflowBusy || Boolean(itemModeration?.pendingCount)}
-                  onChange={(event) => setFinalizeComment(event.target.value)}
-                />
-              </label>
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={workflowBusy || Boolean(itemModeration?.pendingCount)}
-                onClick={() => void finalizeReview()}
-              >
-                {workflowBusy ? "Working…" : "Finalize review"}
-              </Button>
-            </div>
-          ) : null}
-          {submission.workflowStatus !== "submitted" && submission.workflowStatus !== "review" ? (
-            <p className="muted workflow-hint">Submission workflow is in terminal state.</p>
-          ) : null}
-          <Button type="button" variant="ghost" onClick={() => void navigate("/submissions")} style={{ marginTop: 16 }}>
-            Back to list
-          </Button>
-        </Card>
-      </aside>
     </section>
   );
 }

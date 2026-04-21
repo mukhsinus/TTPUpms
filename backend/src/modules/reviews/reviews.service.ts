@@ -137,7 +137,7 @@ export class ReviewsService {
       source: scoringSource,
     });
 
-    return this.repository.reviewSubmissionItemLocked({
+    const reviewedItem = await this.repository.reviewSubmissionItemLocked({
       submissionId,
       itemId,
       reviewerId: user.id,
@@ -145,6 +145,9 @@ export class ReviewsService {
       comment: body.comment,
       decision: body.decision,
     });
+
+    await this.autoFinalizeSubmissionIfReady(user, submissionId);
+    return reviewedItem;
   }
 
   async startSubmissionReview(user: AuthUser, submissionId: string): Promise<ReviewSubmissionEntity> {
@@ -180,13 +183,13 @@ export class ReviewsService {
       comment: body.comment,
     });
 
-    if (body.decision === "approved" || body.decision === "rejected" || body.decision === "needs_revision") {
-      this.notifications.notifySubmissionStatusChanged({
-        userId: submission.userId,
-        submissionId,
-        status: body.decision,
-      });
-    }
+    await this.sendSubmissionItemsSummaryNotification({
+      submissionId,
+      userId: submission.userId,
+      submissionTitle: submission.title,
+      finalStatus: body.decision,
+      overallScore: updated.totalPoints,
+    });
 
     await this.audit.insert({
       actorUserId: user.id,
@@ -269,6 +272,102 @@ export class ReviewsService {
     }
 
     throw new ServiceError(403, "Forbidden");
+  }
+
+  private async autoFinalizeSubmissionIfReady(user: AuthUser, submissionId: string): Promise<void> {
+    const pendingItems = await this.repository.countUnreviewedItems(submissionId);
+    if (pendingItems > 0) {
+      return;
+    }
+    const current = await this.repository.findSubmissionById(submissionId);
+    if (!current || current.status !== "review") {
+      return;
+    }
+    const items = await this.repository.findSubmissionItems(submissionId);
+    if (items.length === 0) {
+      return;
+    }
+    const approvedCount = items.filter((item) => item.status === "approved").length;
+    const rejectedCount = items.filter((item) => item.status === "rejected").length;
+    const decision: "approved" | "rejected" | "needs_revision" =
+      approvedCount === items.length ? "approved" : rejectedCount === items.length ? "rejected" : "needs_revision";
+
+    try {
+      const finalized = await this.repository.completeSubmissionReviewLocked({
+        submissionId,
+        reviewerId: user.id,
+        decision,
+      });
+
+      await this.audit.insert({
+        actorUserId: user.id,
+        targetUserId: current.userId,
+        entityTable: "submissions",
+        entityId: submissionId,
+        action: "review_completed",
+        newValues: {
+          decision,
+          totalPoints: finalized.totalPoints,
+          status: finalized.status,
+          autoFinalized: true,
+        },
+      });
+
+      await this.sendSubmissionItemsSummaryNotification({
+        submissionId,
+        userId: current.userId,
+        submissionTitle: current.title,
+        finalStatus: decision,
+        overallScore: finalized.totalPoints,
+      });
+    } catch (error) {
+      if (
+        error instanceof ServiceError &&
+        error.statusCode === 409 &&
+        /can only be completed while status is "review"/i.test(error.message)
+      ) {
+        return;
+      }
+      this.log.error({ err: error, submissionId }, "Auto finalize after item review failed");
+    }
+  }
+
+  private async sendSubmissionItemsSummaryNotification(input: {
+    submissionId: string;
+    userId: string;
+    submissionTitle: string | null;
+    finalStatus: "approved" | "rejected" | "needs_revision";
+    overallScore: number;
+  }): Promise<void> {
+    const items = await this.repository.findSubmissionItems(input.submissionId);
+    const processedItems: Array<{
+      title: string;
+      status: "approved" | "rejected";
+      approvedScore: number | null;
+      comment: string | null;
+    }> = [];
+    for (const item of items) {
+      if (item.status !== "approved" && item.status !== "rejected") {
+        continue;
+      }
+      processedItems.push({
+        title: item.title,
+        status: item.status,
+        approvedScore: item.status === "approved" ? item.approvedScore : null,
+        comment: item.reviewerComment,
+      });
+    }
+    if (processedItems.length === 0) {
+      return;
+    }
+    this.notifications.notifySubmissionItemsReviewedSummary({
+      userId: input.userId,
+      submissionId: input.submissionId,
+      submissionTitle: input.submissionTitle,
+      finalStatus: input.finalStatus,
+      overallScore: input.overallScore,
+      items: processedItems,
+    });
   }
 }
 

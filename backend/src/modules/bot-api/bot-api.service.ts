@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { createHash, randomUUID } from "crypto";
+import type { PoolClient } from "pg";
 import { env } from "../../config/env";
 import type { AuthUser } from "../../types/auth-user";
 import { ServiceError } from "../../utils/service-error";
@@ -58,6 +59,7 @@ interface UserRow {
 /** Bot list row: submission envelope + first line item (no user identity). */
 export interface BotSubmissionListRow {
   id: string;
+  title: string;
   items: BotSubmitDraftItemSummary[];
   status: string;
   totalPoints: string;
@@ -338,6 +340,37 @@ export class BotApiService {
       return ", student_full_name, faculty, student_id, degree::text AS degree, is_profile_completed";
     }
     return ", NULL::text AS student_full_name, NULL::text AS faculty, NULL::text AS student_id, NULL::text AS degree, false AS is_profile_completed";
+  }
+
+  private async resolveGeneralSubmissionTitleForUser(
+    userId: string,
+    db?: FastifyInstance["db"] | PoolClient,
+  ): Promise<string> {
+    const executor = db ?? this.app.db;
+    const result = await executor.query<{ next_seq: string }>(
+      `
+      SELECT
+        (COALESCE(MAX((regexp_match(s.title, '^General Submission ([0-9]+)$'))[1]::int), 0) + 1)::text AS next_seq
+      FROM submissions s
+      WHERE s.user_id = $1
+        AND s.title ~ '^General Submission [0-9]+$'
+      `,
+      [userId],
+    );
+    const seq = Number(result.rows[0]?.next_seq ?? "1");
+    const safeSeq = Number.isFinite(seq) && seq > 0 ? Math.floor(seq) : 1;
+    return `General Submission ${safeSeq}`;
+  }
+
+  private async resolveSubmissionTitleForBotPayload(input: {
+    userId: string;
+    itemTitles: string[];
+    db?: FastifyInstance["db"] | PoolClient;
+  }): Promise<string> {
+    if (input.itemTitles.length <= 1) {
+      return (input.itemTitles[0] ?? "Untitled").trim().slice(0, 200);
+    }
+    return this.resolveGeneralSubmissionTitleForUser(input.userId, input.db);
   }
 
   private toBotUser(row: UserRow): BotUser {
@@ -709,6 +742,21 @@ export class BotApiService {
     const user = await this.findOrCreateUserByTelegramId(telegramId);
     const auth = toAuthUser(user);
     try {
+      const draftItems = await this.submissionItems.listItems(auth, submissionId);
+      if (draftItems.length > 1) {
+        const nextTitle = await this.resolveSubmissionTitleForBotPayload({
+          userId: user.id,
+          itemTitles: draftItems.map((item) => item.title),
+        });
+        await this.app.db.query(
+          `
+          UPDATE submissions
+          SET title = $2, updated_at = NOW()
+          WHERE id = $1 AND user_id = $3
+          `,
+          [submissionId, nextTitle, user.id],
+        );
+      }
       await this.submissions.submitSubmission(auth, submissionId);
       const items = await this.submissionItems.listItems(auth, submissionId);
       this.app.log.info(
@@ -861,11 +909,15 @@ export class BotApiService {
       });
     }
 
-    const submissionTitle = prepared[0]!.title.slice(0, 200);
-
     const client = await this.app.db.connect();
     try {
       await client.query("BEGIN");
+
+      const submissionTitle = await this.resolveSubmissionTitleForBotPayload({
+        userId: user.id,
+        itemTitles: prepared.map((row) => row.title),
+        db: client,
+      });
 
       const created = await this.submissionsRepository.create(
         {
@@ -1378,48 +1430,85 @@ export class BotApiService {
 
     const result = await this.app.db.query<{
       id: string;
+      title: string;
+      user_id: string;
+      item_count: number;
+      general_seq: number | null;
       status: string;
       totalPoints: string;
       createdAt: string;
       items_json: unknown;
     }>(
       `
-      SELECT
-        s.id,
-        s.status::text AS status,
-        s.total_score::text AS "totalPoints",
-        s.created_at AS "createdAt",
-        COALESCE(items.items_json, '[]'::jsonb) AS items_json
-      FROM submissions s
-      LEFT JOIN LATERAL (
+      WITH base AS (
         SELECT
-          jsonb_agg(
-            jsonb_build_object(
-              'title', si.title,
-              'category', COALESCE(c.name, '—'),
-              'categoryTitle', COALESCE(
-                NULLIF(BTRIM(c.title::text), ''),
-                initcap(regexp_replace(COALESCE(c.name, c.code, 'unknown_category'), '[_-]+', ' ', 'g'))
-              ),
-              'subcategory', COALESCE(NULLIF(BTRIM(cs.label), ''), NULLIF(BTRIM(cs.slug), ''), '—'),
-              'description', COALESCE(NULLIF(BTRIM(si.description), ''), '—'),
-              'link', CASE
-                WHEN si.external_link IS NOT NULL AND BTRIM(si.external_link) <> '' THEN BTRIM(si.external_link)
-                ELSE NULL
-              END,
-              'hasFile', (si.proof_file_url IS NOT NULL AND BTRIM(si.proof_file_url) <> ''),
-              'status', si.status::text,
-              'approvedScore', si.approved_score
-            )
-            ORDER BY si.created_at ASC, si.id ASC
-          ) AS items_json
-        FROM submission_items si
-        LEFT JOIN categories c ON c.id = si.category_id
-        LEFT JOIN category_subcategories cs ON cs.id = si.subcategory_id
-        WHERE si.submission_id = s.id
-      ) items ON true
-      WHERE s.user_id = $1
-      ORDER BY s.created_at DESC
+          s.id,
+          s.user_id,
+          s.title,
+          s.status::text AS status,
+          s.total_score::text AS "totalPoints",
+          s.created_at AS "createdAt",
+          COALESCE(items.items_json, '[]'::jsonb) AS items_json,
+          COALESCE(items.item_count, 0) AS item_count
+        FROM submissions s
+        LEFT JOIN LATERAL (
+          SELECT
+            COUNT(*)::int AS item_count,
+            jsonb_agg(
+              jsonb_build_object(
+                'title', si.title,
+                'category', COALESCE(c.name, '—'),
+                'categoryTitle', COALESCE(
+                  NULLIF(BTRIM(c.title::text), ''),
+                  initcap(regexp_replace(COALESCE(c.name, c.code, 'unknown_category'), '[_-]+', ' ', 'g'))
+                ),
+                'subcategory', COALESCE(NULLIF(BTRIM(cs.label), ''), NULLIF(BTRIM(cs.slug), ''), '—'),
+                'description', COALESCE(NULLIF(BTRIM(si.description), ''), '—'),
+                'link', CASE
+                  WHEN si.external_link IS NOT NULL AND BTRIM(si.external_link) <> '' THEN BTRIM(si.external_link)
+                  ELSE NULL
+                END,
+                'hasFile', (si.proof_file_url IS NOT NULL AND BTRIM(si.proof_file_url) <> ''),
+                'status', si.status::text,
+                'approvedScore', si.approved_score
+              )
+              ORDER BY si.created_at ASC, si.id ASC
+            ) AS items_json
+          FROM submission_items si
+          LEFT JOIN categories c ON c.id = si.category_id
+          LEFT JOIN category_subcategories cs ON cs.id = si.subcategory_id
+          WHERE si.submission_id = s.id
+        ) items ON true
+        WHERE s.user_id = $1
+      ),
+      numbered AS (
+        SELECT
+          b.*,
+          CASE
+            WHEN b.item_count > 1 THEN
+              ROW_NUMBER() OVER (
+                PARTITION BY b.user_id, (b.item_count > 1)
+                ORDER BY b."createdAt" ASC, b.id ASC
+              )
+            ELSE NULL
+          END AS general_seq
+        FROM base b
+      )
+      SELECT
+        n.id,
+        CASE
+          WHEN n.item_count > 1 THEN 'General Submission ' || n.general_seq::text
+          ELSE n.title
+        END AS title,
+        n.user_id,
+        n.item_count,
+        n.general_seq,
+        n.status,
+        n."totalPoints",
+        n."createdAt",
+        n.items_json
+      FROM numbered n
+      ORDER BY n."createdAt" DESC
       LIMIT 10
       `,
       [user.id],
@@ -1474,6 +1563,7 @@ export class BotApiService {
 
     return result.rows.map((row) => ({
       id: row.id,
+      title: row.title,
       items: toSummaryItems(row.items_json),
       status: row.status,
       totalPoints: row.totalPoints,

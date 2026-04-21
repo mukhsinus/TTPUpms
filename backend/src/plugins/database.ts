@@ -13,6 +13,12 @@ export async function registerDatabase(app: FastifyInstance): Promise<void> {
     },
   });
 
+  // Prevent process crashes when idle pooled connections emit transport errors
+  // (e.g. transient network/EADDRNOTAVAIL/timeout from managed DB).
+  pool.on("error", (error) => {
+    app.log.error({ err: error }, "Postgres pool emitted client error");
+  });
+
   try {
     await pool.query("SELECT 1");
   } catch (error) {

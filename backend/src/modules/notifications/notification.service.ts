@@ -11,6 +11,20 @@ export interface SubmissionModerationNotificationInput {
   rejectReason?: string;
 }
 
+export interface SubmissionItemsReviewedSummaryInput {
+  userId: string;
+  submissionId: string;
+  submissionTitle: string | null;
+  finalStatus: "approved" | "rejected" | "needs_revision";
+  overallScore: number;
+  items: Array<{
+    title: string;
+    status: "approved" | "rejected";
+    approvedScore: number | null;
+    comment: string | null;
+  }>;
+}
+
 interface TelegramUserRow {
   telegram_id: string | null;
 }
@@ -57,6 +71,32 @@ export class NotificationService {
     } else {
       text = `Your submission was rejected.\nReason: ${input.rejectReason ?? "—"}`;
     }
+    this.notifyUser(input.userId, text);
+  }
+
+  notifySubmissionItemsReviewedSummary(input: SubmissionItemsReviewedSummaryInput): void {
+    const finalStatusLabel =
+      input.finalStatus === "approved"
+        ? "Approved"
+        : input.finalStatus === "rejected"
+          ? "Rejected"
+          : "Needs revision";
+    const header = input.submissionTitle?.trim()
+      ? `Your submission "${input.submissionTitle.trim()}" has been fully reviewed.`
+      : "Your submission has been fully reviewed.";
+    const lines = input.items.map((item, index) => {
+      const scorePart =
+        item.status === "approved" && item.approvedScore !== null && Number.isFinite(item.approvedScore)
+          ? ` | Score: ${item.approvedScore.toFixed(2)}`
+          : "";
+      const comment = item.comment?.trim() || "—";
+      const statusLabel = item.status === "approved" ? "Approved" : "Rejected";
+      return `${index + 1}. ${item.title} — ${statusLabel}${scorePart}\nComment: ${comment}`;
+    });
+    const overall = Number.isFinite(input.overallScore) ? input.overallScore.toFixed(2) : "0.00";
+    const text = [header, `Final status: ${finalStatusLabel}`, "", ...lines, "", `Overall score: ${overall}`].join(
+      "\n",
+    );
     this.notifyUser(input.userId, text);
   }
 

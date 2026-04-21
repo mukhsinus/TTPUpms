@@ -61,6 +61,7 @@ export interface AdminItemRow {
   status: string;
   reviewed_by: string | null;
   reviewed_at: string | null;
+  category_type: string | null;
   category_code: string | null;
   category_name: string | null;
   category_title: string | null;
@@ -1188,6 +1189,7 @@ export class AdminRepository {
         si.status::text AS status,
         si.reviewed_by::text AS reviewed_by,
         si.reviewed_at AS reviewed_at,
+        c.type::text AS category_type,
         c.code AS category_code,
         c.name AS category_name,
         COALESCE(

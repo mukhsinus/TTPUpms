@@ -482,13 +482,27 @@ export class ReviewsRepository {
           reviewed_by = $5,
           reviewed_at = NOW(),
           updated_at = NOW()
-        FROM submissions s
-        LEFT JOIN categories c ON c.id = si.category_id
-        LEFT JOIN category_subcategories cs ON cs.id = si.subcategory_id
         WHERE si.id = $1
           AND si.submission_id = $6
-          AND s.id = si.submission_id
-        RETURNING ${submissionItemReturningColumns}
+        RETURNING
+          si.id,
+          si.submission_id,
+          (SELECT s.user_id FROM submissions s WHERE s.id = si.submission_id LIMIT 1) AS user_id,
+          (SELECT c.name FROM categories c WHERE c.id = si.category_id LIMIT 1) AS category,
+          (SELECT cs.slug FROM category_subcategories cs WHERE cs.id = si.subcategory_id LIMIT 1) AS subcategory,
+          si.title,
+          si.description,
+          si.proposed_score,
+          si.approved_score,
+          si.reviewer_comment,
+          si.status::text AS status,
+          si.reviewed_by,
+          si.reviewed_at,
+          si.created_at,
+          si.updated_at,
+          si.subcategory_id,
+          coalesce(si.metadata, '{}'::jsonb) AS metadata,
+          (SELECT c.type::text FROM categories c WHERE c.id = si.category_id LIMIT 1) AS category_type
         `,
         [
           input.itemId,

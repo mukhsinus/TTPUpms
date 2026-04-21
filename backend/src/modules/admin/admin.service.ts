@@ -77,6 +77,21 @@ function queueHealthFromPending(pendingCount: number): DashboardQueueHealth {
   return "overloaded";
 }
 
+function isStorageObjectMissingError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const maybeStatusCode = "statusCode" in error ? (error as { statusCode?: unknown }).statusCode : undefined;
+  const maybeStatus = "status" in error ? (error as { status?: unknown }).status : undefined;
+  const statusCode = typeof maybeStatusCode === "string" ? Number(maybeStatusCode) : maybeStatusCode;
+  const status = typeof maybeStatus === "string" ? Number(maybeStatus) : maybeStatus;
+  if (statusCode === 404 || status === 404) {
+    return true;
+  }
+  const message = "message" in error ? (error as { message?: unknown }).message : undefined;
+  return typeof message === "string" && /object not found/i.test(message);
+}
+
 export class AdminService {
   private dashboardCache = new Map<
     string,
@@ -690,6 +705,41 @@ export class AdminService {
     };
   }
 
+  private async resolveSubmissionDisplayTitle(input: {
+    submissionId: string;
+    userId: string;
+    createdAt: string;
+    originalTitle: string;
+    itemCount: number;
+  }): Promise<string> {
+    if (input.itemCount <= 1) {
+      return input.originalTitle;
+    }
+
+    const earlierGeneralResult = await this.app.db.query<{ c: string }>(
+      `
+      SELECT COUNT(*)::text AS c
+      FROM (
+        SELECT s2.id
+        FROM public.submissions s2
+        INNER JOIN public.submission_items si2 ON si2.submission_id = s2.id
+        WHERE s2.user_id = $1
+          AND (
+            s2.created_at < $2::timestamptz
+            OR (s2.created_at = $2::timestamptz AND s2.id::text < $3::text)
+          )
+        GROUP BY s2.id
+        HAVING COUNT(si2.id) > 1
+      ) multi
+      `,
+      [input.userId, input.createdAt, input.submissionId],
+    );
+
+    const seq = Number(earlierGeneralResult.rows[0]?.c ?? "0") + 1;
+    const safeSeq = Number.isFinite(seq) && seq > 0 ? Math.floor(seq) : 1;
+    return `General Submission ${safeSeq}`;
+  }
+
   async getSubmissionDetail(submissionId: string): Promise<{
     submission: Record<string, unknown>;
     items: Record<string, unknown>[];
@@ -725,8 +775,16 @@ export class AdminService {
     ]);
     const itemModeration = this.computeItemModerationSummary(items);
 
+    const resolvedTitle = await this.resolveSubmissionDisplayTitle({
+      submissionId: submission.id,
+      userId: submission.user_id,
+      createdAt: submission.created_at,
+      originalTitle: submission.title,
+      itemCount: items.length,
+    });
+
     return {
-      submission: this.mapSubmissionDetail(submission),
+      submission: this.mapSubmissionDetail(submission, resolvedTitle),
       items: mappedItems,
       itemModeration,
       files: mappedFiles,
@@ -968,11 +1026,11 @@ export class AdminService {
     return this.mapSubmissionDetail(updated);
   }
 
-  private mapSubmissionDetail(row: AdminSubmissionDetailRow) {
+  private mapSubmissionDetail(row: AdminSubmissionDetailRow, titleOverride?: string) {
     return {
       id: row.id,
       userId: row.user_id,
-      title: row.title,
+      title: titleOverride ?? row.title,
       description: row.description,
       status: toModerationStatus(row.db_status),
       workflowStatus: row.db_status,
@@ -992,13 +1050,17 @@ export class AdminService {
   }
 
   /** Prefer signed URLs so private buckets work in the admin browser; fall back to public URL. */
-  private async displayUrlForStoragePath(objectPath: string): Promise<string> {
+  private async displayUrlForStoragePath(objectPath: string): Promise<string | null> {
     const bucket = env.STORAGE_BUCKET;
     const signed = await this.app.supabaseAdmin.storage
       .from(bucket)
       .createSignedUrl(objectPath, env.STORAGE_SIGNED_URL_TTL_SECONDS);
     if (!signed.error && signed.data?.signedUrl) {
       return signed.data.signedUrl;
+    }
+    if (isStorageObjectMissingError(signed.error)) {
+      this.app.log.warn({ objectPath }, "Proof object missing in storage");
+      return null;
     }
     this.app.log.warn({ err: signed.error, objectPath }, "Signed URL failed for admin file; using public URL");
     return this.getPublicUrlForObjectPath(objectPath, bucket);
@@ -1064,6 +1126,7 @@ export class AdminService {
       status: normalizeItemModerationStatus(row.status),
       reviewedById: row.reviewed_by,
       reviewedAt: row.reviewed_at,
+      categoryType: row.category_type,
       categoryCode: row.category_code,
       categoryName: row.category_name,
       categoryTitle,
