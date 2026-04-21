@@ -22,6 +22,7 @@ import {
   type SystemPhasePayload,
 } from "../lib/api";
 import { isAdminPanelRole, normalizeRole } from "../lib/rbac";
+import { onRealtimeUpdate } from "../lib/realtime-events";
 import { useToast } from "../contexts/ToastContext";
 import { EmptyState } from "../components/ui/EmptyState";
 import { DashboardStatsSkeleton, TableSkeleton } from "../components/ui/PageSkeletons";
@@ -192,6 +193,36 @@ export function DashboardPage(): ReactElement {
         setLoading(false);
       }
     })();
+  }, [activityPage, isAdmin, isSuperadmin, loadAdminDashboard]);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      return;
+    }
+    return onRealtimeUpdate((event) => {
+      if (event.type === "new_admin" && !isSuperadmin) {
+        return;
+      }
+      void (async () => {
+        try {
+          setIsRefreshing(true);
+          const tasks: Array<Promise<unknown>> = [
+            loadAdminDashboard(activityPage, true),
+            api.getSystemPhase().then((phase) => setSystemPhase(phase)),
+          ];
+          if (isSuperadmin) {
+            tasks.push(api.getSuperadminDashboard().then((data) => setSuperDashboard(data)));
+          }
+          await Promise.all(tasks);
+          setKpiPulse(true);
+          window.setTimeout(() => setKpiPulse(false), 450);
+        } catch {
+          // Silent realtime refresh; user can still refresh manually on errors.
+        } finally {
+          setIsRefreshing(false);
+        }
+      })();
+    });
   }, [activityPage, isAdmin, isSuperadmin, loadAdminDashboard]);
 
   if (loading) {

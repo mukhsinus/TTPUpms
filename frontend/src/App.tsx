@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, type ReactElement } from "react";
+import { lazy, Suspense, useEffect, useRef, type ReactElement } from "react";
 import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { AdminLayout } from "./components/AdminLayout";
 import { AppLayout } from "./components/AppLayout";
@@ -7,6 +7,7 @@ import { RequireAuth } from "./components/RequireAuth";
 import { RequireRole } from "./components/RequireRole";
 import { RoleGuard } from "./components/guards/RoleGuard";
 import { api } from "./lib/api";
+import { emitRealtimeUpdate } from "./lib/realtime-events";
 import { isAdminPanelRole } from "./lib/rbac";
 import { LoginPage } from "./pages/LoginPage";
 
@@ -81,6 +82,15 @@ function SubmissionDetailEntry(): ReactElement {
 
 function AuthenticatedShell({ onLogout }: { onLogout: () => void }): ReactElement {
   const user = api.getSessionUser();
+  const countersRef = useRef<{
+    submissionsTotal: number | null;
+    studentsTotal: number | null;
+    adminsTotal: number | null;
+  }>({
+    submissionsTotal: null,
+    studentsTotal: null,
+    adminsTotal: null,
+  });
   useEffect(() => {
     if (!isAdminPanelRole(user)) {
       return;
@@ -114,6 +124,62 @@ function AuthenticatedShell({ onLogout }: { onLogout: () => void }): ReactElemen
     const t = globalThis.setTimeout(warm, 120);
     return () => globalThis.clearTimeout(t);
   }, [user]);
+
+  useEffect(() => {
+    if (!isAdminPanelRole(user)) {
+      countersRef.current = { submissionsTotal: null, studentsTotal: null, adminsTotal: null };
+      return;
+    }
+    let cancelled = false;
+    const poll = async (isInitial: boolean): Promise<void> => {
+      try {
+        const [submissions, students, admins] = await Promise.all([
+          api.getAdminSubmissions({ page: 1, pageSize: 1, forceRefresh: true }),
+          api.getAdminStudents({ page: 1, pageSize: 1 }),
+          user?.role === "superadmin" ? api.getSuperadminAdmins({ page: 1, pageSize: 1 }) : Promise.resolve(null),
+        ]);
+        if (cancelled) return;
+
+        const previous = countersRef.current;
+        const next = {
+          submissionsTotal: submissions.total,
+          studentsTotal: students.pagination.total,
+          adminsTotal: admins?.pagination.total ?? previous.adminsTotal,
+        };
+
+        if (!isInitial) {
+          if (previous.submissionsTotal !== null && next.submissionsTotal > previous.submissionsTotal) {
+            emitRealtimeUpdate("new_submission");
+          }
+          if (previous.studentsTotal !== null && next.studentsTotal > previous.studentsTotal) {
+            emitRealtimeUpdate("new_student");
+          }
+          if (
+            user?.role === "superadmin" &&
+            previous.adminsTotal !== null &&
+            next.adminsTotal !== null &&
+            next.adminsTotal > previous.adminsTotal
+          ) {
+            emitRealtimeUpdate("new_admin");
+          }
+        }
+
+        countersRef.current = next;
+      } catch {
+        // Ignore polling errors; UI keeps using manual refresh and user actions.
+      }
+    };
+
+    void poll(true);
+    const timer = globalThis.setInterval(() => {
+      void poll(false);
+    }, 15_000);
+
+    return () => {
+      cancelled = true;
+      globalThis.clearInterval(timer);
+    };
+  }, [user?.role, user?.userId]);
 
   if (isAdminPanelRole(user)) {
     return (

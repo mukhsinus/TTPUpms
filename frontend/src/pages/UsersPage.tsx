@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { Users } from "lucide-react";
 import { api, type AdminStudentDegree, type AdminStudentDetailPayload, type AdminStudentListItem } from "../lib/api";
+import { onRealtimeUpdate } from "../lib/realtime-events";
 import { normalizeStudentId } from "../lib/student-id";
 import { useToast } from "../contexts/ToastContext";
 import { Button } from "../components/ui/Button";
@@ -10,7 +11,7 @@ import { Input } from "../components/ui/Input";
 import { Table } from "../components/ui/Table";
 import { TableSkeleton } from "../components/ui/PageSkeletons";
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 7;
 const SEARCH_DEBOUNCE_MS = 300;
 
 function formatDate(value: string | null | undefined): string {
@@ -18,6 +19,13 @@ function formatDate(value: string | null | undefined): string {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "—";
   return d.toLocaleString();
+}
+
+function formatDateOnly(value: string | null | undefined): string {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString();
 }
 
 function degreeLabel(v: AdminStudentDegree | null): string {
@@ -121,6 +129,28 @@ export function UsersPage(): ReactElement {
   }, [page, search, faculty, degree, sort]);
 
   useEffect(() => {
+    return onRealtimeUpdate((event) => {
+      if (event.type !== "new_student") return;
+      void (async () => {
+        try {
+          const data = await api.getAdminStudents({
+            page,
+            pageSize: PAGE_SIZE,
+            search: search || undefined,
+            faculty: faculty.trim() || undefined,
+            degree: degree || undefined,
+            sort,
+          });
+          setRows(data.items);
+          setTotal(data.pagination.total);
+        } catch {
+          // Silent realtime refresh.
+        }
+      })();
+    });
+  }, [page, search, faculty, degree, sort]);
+
+  useEffect(() => {
     if (!selectedStudentId) {
       setSelected(null);
       return;
@@ -174,7 +204,7 @@ export function UsersPage(): ReactElement {
 
   return (
     <section className="dashboard-stack">
-      <Card title="Students" subtitle="Students registered through Telegram bot.">
+      <Card>
         <div className="table-toolbar moderation-queue-toolbar">
           <Input
             value={searchInput}
@@ -213,7 +243,6 @@ export function UsersPage(): ReactElement {
           >
             <option value="newest">Newest</option>
             <option value="oldest">Oldest</option>
-            <option value="name">Name</option>
           </select>
           <Button
             type="button"
@@ -250,15 +279,13 @@ export function UsersPage(): ReactElement {
                 <tr>
                   <th>Full Name</th>
                   <th>Telegram username</th>
-                  <th>Telegram ID</th>
                   <th>Degree</th>
                   <th>Faculty</th>
                   <th>Student ID</th>
                   <th>Registered</th>
-                  <th>Last activity</th>
-                  <th>Achievements</th>
-                  <th>Approved score</th>
-                  <th>Actions</th>
+                  <th>Items</th>
+                  <th>Score</th>
+                  <th className="students-actions-head">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -270,25 +297,26 @@ export function UsersPage(): ReactElement {
                   >
                     <td>{row.fullName}</td>
                     <td>{row.telegramUsername ?? "—"}</td>
-                    <td>{row.telegramId ?? "—"}</td>
                     <td>{degreeLabel(row.degree)}</td>
                     <td>{row.faculty ?? "—"}</td>
                     <td>{row.studentId ?? "—"}</td>
-                    <td>{formatDate(row.registrationDate)}</td>
-                    <td>{formatDate(row.lastActivityAt)}</td>
+                    <td>{formatDateOnly(row.registrationDate)}</td>
                     <td>{row.totalAchievementsSubmitted}</td>
                     <td>{row.totalApprovedScore.toFixed(2)}</td>
-                    <td>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setSelectedStudentId(row.id);
-                        }}
-                      >
-                        Edit
-                      </Button>
+                    <td className="students-action-cell">
+                      <div className="students-action-cell-inner">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="admin-review-btn"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setSelectedStudentId(row.id);
+                          }}
+                        >
+                          Edit
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -298,7 +326,7 @@ export function UsersPage(): ReactElement {
               <span className="muted">
                 Page {page} of {totalPages} ({total} students)
               </span>
-              <div className="pagination-actions">
+              <div className="pagination-actions admin-pagination-actions students-pagination-actions">
                 <Button type="button" variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
                   Prev
                 </Button>
@@ -367,7 +395,7 @@ export function UsersPage(): ReactElement {
               />
             </label>
             <div className="row-between">
-              <p className="muted">Total submissions: {selected.totalSubmissions} · Achievements: {selected.totalAchievementsSubmitted}</p>
+              <p className="muted">Total submissions: {selected.totalSubmissions} · Items: {selected.totalAchievementsSubmitted}</p>
               <p className="muted">
                 Profile completed: {selected.isProfileCompleted ? "Yes" : "No"} · Approved score: {selected.totalApprovedScore.toFixed(2)}
               </p>

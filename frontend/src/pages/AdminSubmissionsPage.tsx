@@ -20,6 +20,7 @@ import { Table } from "../components/ui/Table";
 import { TableSkeleton } from "../components/ui/PageSkeletons";
 import { SearchAutocomplete, type SearchAutocompleteSuggestion } from "../components/ui/SearchAutocomplete";
 import { isLikelyStudentId, normalizeStudentId } from "../lib/student-id";
+import { onRealtimeUpdate } from "../lib/realtime-events";
 
 const PAGE_SIZE = 7;
 const SEARCH_DEBOUNCE_MS = 320;
@@ -232,7 +233,7 @@ export function AdminSubmissionsPage(): ReactElement {
     return rows.map((item, index) => mapSuggestion(item, index));
   }, [mapSuggestion]);
 
-  const load = useCallback(async (): Promise<void> => {
+  const load = useCallback(async (forceRefresh = false): Promise<void> => {
     const runId = requestSeq.current + 1;
     requestSeq.current = runId;
     const hasPreviousData = items.length > 0 || total > 0;
@@ -251,6 +252,7 @@ export function AdminSubmissionsPage(): ReactElement {
         search: debouncedSearch || undefined,
         dateFrom: dateRange.dateFrom,
         dateTo: dateRange.dateTo,
+        forceRefresh,
       });
       if (requestSeq.current !== runId) {
         return;
@@ -272,6 +274,13 @@ export function AdminSubmissionsPage(): ReactElement {
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  useEffect(() => {
+    return onRealtimeUpdate((event) => {
+      if (event.type !== "new_submission") return;
+      void load(true);
+    });
   }, [load]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));

@@ -877,6 +877,30 @@ body {
   border: none;
 }
 
+/* Unified admin panel button skin */
+.dashboard-shell .ui-button {
+  background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+  color: #ffffff;
+  border: 1px solid transparent;
+  box-shadow: 0 8px 18px rgba(99, 102, 241, 0.22);
+}
+
+.dashboard-shell .ui-button:hover:not(:disabled) {
+  filter: brightness(1.03);
+}
+
+.dashboard-shell .ui-button:disabled {
+  background: #f1f5f9;
+  color: #94a3b8;
+  border-color: #e2e8f0;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.dashboard-shell .ui-button:disabled:hover {
+  filter: none;
+}
+
 .muted {
   color: #64748b;
 }
@@ -1614,15 +1638,15 @@ body {
   border-radius: 999px;
   padding: 0 14px;
   height: 36px;
-  background: #ede9fe;
-  color: #4c1d95;
-  border: 1px solid #ddd6fe;
-  box-shadow: none;
+  min-width: 96px;
+  background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+  color: #ffffff;
+  border: 1px solid transparent;
+  box-shadow: 0 8px 18px rgba(99, 102, 241, 0.22);
 }
 
 .admin-review-btn:hover:not(:disabled) {
-  background: #e9d5ff;
-  transform: none;
+  filter: brightness(1.03);
 }
 
 .admin-pagination {
@@ -1636,6 +1660,7 @@ body {
   height: 36px;
   border-radius: 999px;
   padding: 0 14px;
+  min-width: 96px;
   background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
   border: 1px solid transparent;
   color: #ffffff;
@@ -1657,6 +1682,24 @@ body {
 .admin-pagination-actions .ui-button:disabled:hover {
   filter: none;
   transform: none;
+}
+
+.students-actions-head {
+  text-align: right;
+}
+
+.students-action-cell {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.students-action-cell-inner {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.students-pagination-actions {
+  margin-right: 10px;
 }
 
 @media (max-width: 1100px) {

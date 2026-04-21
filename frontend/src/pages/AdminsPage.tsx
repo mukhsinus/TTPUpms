@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { normalizeRole } from "../lib/rbac";
 import { api, type SuperadminAdminDetailPayload, type SuperadminAdminListPayload } from "../lib/api";
+import { onRealtimeUpdate } from "../lib/realtime-events";
 import { useToast } from "../contexts/ToastContext";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -47,6 +48,13 @@ export function AdminsPage(): ReactElement {
   useEffect(() => {
     void load();
   }, [page, pageSize]);
+
+  useEffect(() => {
+    return onRealtimeUpdate((event) => {
+      if (event.type !== "new_admin") return;
+      void load();
+    });
+  }, [page, pageSize, search]);
 
   const openDetail = async (adminId: string): Promise<void> => {
     setDrawerAdminId(adminId);
