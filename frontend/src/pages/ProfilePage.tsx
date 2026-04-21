@@ -1,6 +1,6 @@
 import type { TFunction } from "i18next";
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
-import { Eye, EyeOff, ShieldCheck, UserCircle2 } from "lucide-react";
+import { Activity, Check, Clock3, Eye, EyeOff, Mail, ShieldCheck, User, UserCircle2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { api, type AdminProfilePayload } from "../lib/api";
@@ -53,6 +53,12 @@ function actionLabel(action: AdminProfilePayload["recentActions"][number]["actio
     return "Student profile updated";
   }
   return action.replaceAll("_", " ");
+}
+
+function actionTone(action: AdminProfilePayload["recentActions"][number]["action"]): "approved" | "rejected" | "neutral" {
+  if (action.includes("rejected")) return "rejected";
+  if (action.includes("approved")) return "approved";
+  return "neutral";
 }
 
 export function ProfilePage(): ReactElement {
@@ -172,26 +178,42 @@ export function ProfilePage(): ReactElement {
         </Card>
       ) : null}
 
-      <Card title={t("identity")}>
-        <div className="profile-account-grid">
-          <div className="profile-identity">
+      <Card className="profile-top-card">
+        <div className="profile-top-grid-premium">
+          <section className="profile-pane">
+            <div className="profile-pane-head">
+              <span className="profile-pane-icon" aria-hidden>
+                <User size={14} />
+              </span>
+              <div>
+                <h3>{t("identity")}</h3>
+                <p>{t("subtitle", { defaultValue: "Update your personal information" })}</p>
+              </div>
+            </div>
+
             <label className="item-review-field profile-identity-field-short">
               <span>{t("fullName")}</span>
-              <Input
-                value={identityForm.fullName}
-                onChange={(e) => setIdentityForm((prev) => ({ ...prev, fullName: e.target.value }))}
-                placeholder={t("placeholderFullName")}
-                aria-label={t("fullName")}
-              />
+              <div className="profile-input-with-icon">
+                <User size={14} aria-hidden />
+                <Input
+                  value={identityForm.fullName}
+                  onChange={(e) => setIdentityForm((prev) => ({ ...prev, fullName: e.target.value }))}
+                  placeholder={t("placeholderFullName")}
+                  aria-label={t("fullName")}
+                />
+              </div>
             </label>
             <label className="item-review-field profile-identity-field-short">
               <span>{t("email")}</span>
-              <Input
-                value={identityForm.email}
-                onChange={(e) => setIdentityForm((prev) => ({ ...prev, email: e.target.value }))}
-                placeholder={t("placeholderEmail")}
-                aria-label={t("email")}
-              />
+              <div className="profile-input-with-icon">
+                <Mail size={14} aria-hidden />
+                <Input
+                  value={identityForm.email}
+                  onChange={(e) => setIdentityForm((prev) => ({ ...prev, email: e.target.value }))}
+                  placeholder={t("placeholderEmail")}
+                  aria-label={t("email")}
+                />
+              </div>
             </label>
             {!emailValid ? <p className="error">{t("emailInvalid")}</p> : null}
             {emailChanged ? (
@@ -260,57 +282,106 @@ export function ProfilePage(): ReactElement {
                 </Button>
               ) : null}
             </div>
-          </div>
+          </section>
 
-          <aside className="profile-security-column" aria-label={t("security")}>
-            <div className="profile-security-panel">
-              <div className="profile-security-panel-row profile-security-panel-row-top">
-                <div className="profile-kv">
-                  <span>{t("password")}</span>
-                  <strong>{t("passwordMasked")}</strong>
-                </div>
-              </div>
-              <div className="profile-security-panel-row profile-security-panel-row-bottom">
-                <div className="profile-security-line muted">
-                  <ShieldCheck size={14} aria-hidden />
-                  <span>{t("passwordHintLine")}</span>
-                </div>
+          <section className="profile-pane profile-pane-security" aria-label={t("security")}>
+            <div className="profile-pane-head">
+              <span className="profile-pane-icon" aria-hidden>
+                <ShieldCheck size={14} />
+              </span>
+              <div>
+                <h3>{t("changePassword")}</h3>
+                <p>{t("security", { defaultValue: "Keep your account secure" })}</p>
               </div>
             </div>
-            <Button
-              type="button"
-              variant="primary"
-              className="profile-primary-action profile-primary-action-wide"
-              onClick={() => setShowPasswordModal(true)}
-            >
+
+            <label className="item-review-field">
+              <span>{t("password")}</span>
+              <div className="password-input-wrap profile-password-preview">
+                <Input type={passwordVisible.current ? "text" : "password"} value="••••••••••••" readOnly aria-label={t("password")} />
+                <button
+                  type="button"
+                  className="password-visibility-btn"
+                  aria-label={passwordVisible.current ? t("hidePassword") : t("showPassword")}
+                  onClick={() => setPasswordVisible((prev) => ({ ...prev, current: !prev.current }))}
+                >
+                  {passwordVisible.current ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </label>
+
+            <div className="profile-security-hint">
+              <ShieldCheck size={14} aria-hidden />
+              <span>{t("passwordHintLine")}</span>
+            </div>
+
+            <Button type="button" variant="primary" className="profile-primary-action profile-primary-action-wide" onClick={() => setShowPasswordModal(true)}>
               {t("changePassword")}
             </Button>
-          </aside>
+          </section>
         </div>
       </Card>
 
-      <Card title={t("performanceStats")}>
-        <div className="profile-stats-grid">
+      <Card className="profile-stats-panel">
+        <div className="profile-panel-headline">
+          <div className="profile-pane-head">
+            <span className="profile-pane-icon" aria-hidden>
+              <Activity size={14} />
+            </span>
+            <div>
+              <h3>{t("performanceStats")}</h3>
+              <p>{t("subtitle", { defaultValue: "Your moderation performance overview" })}</p>
+            </div>
+          </div>
+        </div>
+        <div className="profile-stats-grid profile-stats-grid-premium">
           <div className="profile-stat-card">
+            <span className="profile-stat-icon profile-stat-icon-green" aria-hidden>
+              <Check size={14} />
+            </span>
             <span>{t("approvals")}</span>
             <strong>{payload.stats.approvals}</strong>
+            <small>Total approved</small>
           </div>
           <div className="profile-stat-card">
+            <span className="profile-stat-icon profile-stat-icon-red" aria-hidden>
+              <X size={14} />
+            </span>
             <span>{t("rejects")}</span>
             <strong>{payload.stats.rejects}</strong>
+            <small>Total rejected</small>
           </div>
           <div className="profile-stat-card">
+            <span className="profile-stat-icon profile-stat-icon-blue" aria-hidden>
+              <Clock3 size={14} />
+            </span>
             <span>{t("avgReview")}</span>
             <strong>{t("avgReviewMinutes", { count: Math.round(payload.stats.avgReviewMinutes) })}</strong>
+            <small>Average time</small>
           </div>
           <div className="profile-stat-card">
+            <span className="profile-stat-icon profile-stat-icon-purple" aria-hidden>
+              <Activity size={14} />
+            </span>
             <span>{t("actions7d")}</span>
             <strong>{payload.stats.actions7d}</strong>
+            <small>Total actions</small>
           </div>
         </div>
       </Card>
 
-      <Card title={t("recentActions")}>
+      <Card className="profile-recent-card">
+        <div className="profile-panel-headline">
+          <div className="profile-pane-head">
+            <span className="profile-pane-icon" aria-hidden>
+              <Clock3 size={14} />
+            </span>
+            <div>
+              <h3>{t("recentActions")}</h3>
+              <p>{t("noRecentActionsSubtitle", { defaultValue: "Your latest moderation activities" })}</p>
+            </div>
+          </div>
+        </div>
         {payload.recentActions.length === 0 ? (
           <EmptyState
             icon={UserCircle2}
@@ -327,10 +398,14 @@ export function ProfilePage(): ReactElement {
                 className="profile-activity-row"
                 onClick={() => row.submissionId && navigate(`/submissions/${row.submissionId}`)}
               >
-                <div>
-                  <strong>{actionLabel(row.action, t)}</strong>{" "}
-                  {row.studentId ? <span className="muted">{t("studentWithId", { id: row.studentId })}</span> : null}
-                  {row.submissionTitle ? <span className="muted"> — {row.submissionTitle}</span> : null}
+                <div className="profile-activity-row-main">
+                  <span className={`profile-activity-pill profile-activity-pill-${actionTone(row.action)}`}>
+                    {actionLabel(row.action, t)}
+                  </span>
+                  <span className="profile-activity-desc">
+                    {row.studentId ? <span>{t("studentWithId", { id: row.studentId })}</span> : null}
+                    {row.submissionTitle ? <span> — {row.submissionTitle}</span> : null}
+                  </span>
                 </div>
                 <span className="muted">{relativeTime(row.createdAt, t)}</span>
               </button>

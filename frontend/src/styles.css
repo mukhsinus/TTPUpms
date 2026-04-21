@@ -2015,7 +2015,8 @@ body {
 }
 
 .profile-identity-field-short {
-  max-width: 360px;
+  max-width: none;
+  width: 100%;
 }
 
 .profile-security-column {
@@ -2280,6 +2281,211 @@ body {
   color: #64748b;
 }
 
+/* Profile page - reference style */
+.profile-top-card {
+  padding: 18px 20px;
+}
+
+.profile-top-grid-premium {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px;
+}
+
+.profile-pane {
+  display: grid;
+  gap: 12px;
+}
+
+.profile-pane-security {
+  border-left: 1px solid #edf2f7;
+  padding-left: 20px;
+}
+
+.profile-pane-head {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.profile-pane-head h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+  color: #0f172a;
+}
+
+.profile-pane-head p {
+  margin: 2px 0 0;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.profile-pane-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #334155;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.profile-input-with-icon {
+  position: relative;
+}
+
+.profile-input-with-icon > svg {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #94a3b8;
+  pointer-events: none;
+}
+
+.profile-input-with-icon .ui-input {
+  padding-left: 36px;
+}
+
+.profile-password-preview .ui-input {
+  background: #ffffff;
+}
+
+.profile-security-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #64748b;
+  font-size: 0.9rem;
+  border: 1px solid #edf2f7;
+  border-radius: 10px;
+  background: #fbfdff;
+  padding: 11px 12px;
+}
+
+.profile-stats-panel {
+  padding: 16px 18px;
+}
+
+.profile-panel-headline {
+  margin-bottom: 10px;
+}
+
+.profile-stats-grid-premium {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.profile-stat-card {
+  border: 1px solid #edf2f7;
+  border-radius: 12px;
+  padding: 12px;
+  background: #ffffff;
+  display: grid;
+  gap: 4px;
+}
+
+.profile-stat-card small {
+  color: #64748b;
+  font-size: 0.8rem;
+}
+
+.profile-stat-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.profile-stat-icon-green {
+  background: #ecfdf3;
+  color: #15803d;
+}
+
+.profile-stat-icon-red {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.profile-stat-icon-blue {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.profile-stat-icon-purple {
+  background: #f5f3ff;
+  color: #6d28d9;
+}
+
+.profile-recent-card {
+  padding: 16px 18px;
+}
+
+.profile-activity-list {
+  gap: 8px;
+}
+
+.profile-activity-row {
+  border: 1px solid #edf2f7;
+  border-radius: 10px;
+  padding: 9px 12px;
+  background: #fff;
+  align-items: center;
+}
+
+.profile-activity-row-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.profile-activity-desc {
+  color: #334155;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-activity-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1;
+  border: 1px solid transparent;
+}
+
+.profile-activity-pill-approved {
+  background: #ecfdf3;
+  color: #15803d;
+  border-color: #bbf7d0;
+}
+
+.profile-activity-pill-rejected {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+.profile-activity-pill-neutral {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+}
+
 @media (max-width: 900px) {
   .ops-main-grid {
     grid-template-columns: 1fr;
@@ -2304,6 +2510,21 @@ body {
 
   .profile-security-column {
     width: 100%;
+  }
+
+  .profile-top-grid-premium {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-pane-security {
+    border-left: none;
+    padding-left: 0;
+    border-top: 1px solid #edf2f7;
+    padding-top: 12px;
+  }
+
+  .profile-stats-grid-premium {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
