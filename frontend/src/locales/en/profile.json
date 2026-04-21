@@ -36,7 +36,7 @@
   "passwordHintLine": "Use at least 10 characters with mixed letters, numbers, and symbols.",
   "approveSubmissions": "Approve submissions",
   "rejectSubmissions": "Reject submissions",
-  "exportCsv": "Export CSV",
+  "exportCsv": "Export PDF report",
   "manageAdmins": "Manage admins",
   "viewAuditLogs": "View audit logs",
   "securityApprovals": "Security approvals",

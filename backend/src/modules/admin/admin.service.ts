@@ -450,7 +450,11 @@ export class AdminService {
     return this.mapStudentDetailRow(row);
   }
 
-  async updateStudentById(studentId: string, body: AdminUpdateStudentBody): Promise<{
+  async updateStudentById(
+    studentId: string,
+    body: AdminUpdateStudentBody,
+    actor: { actorUserId: string },
+  ): Promise<{
     id: string;
     fullName: string;
     telegramUsername: string | null;
@@ -467,12 +471,43 @@ export class AdminService {
     totalSubmissions: number;
     totalApprovedScore: number;
   }> {
+    const before = await this.repository.findStudentById(studentId);
+    if (!before) {
+      throw new ServiceError(404, "Student not found");
+    }
     await this.repository.updateStudentById(studentId, body);
     const row = await this.repository.findStudentById(studentId);
     if (!row) {
       throw new ServiceError(404, "Student not found");
     }
     this.invalidateReadCaches();
+    const oldValues = {
+      fullName: before.student_full_name ?? before.full_name,
+      degree: before.degree,
+      faculty: before.faculty,
+      studentId: before.student_id,
+    };
+    const newValues = {
+      fullName: row.student_full_name ?? row.full_name,
+      degree: row.degree,
+      faculty: row.faculty,
+      studentId: row.student_id,
+    };
+    const changedKeys = Object.keys(newValues).filter(
+      (key) => oldValues[key as keyof typeof oldValues] !== newValues[key as keyof typeof newValues],
+    );
+    if (changedKeys.length > 0) {
+      await this.audit.insert({
+        actorUserId: actor.actorUserId,
+        targetUserId: studentId,
+        entityTable: "users",
+        entityId: studentId,
+        action: "student_profile_updated",
+        oldValues,
+        newValues,
+        metadata: { changedKeys },
+      });
+    }
     return this.mapStudentDetailRow(row);
   }
 
@@ -876,6 +911,19 @@ export class AdminService {
         targetUserId,
         entityTable: "submissions",
         entityId: submissionId,
+        action: "moderation_submission_approved",
+        oldValues: { status: oldDbStatus },
+        newValues: {
+          status: "approved",
+          scoreProvided: body.score ?? null,
+          lineCount,
+        },
+      });
+      await this.audit.insert({
+        actorUserId: actor.actorUserId,
+        targetUserId,
+        entityTable: "submissions",
+        entityId: submissionId,
         action: "admin_moderation_approve",
         oldValues: { status: oldDbStatus },
         newValues: {
@@ -1003,6 +1051,15 @@ export class AdminService {
     }
 
     try {
+      await this.audit.insert({
+        actorUserId: actor.actorUserId,
+        targetUserId,
+        entityTable: "submissions",
+        entityId: submissionId,
+        action: "moderation_submission_rejected",
+        oldValues: { status: oldDbStatus },
+        newValues: { status: "rejected", reason: body.reason ?? null },
+      });
       await this.audit.insert({
         actorUserId: actor.actorUserId,
         targetUserId,

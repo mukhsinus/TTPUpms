@@ -5,11 +5,11 @@ import { ServiceError } from "../../utils/service-error";
 import type { SuperadminService } from "./superadmin.service";
 import {
   superadminAdminIdParamsSchema,
+  superadminActivityPdfQuerySchema,
   superadminAssignBodySchema,
   superadminAuditQuerySchema,
   superadminListQuerySchema,
   superadminNoteBodySchema,
-  superadminReportQuerySchema,
   superadminResolveSecurityBodySchema,
   superadminResetPasswordBodySchema,
   superadminRoleBodySchema,
@@ -215,49 +215,17 @@ export class SuperadminController {
     }
   };
 
-  exportModerationPerformance = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
-    try {
-      const query = superadminReportQuerySchema.parse(request.query);
-      const csv = await this.service.exportModerationPerformanceCsv(query.from, query.to);
-      reply.type("text/csv; charset=utf-8");
-      reply.header("Content-Disposition", 'attachment; filename="moderation-performance.csv"');
-      reply.send(csv);
-    } catch (error) {
-      this.handleError(reply, error);
+  exportActivityPdf = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!request.user) {
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
+      return;
     }
-  };
-
-  exportAdminProductivity = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     try {
-      const query = superadminReportQuerySchema.parse(request.query);
-      const csv = await this.service.exportAdminProductivityCsv(query.from, query.to);
-      reply.type("text/csv; charset=utf-8");
-      reply.header("Content-Disposition", 'attachment; filename="admin-productivity.csv"');
-      reply.send(csv);
-    } catch (error) {
-      this.handleError(reply, error);
-    }
-  };
-
-  exportApprovalSummary = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
-    try {
-      const query = superadminReportQuerySchema.parse(request.query);
-      const csv = await this.service.exportApprovalSummaryCsv(query.from, query.to);
-      reply.type("text/csv; charset=utf-8");
-      reply.header("Content-Disposition", 'attachment; filename="approval-summary.csv"');
-      reply.send(csv);
-    } catch (error) {
-      this.handleError(reply, error);
-    }
-  };
-
-  exportAudit = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
-    try {
-      const query = superadminReportQuerySchema.parse(request.query);
-      const csv = await this.service.exportAuditCsv(query.from, query.to);
-      reply.type("text/csv; charset=utf-8");
-      reply.header("Content-Disposition", 'attachment; filename="audit-export.csv"');
-      reply.send(csv);
+      const query = superadminActivityPdfQuerySchema.parse(request.query);
+      const result = await this.service.exportActivityReportPdf(query, request.user.id);
+      reply.type("application/pdf");
+      reply.header("Content-Disposition", `attachment; filename="${result.filename}"`);
+      reply.send(result.buffer);
     } catch (error) {
       this.handleError(reply, error);
     }

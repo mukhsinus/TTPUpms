@@ -14,6 +14,7 @@ import {
 import { ServiceError } from "../../utils/service-error";
 import type { AuthUser } from "../../types/auth-user";
 import { isAdminPanelOperator } from "../../utils/admin-roles";
+import type { AdminActivityAction } from "../audit/admin-activity";
 
 export class ReviewsService {
   constructor(
@@ -91,14 +92,7 @@ export class ReviewsService {
       assertValidTransition("submitted", "review");
     }
 
-    this.log.info({
-      event: "scoring_applied",
-      submissionId,
-      itemId,
-      score: finalScore,
-      scoringKind: item.categoryType === "manual" ? "expert" : item.categoryType,
-      source: "reviewer",
-    });
+    this.log.info({ event: "scoring_applied", submissionId, itemId, score: finalScore });
 
     const reviewedItem = await this.repository.reviewSubmissionItemLocked({
       submissionId,
@@ -108,6 +102,56 @@ export class ReviewsService {
       comment: body.comment,
       decision: body.decision,
     });
+
+    const moderationAction: AdminActivityAction = body.decision === "approved"
+      ? "moderation_item_approved"
+      : "moderation_item_rejected";
+    const oldValues: Record<string, unknown> = {
+      status: item.status,
+      approvedScore: item.approvedScore,
+      reviewerComment: item.reviewerComment,
+    };
+    const newValues: Record<string, unknown> = {
+      status: reviewedItem.status,
+      approvedScore: reviewedItem.approvedScore,
+      reviewerComment: reviewedItem.reviewerComment,
+    };
+    const metadata: Record<string, unknown> = {
+      submissionId,
+      category: reviewedItem.category,
+      categoryType: reviewedItem.categoryType,
+    };
+    const scoreChanged = item.approvedScore !== reviewedItem.approvedScore;
+    const commentChanged = (item.reviewerComment ?? null) !== (reviewedItem.reviewerComment ?? null);
+    const followUpActions: AdminActivityAction[] = [];
+    if (scoreChanged) {
+      followUpActions.push("moderation_item_score_changed");
+    }
+    if (commentChanged) {
+      followUpActions.push("moderation_item_comment_changed");
+    }
+    await this.audit.insert({
+      actorUserId: user.id,
+      targetUserId: submission.userId,
+      entityTable: "submission_items",
+      entityId: itemId,
+      action: moderationAction,
+      oldValues,
+      newValues,
+      metadata,
+    });
+    for (const action of followUpActions) {
+      await this.audit.insert({
+        actorUserId: user.id,
+        targetUserId: submission.userId,
+        entityTable: "submission_items",
+        entityId: itemId,
+        action,
+        oldValues,
+        newValues,
+        metadata,
+      });
+    }
 
     await this.autoFinalizeSubmissionIfReady(user, submissionId);
     return reviewedItem;
@@ -159,7 +203,7 @@ export class ReviewsService {
       targetUserId: submission.userId,
       entityTable: "submissions",
       entityId: submissionId,
-      action: "review_completed",
+      action: body.decision === "approved" ? "moderation_submission_approved" : "moderation_submission_rejected",
       newValues: {
         decision: body.decision,
         totalPoints: updated.totalPoints,
@@ -254,7 +298,7 @@ export class ReviewsService {
         targetUserId: current.userId,
         entityTable: "submissions",
         entityId: submissionId,
-        action: "review_completed",
+        action: decision === "approved" ? "moderation_submission_approved" : "moderation_submission_rejected",
         newValues: {
           decision,
           totalPoints: finalized.totalPoints,

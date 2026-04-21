@@ -282,39 +282,12 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     );
 
     r.get(
-      "/reports/moderation-performance.csv",
+      "/reports/activity.pdf",
       {
         preHandler: [requireSuperadmin],
         config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
       },
-      superadminController.exportModerationPerformance,
-    );
-
-    r.get(
-      "/reports/admin-productivity.csv",
-      {
-        preHandler: [requireSuperadmin],
-        config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
-      },
-      superadminController.exportAdminProductivity,
-    );
-
-    r.get(
-      "/reports/approval-summary.csv",
-      {
-        preHandler: [requireSuperadmin],
-        config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
-      },
-      superadminController.exportApprovalSummary,
-    );
-
-    r.get(
-      "/reports/audit-export.csv",
-      {
-        preHandler: [requireSuperadmin],
-        config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
-      },
-      superadminController.exportAudit,
+      superadminController.exportActivityPdf,
     );
   });
 }

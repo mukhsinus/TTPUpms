@@ -3,7 +3,17 @@ import type { FastifyInstance } from "fastify";
 import type { AuditLogRepository } from "../audit/audit-log.repository";
 import type { NotificationService } from "../notifications/notification.service";
 import { ServiceError } from "../../utils/service-error";
-import type { SuperadminAuditQuery, SuperadminListQuery, SuperadminSecurityQuery } from "./superadmin.schema";
+import type {
+  SuperadminActivityPdfQuery,
+  SuperadminAuditQuery,
+  SuperadminListQuery,
+  SuperadminSecurityQuery,
+} from "./superadmin.schema";
+import {
+  ActivityReportPdfService,
+  buildActivityPdfFilename,
+  normalizeDisplayDateTime,
+} from "./activity-report-pdf.service";
 import { SuperadminRepository } from "./superadmin.repository";
 
 function toNum(value: string | null | undefined): number {
@@ -11,21 +21,9 @@ function toNum(value: string | null | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function toCsv(rows: Array<Record<string, string | number | null>>): string {
-  if (rows.length === 0) {
-    return "";
-  }
-  const headers = Object.keys(rows[0]);
-  const escapeCell = (value: string | number | null): string => `"${String(value ?? "").replace(/"/g, '""')}"`;
-  const lines = [headers.join(",")];
-  for (const row of rows) {
-    lines.push(headers.map((h) => escapeCell(row[h] ?? null)).join(","));
-  }
-  return lines.join("\n");
-}
-
 export class SuperadminService {
   private readonly repository: SuperadminRepository;
+  private readonly pdfService: ActivityReportPdfService;
 
   constructor(
     private readonly app: FastifyInstance,
@@ -33,6 +31,7 @@ export class SuperadminService {
     private readonly notifications: NotificationService,
   ) {
     this.repository = new SuperadminRepository(app);
+    this.pdfService = new ActivityReportPdfService();
   }
 
   async getDashboard(): Promise<{
@@ -382,27 +381,73 @@ export class SuperadminService {
     return this.repository.listAdminNotes(submissionId);
   }
 
-  async exportModerationPerformanceCsv(from: string, to: string): Promise<string> {
-    const rows = await this.repository.getModerationReportRows(from, to);
-    return toCsv(rows);
-  }
-
-  async exportAdminProductivityCsv(from: string, to: string): Promise<string> {
-    const rows = await this.repository.getAdminProductivityRows(from, to);
-    return toCsv(rows);
-  }
-
-  async exportApprovalSummaryCsv(from: string, to: string): Promise<string> {
-    const rows = await this.repository.getApprovalSummaryRows(from, to);
-    return toCsv(rows);
-  }
-
-  async exportAuditCsv(from: string, to: string): Promise<string> {
-    const rows = await this.repository.getAuditExportRows(from, to);
-    return toCsv(rows);
+  async exportActivityReportPdf(
+    query: SuperadminActivityPdfQuery,
+    actorUserId: string,
+  ): Promise<{ buffer: Buffer; filename: string }> {
+    const now = new Date();
+    const range = this.resolveRange(query, now);
+    const rows = await this.repository.listActivityReportRows({
+      from: range.from,
+      to: range.to,
+      adminId: query.adminId,
+      actionType: query.actionType,
+    });
+    const actor = await this.repository.findAdminIdentity(actorUserId);
+    const generatedBy =
+      actor?.email ?? actor?.full_name ?? actorUserId;
+    const generatedAtIso = normalizeDisplayDateTime(now.toISOString());
+    const buffer = await this.pdfService.render({
+      generatedAtIso,
+      generatedBy,
+      filters: {
+        range: query.range,
+        from: normalizeDisplayDateTime(range.from),
+        to: normalizeDisplayDateTime(range.to),
+        adminId: query.adminId,
+        actionType: query.actionType,
+      },
+      rows,
+    });
+    return {
+      buffer,
+      filename: buildActivityPdfFilename(now),
+    };
   }
 
   async updateLastLogin(adminId: string, ip: string | null): Promise<void> {
     await this.repository.updateAdminLastLogin(adminId, ip);
+  }
+
+  private resolveRange(
+    query: SuperadminActivityPdfQuery,
+    now: Date,
+  ): { from: string; to: string } {
+    if (query.range === "custom") {
+      const from = new Date(query.from as string);
+      const to = new Date(query.to as string);
+      if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
+        throw new ServiceError(400, "Invalid custom date range", "VALIDATION_ERROR");
+      }
+      return { from: from.toISOString(), to: to.toISOString() };
+    }
+    if (query.range === "today") {
+      const from = new Date(now);
+      from.setHours(0, 0, 0, 0);
+      const to = new Date(now);
+      to.setHours(23, 59, 59, 999);
+      return { from: from.toISOString(), to: to.toISOString() };
+    }
+    if (query.range === "thisMonth") {
+      const from = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+      const to = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+      return { from: from.toISOString(), to: to.toISOString() };
+    }
+    const from = new Date(now);
+    from.setDate(from.getDate() - 6);
+    from.setHours(0, 0, 0, 0);
+    const to = new Date(now);
+    to.setHours(23, 59, 59, 999);
+    return { from: from.toISOString(), to: to.toISOString() };
   }
 }

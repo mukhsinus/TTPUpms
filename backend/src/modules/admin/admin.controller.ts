@@ -146,7 +146,9 @@ export class AdminController {
     try {
       const params = adminStudentIdParamsSchema.parse(request.params);
       const body = adminUpdateStudentBodySchema.parse(request.body ?? {});
-      const data = await this.service.updateStudentById(params.id, body);
+      const data = await this.service.updateStudentById(params.id, body, {
+        actorUserId: request.user.id,
+      });
       reply.status(200).send(success(data));
     } catch (error) {
       this.handleError(reply, error);

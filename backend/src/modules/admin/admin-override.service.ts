@@ -38,6 +38,22 @@ export class AdminOverrideService {
       targetUserId: submission.userId,
       entityTable: "submissions",
       entityId: submissionId,
+      action: "moderation_submission_score_overridden",
+      oldValues: {
+        totalPoints: submission.totalPoints,
+      },
+      newValues: {
+        totalPoints: updated.totalPoints,
+        reason: body.reason ?? null,
+      },
+      requestIp: actor.requestIp,
+      userAgent: actor.userAgent,
+    });
+    await this.repository.insertAuditLog({
+      actorUserId: actor.actorUserId,
+      targetUserId: submission.userId,
+      entityTable: "submissions",
+      entityId: submissionId,
       action: "admin_override_score",
       oldValues: {
         totalPoints: submission.totalPoints,
@@ -71,6 +87,22 @@ export class AdminOverrideService {
 
     const updated = await this.repository.updateSubmissionStatus(submissionId, body.status);
 
+    await this.repository.insertAuditLog({
+      actorUserId: actor.actorUserId,
+      targetUserId: submission.userId,
+      entityTable: "submissions",
+      entityId: submissionId,
+      action: "moderation_submission_status_overridden",
+      oldValues: {
+        status: submission.status,
+      },
+      newValues: {
+        status: updated.status,
+        reason: body.reason ?? null,
+      },
+      requestIp: actor.requestIp,
+      userAgent: actor.userAgent,
+    });
     await this.repository.insertAuditLog({
       actorUserId: actor.actorUserId,
       targetUserId: submission.userId,

@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { SuperadminAuditQuery, SuperadminListQuery, SuperadminSecurityQuery } from "./superadmin.schema";
+import type { AdminActivityAction } from "../audit/admin-activity";
 
 export interface SuperadminAdminListRow {
   id: string;
@@ -86,6 +87,16 @@ export interface SuperadminAdminNoteRow {
   admin_name: string | null;
   note: string;
   created_at: string;
+}
+
+export interface ActivityReportRow {
+  time: string;
+  admin_name: string | null;
+  admin_email: string | null;
+  action_type: string;
+  entity_type: string | null;
+  entity_label: string;
+  details: string;
 }
 
 export class SuperadminRepository {
@@ -685,5 +696,52 @@ export class SuperadminRepository {
       targetId: r.target_id,
       requestIp: r.request_ip,
     }));
+  }
+
+  async listActivityReportRows(input: {
+    from: string;
+    to: string;
+    adminId?: string;
+    actionType?: AdminActivityAction;
+  }): Promise<ActivityReportRow[]> {
+    const params: unknown[] = [input.from, input.to];
+    const where: string[] = [
+      "aal.created_at >= $1::timestamptz",
+      "aal.created_at <= $2::timestamptz",
+    ];
+    let paramIndex = 3;
+    if (input.adminId) {
+      where.push(`aal.admin_id = $${paramIndex++}::uuid`);
+      params.push(input.adminId);
+    }
+    if (input.actionType) {
+      where.push(`aal.action_type = $${paramIndex++}`);
+      params.push(input.actionType);
+    }
+    const result = await this.app.db.query<ActivityReportRow>(
+      `
+      SELECT
+        to_char(aal.created_at, 'YYYY-MM-DD HH24:MI:SS') AS time,
+        COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), '')) AS admin_name,
+        aal.admin_email::text AS admin_email,
+        aal.action_type,
+        aal.entity_type,
+        aal.entity_label,
+        CONCAT(
+          COALESCE(NULLIF(aal.old_value::text, '{}'), ''),
+          CASE
+            WHEN aal.old_value::text <> '{}'::text AND aal.new_value::text <> '{}'::text THEN ' -> '
+            ELSE ''
+          END,
+          COALESCE(NULLIF(aal.new_value::text, '{}'), '')
+        ) AS details
+      FROM public.admin_activity_logs aal
+      LEFT JOIN public.users u ON u.id = aal.admin_id
+      WHERE ${where.join(" AND ")}
+      ORDER BY aal.created_at DESC, aal.id DESC
+      `,
+      params,
+    );
+    return result.rows;
   }
 }

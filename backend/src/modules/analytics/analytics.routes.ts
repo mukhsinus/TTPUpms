@@ -16,21 +16,4 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
     controller.getScoresByCategory,
   );
   app.get("/activity-stats", { preHandler: [authMiddleware, analyticsGuard] }, controller.getActivityStats);
-
-  app.get(
-    "/export/csv",
-    {
-      preHandler: [authMiddleware, analyticsGuard],
-      config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
-    },
-    controller.exportCsv,
-  );
-  app.get(
-    "/export/excel",
-    {
-      preHandler: [authMiddleware, analyticsGuard],
-      config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
-    },
-    controller.exportExcel,
-  );
 }

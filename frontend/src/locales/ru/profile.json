@@ -36,7 +36,7 @@
   "passwordHintLine": "Не менее 10 символов: буквы, цифры и спецсимволы.",
   "approveSubmissions": "Одобрение заявок",
   "rejectSubmissions": "Отклонение заявок",
-  "exportCsv": "Экспорт CSV",
+  "exportCsv": "Экспорт PDF-отчета",
   "manageAdmins": "Управление админами",
   "viewAuditLogs": "Просмотр журнала аудита",
   "securityApprovals": "Подтверждения в безопасности",

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ADMIN_ACTIVITY_ACTIONS } from "../audit/admin-activity";
 
 export const superadminListQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -48,10 +49,25 @@ export const superadminResolveSecurityBodySchema = z.object({
   status: z.enum(["approved", "rejected"]),
 });
 
-export const superadminReportQuerySchema = z.object({
-  from: z.string().trim().min(1),
-  to: z.string().trim().min(1),
-});
+export const superadminActivityPdfQuerySchema = z
+  .object({
+    range: z.enum(["today", "last7", "thisMonth", "custom"]).default("last7"),
+    from: z.string().trim().min(1).optional(),
+    to: z.string().trim().min(1).optional(),
+    adminId: z.string().uuid().optional(),
+    actionType: z.enum(ADMIN_ACTIVITY_ACTIONS).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.range !== "custom") {
+      return;
+    }
+    if (!value.from || !value.to) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Custom range requires both from and to",
+      });
+    }
+  });
 
 export const superadminSubmissionParamsSchema = z.object({
   submissionId: z.string().uuid(),
@@ -68,3 +84,4 @@ export const superadminNoteBodySchema = z.object({
 export type SuperadminListQuery = z.infer<typeof superadminListQuerySchema>;
 export type SuperadminAuditQuery = z.infer<typeof superadminAuditQuerySchema>;
 export type SuperadminSecurityQuery = z.infer<typeof superadminSecurityQuerySchema>;
+export type SuperadminActivityPdfQuery = z.infer<typeof superadminActivityPdfQuerySchema>;

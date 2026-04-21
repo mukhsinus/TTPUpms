@@ -36,7 +36,7 @@
   "passwordHintLine": "Kamida 10 belgi: harf, raqam va maxsus belgilar.",
   "approveSubmissions": "Arizalarni tasdiqlash",
   "rejectSubmissions": "Arizalarni rad etish",
-  "exportCsv": "CSV eksport",
+  "exportCsv": "PDF hisobot eksporti",
   "manageAdmins": "Adminlarni boshqarish",
   "viewAuditLogs": "Audit jurnalini ko'rish",
   "securityApprovals": "Xavfsizlik tasdiqlari",

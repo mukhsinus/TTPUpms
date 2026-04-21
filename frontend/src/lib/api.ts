@@ -1495,14 +1495,20 @@ export const api = {
     );
   },
 
-  async downloadReportCsv(
-    kind: "moderation-performance" | "admin-productivity" | "approval-summary" | "audit-export",
-    fromIso: string,
-    toIso: string,
-  ): Promise<Blob> {
+  async downloadActivityReportPdf(params: {
+    range: "today" | "last7" | "thisMonth" | "custom";
+    from?: string;
+    to?: string;
+    adminId?: string;
+    actionType?: string;
+  }): Promise<Blob> {
     const token = getAuthToken();
-    const q = new URLSearchParams({ from: fromIso, to: toIso });
-    const path = `/api/admin/reports/${kind}.csv?${q.toString()}`;
+    const q = new URLSearchParams({ range: params.range });
+    if (params.from) q.set("from", params.from);
+    if (params.to) q.set("to", params.to);
+    if (params.adminId) q.set("adminId", params.adminId);
+    if (params.actionType) q.set("actionType", params.actionType);
+    const path = `/api/admin/reports/activity.pdf?${q.toString()}`;
     const headers = new Headers();
     if (token) {
       headers.set("Authorization", `Bearer ${token}`);
@@ -1513,7 +1519,7 @@ export const api = {
     }
     const response = await fetch(buildApiUrl(path), { method: "GET", headers });
     if (!response.ok) {
-      throw new ApiError(`CSV export failed (${response.status})`, response.status);
+      throw new ApiError(`PDF export failed (${response.status})`, response.status);
     }
     return response.blob();
   },

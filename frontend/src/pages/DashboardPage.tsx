@@ -5,7 +5,6 @@ import {
   Award,
   CheckCircle2,
   ClipboardList,
-  Download,
   Gavel,
   RefreshCw,
   Search,
@@ -433,38 +432,6 @@ export function DashboardPage(): ReactElement {
           ? t("queueHealthModerate", { count: adminDashboard.pendingCount })
           : t("queueHealthOverloaded", { count: adminDashboard.pendingCount });
 
-    const exportCsv = (): void => {
-      const header = [
-        t("csvAction"),
-        t("csvAdmin"),
-        t("csvStudentId"),
-        t("csvStudentName"),
-        t("csvSubmission"),
-        t("csvTime"),
-      ];
-      const rows = adminDashboard.recentActivity.map((r) => [
-        formatActivityAction(r.action, t),
-        r.adminName,
-        r.studentId ?? "",
-        r.studentName ?? "",
-        `${(
-          r.submissionTitle?.trim() ||
-          (r.studentId ? t("csvSubmissionNumbered", { id: r.studentId }) : t("csvSubmissionFallback"))
-        ).trim()} — ${formatDateTime(r.submissionSubmittedAt ?? r.createdAt, t)}`,
-        formatDateTime(r.createdAt, t),
-      ]);
-      const csv = [header, ...rows]
-        .map((cols) => cols.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","))
-        .join("\n");
-      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "moderation-activity.csv";
-      a.click();
-      URL.revokeObjectURL(url);
-    };
-
     const openStudentSearch = (): void => {
       const raw = window.prompt(t("searchStudentPrompt"));
       if (!raw?.trim()) return;
@@ -591,9 +558,6 @@ export function DashboardPage(): ReactElement {
               </Button>
               <Button type="button" variant="secondary" onClick={openStudentSearch}>
                 <Search size={16} /> {t("searchStudent")}
-              </Button>
-              <Button type="button" variant="secondary" onClick={exportCsv}>
-                <Download size={16} /> {t("exportCsv")}
               </Button>
               <Button
                 type="button"
