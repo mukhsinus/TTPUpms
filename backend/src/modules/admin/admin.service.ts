@@ -138,7 +138,7 @@ export class AdminService {
     };
   }
 
-  async getDashboard(query: AdminDashboardQuery): Promise<{
+  async getDashboard(query: AdminDashboardQuery, actorRole?: string): Promise<{
     pendingCount: number;
     avgReviewTimeHours: number;
     oldestPendingHours: number;
@@ -185,7 +185,8 @@ export class AdminService {
         return cached.data;
       }
     }
-    const data = await this.buildDashboard(query);
+    const includeRecentActivity = actorRole === "superadmin";
+    const data = await this.buildDashboard(query, includeRecentActivity);
     if (!query.forceRefresh) {
       const key = `${query.page}:${query.pageSize}`;
       this.dashboardCache.set(key, {
@@ -196,7 +197,7 @@ export class AdminService {
     return data;
   }
 
-  private async buildDashboard(query: AdminDashboardQuery): Promise<{
+  private async buildDashboard(query: AdminDashboardQuery, includeRecentActivity: boolean): Promise<{
     pendingCount: number;
     avgReviewTimeHours: number;
     oldestPendingHours: number;
@@ -239,8 +240,10 @@ export class AdminService {
     const [summary, needsAttentionRows, activityRows, totalActivity] = await Promise.all([
       this.repository.getDashboardSummary(),
       this.repository.listNeedsAttention(5),
-      this.repository.listRecentActivity(query.page, query.pageSize),
-      this.repository.countRecentActivity(),
+      includeRecentActivity
+        ? this.repository.listRecentActivity(query.page, query.pageSize)
+        : Promise.resolve([]),
+      includeRecentActivity ? this.repository.countRecentActivity() : Promise.resolve(0),
     ]);
 
     const pendingCount = Number(summary.pending_count ?? "0");

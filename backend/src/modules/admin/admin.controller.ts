@@ -41,7 +41,7 @@ export class AdminController {
     }
     try {
       const query = adminDashboardQuerySchema.parse(request.query);
-      const data = await this.service.getDashboard(query);
+      const data = await this.service.getDashboard(query, request.user.role);
       reply.header("Cache-Control", "private, max-age=5, stale-while-revalidate=20");
       reply.send(success(data));
     } catch (error) {
@@ -57,6 +57,9 @@ export class AdminController {
     try {
       const params = adminDashboardAdminParamsSchema.parse(request.params);
       const query = adminDashboardQuerySchema.parse(request.query);
+      if (request.user.role !== "superadmin") {
+        throw new ServiceError(403, "Forbidden");
+      }
       const data = await this.service.getAdminActivityProfile(params.adminId, query);
       reply.header("Cache-Control", "private, max-age=5, stale-while-revalidate=20");
       reply.send(success(data));

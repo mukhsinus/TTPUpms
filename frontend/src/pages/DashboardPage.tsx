@@ -593,28 +593,30 @@ export function DashboardPage(): ReactElement {
           </Card>
 
           {systemPhase ? (
-            <Card title={t("systemPhaseTitle")} subtitle={t("systemPhaseSubtitle")}>
-              <p className="muted">
-                <strong>{t("systemPhaseCurrent")}: </strong>
-                {systemPhase.phase === "submission" ? t("phaseSubmission") : t("phaseEvaluation")}
-              </p>
-              <p className="muted">
-                {t("systemPhaseSubmissionDeadline")}:{" "}
-                {systemPhase.submissionDeadline ? formatDateTime(systemPhase.submissionDeadline, t) : t("dateUnavailable")}
-              </p>
-              <p className="muted">
-                {t("systemPhaseEvaluationDeadline")}:{" "}
-                {systemPhase.evaluationDeadline ? formatDateTime(systemPhase.evaluationDeadline, t) : t("dateUnavailable")}
-              </p>
-              <p className="muted">
-                {t("systemPhaseLastChangedAt")}:{" "}
-                {systemPhase.lastChangedAt ? formatDateTime(systemPhase.lastChangedAt, t) : t("dateUnavailable")}
-              </p>
-              <p className="muted">
-                {t("systemPhaseLastChangedBy")}:{" "}
-                {systemPhase.lastChangedBy?.name ?? systemPhase.lastChangedBy?.email ?? t("dateUnavailable")}
-              </p>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+            <Card className="ops-main-span-full" title={t("systemPhaseTitle")} subtitle={t("systemPhaseSubtitle")}>
+              <div className="system-phase-summary-grid">
+                <p className="muted">
+                  <strong>{t("systemPhaseCurrent")}: </strong>
+                  {systemPhase.phase === "submission" ? t("phaseSubmission") : t("phaseEvaluation")}
+                </p>
+                <p className="muted">
+                  {t("systemPhaseSubmissionDeadline")}:{" "}
+                  {systemPhase.submissionDeadline ? formatDateTime(systemPhase.submissionDeadline, t) : t("dateUnavailable")}
+                </p>
+                <p className="muted">
+                  {t("systemPhaseEvaluationDeadline")}:{" "}
+                  {systemPhase.evaluationDeadline ? formatDateTime(systemPhase.evaluationDeadline, t) : t("dateUnavailable")}
+                </p>
+                <p className="muted">
+                  {t("systemPhaseLastChangedAt")}:{" "}
+                  {systemPhase.lastChangedAt ? formatDateTime(systemPhase.lastChangedAt, t) : t("dateUnavailable")}
+                </p>
+                <p className="muted">
+                  {t("systemPhaseLastChangedBy")}:{" "}
+                  {systemPhase.lastChangedBy?.name ?? systemPhase.lastChangedBy?.email ?? t("dateUnavailable")}
+                </p>
+              </div>
+              <div className="system-phase-actions">
                 <Button
                   type="button"
                   variant="secondary"
@@ -632,8 +634,8 @@ export function DashboardPage(): ReactElement {
                   {t("switchToEvaluation")}
                 </Button>
               </div>
-              <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-                <label className="muted">
+              <div className="system-phase-form-grid">
+                <label className="muted system-phase-field">
                   {t("systemPhaseSubmissionDeadline")}
                   <input
                     className="ui-input"
@@ -642,7 +644,7 @@ export function DashboardPage(): ReactElement {
                     onChange={(event) => setSubmissionDeadlineInput(event.target.value)}
                   />
                 </label>
-                <label className="muted">
+                <label className="muted system-phase-field">
                   {t("systemPhaseEvaluationDeadline")}
                   <input
                     className="ui-input"
@@ -651,7 +653,7 @@ export function DashboardPage(): ReactElement {
                     onChange={(event) => setEvaluationDeadlineInput(event.target.value)}
                   />
                 </label>
-                <div>
+                <div className="system-phase-save">
                   <Button type="button" variant="primary" disabled={phaseBusy} onClick={() => void saveDeadlines()}>
                     {phaseBusy ? t("refreshing") : t("saveDeadlines")}
                   </Button>
@@ -661,65 +663,67 @@ export function DashboardPage(): ReactElement {
           ) : null}
         </section>
 
-        <Card title={t("recentActivity")}>
-          {adminDashboard.recentActivity.length === 0 ? (
-            <p className="muted">{t("noActivity")}</p>
-          ) : (
-            <>
-              <Table>
-                <thead>
-                  <tr>
-                    <th>{t("tableAction")}</th>
-                    <th>{t("tableAdmin")}</th>
-                    <th>{t("tableStudent")}</th>
-                    <th>{t("tableTime")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {adminDashboard.recentActivity.map((row) => (
-                    <tr key={row.id}>
-                      <td>{formatActivityAction(row.action, t)}</td>
-                      <td>
-                        <button type="button" className="admin-link-btn" onClick={() => setDrawerAdminId(row.adminId)}>
-                          {row.adminName}
-                        </button>
-                        <span className="muted"> · {t("actionsCount", { count: activityCountByAdmin.get(row.adminId) ?? 0 })}</span>
-                      </td>
-                      <td>{row.studentId ?? "—"}</td>
-                      <td>{formatRelativeTime(row.createdAt, t)}</td>
+        {isSuperadmin ? (
+          <Card title={t("recentActivity")}>
+            {adminDashboard.recentActivity.length === 0 ? (
+              <p className="muted">{t("noActivity")}</p>
+            ) : (
+              <>
+                <Table>
+                  <thead>
+                    <tr>
+                      <th>{t("tableAction")}</th>
+                      <th>{t("tableAdmin")}</th>
+                      <th>{t("tableStudent")}</th>
+                      <th>{t("tableTime")}</th>
                     </tr>
-                  ))}
-                </tbody>
-              </Table>
-              <div className="pagination-bar">
-                <span className="muted">
-                  {t("paginationPage", {
-                    page: adminDashboard.pagination.page,
-                    total: adminDashboard.pagination.totalPages,
-                  })}
-                </span>
-                <div className="pagination-actions">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={!adminDashboard.pagination.hasPrev}
-                    onClick={() => setActivityPage((p) => p - 1)}
-                  >
-                    {t("previous")}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={!adminDashboard.pagination.hasNext}
-                    onClick={() => setActivityPage((p) => p + 1)}
-                  >
-                    {t("next")}
-                  </Button>
+                  </thead>
+                  <tbody>
+                    {adminDashboard.recentActivity.map((row) => (
+                      <tr key={row.id}>
+                        <td>{formatActivityAction(row.action, t)}</td>
+                        <td>
+                          <button type="button" className="admin-link-btn" onClick={() => setDrawerAdminId(row.adminId)}>
+                            {row.adminName}
+                          </button>
+                          <span className="muted"> · {t("actionsCount", { count: activityCountByAdmin.get(row.adminId) ?? 0 })}</span>
+                        </td>
+                        <td>{row.studentId ?? "—"}</td>
+                        <td>{formatRelativeTime(row.createdAt, t)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+                <div className="pagination-bar">
+                  <span className="muted">
+                    {t("paginationPage", {
+                      page: adminDashboard.pagination.page,
+                      total: adminDashboard.pagination.totalPages,
+                    })}
+                  </span>
+                  <div className="pagination-actions">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={!adminDashboard.pagination.hasPrev}
+                      onClick={() => setActivityPage((p) => p - 1)}
+                    >
+                      {t("previous")}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={!adminDashboard.pagination.hasNext}
+                      onClick={() => setActivityPage((p) => p + 1)}
+                    >
+                      {t("next")}
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            </>
-          )}
-        </Card>
+              </>
+            )}
+          </Card>
+        ) : null}
 
         {drawerAdminId ? (
           <Suspense
