@@ -6,8 +6,6 @@ import {
   CheckCircle2,
   ClipboardList,
   Gavel,
-  RefreshCw,
-  Search,
   ShieldAlert,
   Timer,
   TrendingUp,
@@ -24,7 +22,6 @@ import {
   type SystemPhasePayload,
 } from "../lib/api";
 import { isAdminPanelRole, normalizeRole } from "../lib/rbac";
-import { isLikelyStudentId, normalizeStudentId } from "../lib/student-id";
 import { useToast } from "../contexts/ToastContext";
 import { EmptyState } from "../components/ui/EmptyState";
 import { DashboardStatsSkeleton, TableSkeleton } from "../components/ui/PageSkeletons";
@@ -452,30 +449,6 @@ export function DashboardPage(): ReactElement {
           ? t("queueHealthModerate", { count: adminDashboard.pendingCount })
           : t("queueHealthOverloaded", { count: adminDashboard.pendingCount });
 
-    const openStudentSearch = (): void => {
-      const raw = window.prompt(t("searchStudentPrompt"));
-      if (!raw?.trim()) return;
-      const query = isLikelyStudentId(raw) ? normalizeStudentId(raw) : raw.trim();
-      navigate(`/submissions?search=${encodeURIComponent(query)}`);
-    };
-
-    const handleRefresh = async (): Promise<void> => {
-      try {
-        setIsRefreshing(true);
-        setKpiPulse(true);
-        await Promise.all([
-          loadAdminDashboard(activityPage, true),
-          api.getSystemPhase().then((phase) => setSystemPhase(phase)),
-        ]);
-        toast.success(t("toastDashboardUpdated"));
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : t("toastRefreshDashboardFailed"));
-      } finally {
-        window.setTimeout(() => setKpiPulse(false), 520);
-        setIsRefreshing(false);
-      }
-    };
-
     const saveDeadlines = async (): Promise<void> => {
       try {
         setPhaseBusy(true);
@@ -571,29 +544,8 @@ export function DashboardPage(): ReactElement {
             )}
           </Card>
 
-          <Card title={t("quickActions")}>
-            <div className="ops-actions-grid">
-              <Button type="button" variant="primary" onClick={() => navigate("/submissions")}>
-                <ClipboardList size={16} /> {t("openQueue")}
-              </Button>
-              <Button type="button" variant="secondary" onClick={openStudentSearch}>
-                <Search size={16} /> {t("searchStudent")}
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => void handleRefresh()}
-                disabled={isRefreshing}
-                aria-busy={isRefreshing}
-              >
-                <RefreshCw size={16} className={isRefreshing ? "spin" : ""} />
-                {isRefreshing ? t("refreshing") : t("refresh")}
-              </Button>
-            </div>
-          </Card>
-
           {systemPhase ? (
-            <Card className="ops-main-span-full" title={t("systemPhaseTitle")} subtitle={t("systemPhaseSubtitle")}>
+            <Card title={t("systemPhaseTitle")} subtitle={t("systemPhaseSubtitle")}>
               <div className="system-phase-summary-grid">
                 <p className="muted">
                   <strong>{t("systemPhaseCurrent")}: </strong>

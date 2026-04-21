@@ -1643,11 +1643,7 @@ body {
 .ops-main-grid {
   display: grid;
   gap: var(--space-4);
-  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 1fr);
-}
-
-.ops-main-span-full {
-  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .system-phase-summary-grid {
@@ -1705,12 +1701,6 @@ body {
 .needs-attention-row:hover {
   border-color: #93c5fd;
   background: #f8fbff;
-}
-
-.ops-actions-grid {
-  display: grid;
-  gap: var(--space-2);
-  grid-template-columns: 1fr 1fr;
 }
 
 .admin-link-btn {
@@ -2103,10 +2093,6 @@ body {
 
   .system-phase-summary-grid,
   .system-phase-form-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .ops-actions-grid {
     grid-template-columns: 1fr;
   }
 
