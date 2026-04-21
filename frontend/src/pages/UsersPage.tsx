@@ -26,6 +26,35 @@ function degreeLabel(v: AdminStudentDegree | null): string {
   return "—";
 }
 
+function validateStudentForm(input: {
+  full_name: string;
+  faculty: string;
+  student_id: string;
+}): string | null {
+  const fullName = input.full_name.trim();
+  if (!fullName) {
+    return "Full name is required.";
+  }
+  if (fullName.length < 2 || fullName.length > 300) {
+    return "Full name must be between 2 and 300 characters.";
+  }
+  const faculty = input.faculty.trim();
+  if (!faculty) {
+    return "Faculty is required.";
+  }
+  if (faculty.length > 200) {
+    return "Faculty must be 200 characters or less.";
+  }
+  const studentId = normalizeStudentId(input.student_id);
+  if (!studentId) {
+    return "Student ID is required.";
+  }
+  if (studentId.length > 64) {
+    return "Student ID is too long.";
+  }
+  return null;
+}
+
 export function UsersPage(): ReactElement {
   const toast = useToast();
   const [loading, setLoading] = useState(true);
@@ -229,13 +258,14 @@ export function UsersPage(): ReactElement {
                   <th>Last activity</th>
                   <th>Achievements</th>
                   <th>Approved score</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row) => (
                   <tr
                     key={row.id}
-                    className="clickable-row"
+                    className={selectedStudentId === row.id ? "clickable-row is-selected" : "clickable-row"}
                     onClick={() => setSelectedStudentId(row.id)}
                   >
                     <td>{row.fullName}</td>
@@ -248,6 +278,18 @@ export function UsersPage(): ReactElement {
                     <td>{formatDate(row.lastActivityAt)}</td>
                     <td>{row.totalAchievementsSubmitted}</td>
                     <td>{row.totalApprovedScore.toFixed(2)}</td>
+                    <td>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSelectedStudentId(row.id);
+                        }}
+                      >
+                        Edit
+                      </Button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -277,6 +319,14 @@ export function UsersPage(): ReactElement {
       {selected ? (
         <Card title="Student details">
           <div className="items-stack">
+            <div className="row-between">
+              <p className="muted">
+                Telegram: @{selected.telegramUsername ?? "—"} · {selected.telegramId ?? "—"}
+              </p>
+              <p className="muted">
+                Registered: {formatDate(selected.registrationDate)} · Last activity: {formatDate(selected.lastActivityAt)}
+              </p>
+            </div>
             <label className="item-review-field">
               <span>Name</span>
               <Input
@@ -317,11 +367,9 @@ export function UsersPage(): ReactElement {
               />
             </label>
             <div className="row-between">
+              <p className="muted">Total submissions: {selected.totalSubmissions} · Achievements: {selected.totalAchievementsSubmitted}</p>
               <p className="muted">
-                Registered: {formatDate(selected.registrationDate)} · Last activity: {formatDate(selected.lastActivityAt)}
-              </p>
-              <p className="muted">
-                Profile completed: {selected.isProfileCompleted ? "Yes" : "No"}
+                Profile completed: {selected.isProfileCompleted ? "Yes" : "No"} · Approved score: {selected.totalApprovedScore.toFixed(2)}
               </p>
             </div>
             <div className="actions-wrap">
@@ -331,6 +379,11 @@ export function UsersPage(): ReactElement {
                 disabled={saveDisabled}
                 onClick={async () => {
                   if (!selectedStudentId) {
+                    return;
+                  }
+                  const validationError = validateStudentForm(form);
+                  if (validationError) {
+                    toast.error(validationError);
                     return;
                   }
                   try {
@@ -372,6 +425,22 @@ export function UsersPage(): ReactElement {
                 }}
               >
                 {saving ? "Saving..." : "Save changes"}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={saving || !dirty}
+                onClick={() => {
+                  setForm({
+                    full_name: selected.fullName,
+                    degree: selected.degree ?? "bachelor",
+                    faculty: selected.faculty ?? "",
+                    student_id: selected.studentId ?? "",
+                    email: selected.email ?? "",
+                  });
+                }}
+              >
+                Cancel changes
               </Button>
               <Button type="button" variant="ghost" onClick={() => setSelectedStudentId(null)}>
                 Close
