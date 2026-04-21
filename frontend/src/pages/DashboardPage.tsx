@@ -208,7 +208,7 @@ export function DashboardPage(): ReactElement {
           setIsRefreshing(true);
           const tasks: Array<Promise<unknown>> = [
             loadAdminDashboard(activityPage, true),
-            api.getSystemPhase().then((phase) => setSystemPhase(phase)),
+            api.getSystemPhase({ forceRefresh: true }).then((phase) => setSystemPhase(phase)),
           ];
           if (isSuperadmin) {
             tasks.push(api.getSuperadminDashboard().then((data) => setSuperDashboard(data)));

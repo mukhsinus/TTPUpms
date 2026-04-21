@@ -440,6 +440,7 @@ export function AdminSubmissionDetailPage(): ReactElement {
                       <Button
                         type="button"
                         variant="secondary"
+                        className="approve-btn"
                         disabled={savingItemId === item.id}
                         onClick={() => void submitItemReview(item, "approved")}
                       >
@@ -448,6 +449,7 @@ export function AdminSubmissionDetailPage(): ReactElement {
                       <Button
                         type="button"
                         variant="danger"
+                        className="reject-btn"
                         disabled={savingItemId === item.id}
                         onClick={() => void submitItemReview(item, "rejected")}
                       >
@@ -515,6 +517,7 @@ export function AdminSubmissionDetailPage(): ReactElement {
                 <Button
                   type="button"
                   variant="primary"
+                  className="approve-btn"
                   disabled={busy}
                   onClick={async () => {
                     if (!submissionId) return;
@@ -539,6 +542,7 @@ export function AdminSubmissionDetailPage(): ReactElement {
                 <Button
                   type="button"
                   variant="danger"
+                  className="reject-btn"
                   disabled={busy}
                   onClick={async () => {
                     if (!submissionId) return;

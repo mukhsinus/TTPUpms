@@ -467,6 +467,7 @@ export function SubmissionDetailPage(): ReactElement {
                         <Button
                           type="button"
                           variant="secondary"
+                          className="approve-btn"
                           disabled={savingItemId === item.id}
                           onClick={() => void submitItemReview(item, "approved")}
                         >
@@ -475,6 +476,7 @@ export function SubmissionDetailPage(): ReactElement {
                         <Button
                           type="button"
                           variant="danger"
+                          className="reject-btn"
                           disabled={savingItemId === item.id}
                           onClick={() => void submitItemReview(item, "rejected")}
                         >

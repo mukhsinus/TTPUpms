@@ -81,10 +81,38 @@ let adminSearchSuggestionsCache = new Map<
     data: AdminSearchSuggestion[];
   }
 >();
+let adminStudentsCache = new Map<
+  string,
+  {
+    expiresAt: number;
+    data: AdminStudentsListPayload;
+  }
+>();
+let adminStudentsInFlight = new Map<string, Promise<AdminStudentsListPayload>>();
+let superadminAdminsCache = new Map<
+  string,
+  {
+    expiresAt: number;
+    data: SuperadminAdminListPayload;
+  }
+>();
+let superadminAdminsInFlight = new Map<string, Promise<SuperadminAdminListPayload>>();
+let systemPhaseCache:
+  | {
+      expiresAt: number;
+      data: SystemPhasePayload;
+    }
+  | null = null;
+let systemPhaseInFlight: Promise<SystemPhasePayload> | null = null;
 
 const ADMIN_LIST_CACHE_TTL_MS = 10_000;
 const ADMIN_DETAIL_CACHE_TTL_MS = 15_000;
 const ADMIN_SEARCH_SUGGESTION_CACHE_TTL_MS = 20_000;
+const ADMIN_DASHBOARD_CACHE_TTL_MS = 10 * 60_000;
+const ADMIN_PROFILE_CACHE_TTL_MS = 10 * 60_000;
+const ADMIN_STUDENTS_CACHE_TTL_MS = 10 * 60_000;
+const SUPERADMIN_ADMINS_CACHE_TTL_MS = 10 * 60_000;
+const SYSTEM_PHASE_CACHE_TTL_MS = 10 * 60_000;
 
 function createIdempotencyKey(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -888,6 +916,12 @@ export const api = {
     adminSubmissionDetailCache.clear();
     adminSubmissionDetailInFlight.clear();
     adminSearchSuggestionsCache.clear();
+    adminStudentsCache.clear();
+    adminStudentsInFlight.clear();
+    superadminAdminsCache.clear();
+    superadminAdminsInFlight.clear();
+    systemPhaseCache = null;
+    systemPhaseInFlight = null;
   },
 
   getSessionUser(): SessionUser | null {
@@ -1190,14 +1224,39 @@ export const api = {
     return request<AdminDashboardMetrics>("/api/admin/metrics");
   },
 
-  getSystemPhase(): Promise<SystemPhasePayload> {
-    return request<SystemPhasePayload>("/api/system/phase");
+  getSystemPhase(options?: { forceRefresh?: boolean }): Promise<SystemPhasePayload> {
+    const now = Date.now();
+    if (!options?.forceRefresh && systemPhaseCache && systemPhaseCache.expiresAt > now) {
+      return Promise.resolve(systemPhaseCache.data);
+    }
+    if (!options?.forceRefresh && systemPhaseInFlight) {
+      return systemPhaseInFlight;
+    }
+    const promise = request<SystemPhasePayload>("/api/system/phase")
+      .then((data) => {
+        systemPhaseCache = {
+          expiresAt: Date.now() + SYSTEM_PHASE_CACHE_TTL_MS,
+          data,
+        };
+        return data;
+      })
+      .finally(() => {
+        systemPhaseInFlight = null;
+      });
+    if (!options?.forceRefresh) {
+      systemPhaseInFlight = promise;
+    }
+    return promise;
   },
 
   setSystemPhase(phase: ProjectPhase): Promise<SystemPhasePayload> {
     return request<SystemPhasePayload>("/api/admin/system/phase", {
       method: "PATCH",
       body: JSON.stringify({ phase }),
+    }).then((data) => {
+      systemPhaseCache = null;
+      systemPhaseInFlight = null;
+      return data;
     });
   },
 
@@ -1211,6 +1270,10 @@ export const api = {
         submissionDeadline: input.submissionDeadline,
         evaluationDeadline: input.evaluationDeadline,
       }),
+    }).then((data) => {
+      systemPhaseCache = null;
+      systemPhaseInFlight = null;
+      return data;
     });
   },
 
@@ -1236,7 +1299,7 @@ export const api = {
       .then((data) => {
         adminDashboardCache = {
           key: cacheKey,
-          expiresAt: Date.now() + 10_000,
+          expiresAt: Date.now() + ADMIN_DASHBOARD_CACHE_TTL_MS,
           data,
         };
         return data;
@@ -1275,7 +1338,7 @@ export const api = {
       .then((data) => {
         adminProfileCache = {
           key: cacheKey,
-          expiresAt: Date.now() + 10_000,
+          expiresAt: Date.now() + ADMIN_PROFILE_CACHE_TTL_MS,
           data,
         };
         return data;
@@ -1380,7 +1443,23 @@ export const api = {
     return request<AdminActivityProfilePayload>(`/api/admin/dashboard/admins/${adminId}?${q.toString()}`);
   },
 
-  getSuperadminAdmins(params?: { page?: number; pageSize?: number; search?: string }): Promise<SuperadminAdminListPayload> {
+  getSuperadminAdmins(params?: { page?: number; pageSize?: number; search?: string; forceRefresh?: boolean }): Promise<SuperadminAdminListPayload> {
+    const cacheKey = JSON.stringify({
+      page: params?.page ?? 1,
+      pageSize: params?.pageSize ?? 20,
+      search: params?.search?.trim() ?? "",
+    });
+    const now = Date.now();
+    const cached = superadminAdminsCache.get(cacheKey);
+    if (!params?.forceRefresh && cached && cached.expiresAt > now) {
+      return Promise.resolve(cached.data);
+    }
+    if (!params?.forceRefresh) {
+      const inflight = superadminAdminsInFlight.get(cacheKey);
+      if (inflight) {
+        return inflight;
+      }
+    }
     const q = new URLSearchParams({
       page: String(params?.page ?? 1),
       pageSize: String(params?.pageSize ?? 20),
@@ -1388,7 +1467,21 @@ export const api = {
     if (params?.search?.trim()) {
       q.set("search", params.search.trim());
     }
-    return request<SuperadminAdminListPayload>(`/api/admin/admins?${q.toString()}`);
+    const promise = request<SuperadminAdminListPayload>(`/api/admin/admins?${q.toString()}`)
+      .then((data) => {
+        superadminAdminsCache.set(cacheKey, {
+          expiresAt: Date.now() + SUPERADMIN_ADMINS_CACHE_TTL_MS,
+          data,
+        });
+        return data;
+      })
+      .finally(() => {
+        superadminAdminsInFlight.delete(cacheKey);
+      });
+    if (!params?.forceRefresh) {
+      superadminAdminsInFlight.set(cacheKey, promise);
+    }
+    return promise;
   },
 
   getSuperadminAdminDetail(
@@ -1407,6 +1500,8 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ role }),
     });
+    superadminAdminsCache.clear();
+    superadminAdminsInFlight.clear();
   },
 
   async setAdminStatus(adminId: string, status: "active" | "suspended", reason?: string): Promise<void> {
@@ -1414,12 +1509,18 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ status, reason }),
     });
+    superadminAdminsCache.clear();
+    superadminAdminsInFlight.clear();
   },
 
   resetAdminPassword(adminId: string, temporaryPassword?: string): Promise<{ temporaryPassword: string; email: string | null }> {
     return request<{ temporaryPassword: string; email: string | null }>(`/api/admin/admins/${adminId}/reset-password`, {
       method: "POST",
       body: JSON.stringify({ temporaryPassword }),
+    }).then((data) => {
+      superadminAdminsCache.clear();
+      superadminAdminsInFlight.clear();
+      return data;
     });
   },
 
@@ -1470,6 +1571,10 @@ export const api = {
     return request<{ revokedCount: number }>(`/api/admin/security/admins/${adminId}/revoke-sessions`, {
       method: "POST",
       body: JSON.stringify({}),
+    }).then((data) => {
+      superadminAdminsCache.clear();
+      superadminAdminsInFlight.clear();
+      return data;
     });
   },
 
@@ -1630,7 +1735,27 @@ export const api = {
     faculty?: string;
     degree?: AdminStudentDegree;
     sort?: "newest" | "oldest" | "name";
+    forceRefresh?: boolean;
   }): Promise<AdminStudentsListPayload> {
+    const cacheKey = JSON.stringify({
+      page: params.page ?? 1,
+      pageSize: params.pageSize ?? 20,
+      search: params.search?.trim() ?? "",
+      faculty: params.faculty?.trim() ?? "",
+      degree: params.degree ?? "",
+      sort: params.sort ?? "",
+    });
+    const now = Date.now();
+    const cached = adminStudentsCache.get(cacheKey);
+    if (!params.forceRefresh && cached && cached.expiresAt > now) {
+      return Promise.resolve(cached.data);
+    }
+    if (!params.forceRefresh) {
+      const inflight = adminStudentsInFlight.get(cacheKey);
+      if (inflight) {
+        return inflight;
+      }
+    }
     const q = new URLSearchParams();
     q.set("page", String(params.page ?? 1));
     q.set("pageSize", String(params.pageSize ?? 20));
@@ -1646,7 +1771,21 @@ export const api = {
     if (params.sort) {
       q.set("sort", params.sort);
     }
-    return request<AdminStudentsListPayload>(`/api/admin/students?${q.toString()}`);
+    const promise = request<AdminStudentsListPayload>(`/api/admin/students?${q.toString()}`)
+      .then((data) => {
+        adminStudentsCache.set(cacheKey, {
+          expiresAt: Date.now() + ADMIN_STUDENTS_CACHE_TTL_MS,
+          data,
+        });
+        return data;
+      })
+      .finally(() => {
+        adminStudentsInFlight.delete(cacheKey);
+      });
+    if (!params.forceRefresh) {
+      adminStudentsInFlight.set(cacheKey, promise);
+    }
+    return promise;
   },
 
   getAdminStudentById(studentId: string): Promise<AdminStudentDetailPayload> {
@@ -1673,6 +1812,8 @@ export const api = {
       adminSubmissionDetailInFlight.clear();
       adminDashboardCache = null;
       adminDashboardInFlight = null;
+      adminStudentsCache.clear();
+      adminStudentsInFlight.clear();
       return data;
     });
   },

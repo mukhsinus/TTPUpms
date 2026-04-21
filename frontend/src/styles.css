@@ -901,6 +901,29 @@ body {
   filter: none;
 }
 
+/* Explicit semantic action colors (must differ from global gradient) */
+.dashboard-shell .ui-button.approve-btn {
+  background: #16a34a;
+  color: #ffffff;
+  border-color: #15803d;
+  box-shadow: 0 8px 18px rgba(22, 163, 74, 0.22);
+}
+
+.dashboard-shell .ui-button.approve-btn:hover:not(:disabled) {
+  filter: brightness(1.03);
+}
+
+.dashboard-shell .ui-button.reject-btn {
+  background: #dc2626;
+  color: #ffffff;
+  border-color: #b91c1c;
+  box-shadow: 0 8px 18px rgba(220, 38, 38, 0.22);
+}
+
+.dashboard-shell .ui-button.reject-btn:hover:not(:disabled) {
+  filter: brightness(1.03);
+}
+
 .muted {
   color: #64748b;
 }

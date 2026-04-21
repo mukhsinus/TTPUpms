@@ -33,10 +33,10 @@ export function AdminsPage(): ReactElement {
   const sessionRole = normalizeRole(api.getSessionUser()?.role ?? "student");
   const currentUserId = api.getSessionUser()?.userId ?? null;
 
-  const load = async (): Promise<void> => {
+  const load = async (forceRefresh = false): Promise<void> => {
     setLoading(true);
     try {
-      const data = await api.getSuperadminAdmins({ page, pageSize, search: search.trim() || undefined });
+      const data = await api.getSuperadminAdmins({ page, pageSize, search: search.trim() || undefined, forceRefresh });
       setList(data);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to load admins");
@@ -52,7 +52,7 @@ export function AdminsPage(): ReactElement {
   useEffect(() => {
     return onRealtimeUpdate((event) => {
       if (event.type !== "new_admin") return;
-      void load();
+      void load(true);
     });
   }, [page, pageSize, search]);
 

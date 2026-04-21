@@ -106,8 +106,8 @@ function AuthenticatedShell({ onLogout }: { onLogout: () => void }): ReactElemen
         void loadReportsPage();
       }
       void api.getAdminDashboard({ page: 1, pageSize: 12 }).catch(() => undefined);
-      void api.getAdminSubmissions({ page: 1, pageSize: 20 }).catch(() => undefined);
-      void api.getAdminProfile({ page: 1, pageSize: 10 }).catch(() => undefined);
+      void api.getAdminSubmissions({ page: 1, pageSize: 7 }).catch(() => undefined);
+      void api.getAdminProfile({ page: 1, pageSize: 5 }).catch(() => undefined);
     };
     const browser = globalThis as typeof globalThis & {
       requestIdleCallback?: (cb: IdleRequestCallback) => number;
@@ -135,8 +135,10 @@ function AuthenticatedShell({ onLogout }: { onLogout: () => void }): ReactElemen
       try {
         const [submissions, students, admins] = await Promise.all([
           api.getAdminSubmissions({ page: 1, pageSize: 1, forceRefresh: true }),
-          api.getAdminStudents({ page: 1, pageSize: 1 }),
-          user?.role === "superadmin" ? api.getSuperadminAdmins({ page: 1, pageSize: 1 }) : Promise.resolve(null),
+          api.getAdminStudents({ page: 1, pageSize: 1, forceRefresh: true }),
+          user?.role === "superadmin"
+            ? api.getSuperadminAdmins({ page: 1, pageSize: 1, forceRefresh: true })
+            : Promise.resolve(null),
         ]);
         if (cancelled) return;
 

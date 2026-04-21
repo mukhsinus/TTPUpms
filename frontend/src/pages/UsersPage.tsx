@@ -140,6 +140,7 @@ export function UsersPage(): ReactElement {
             faculty: faculty.trim() || undefined,
             degree: degree || undefined,
             sort,
+            forceRefresh: true,
           });
           setRows(data.items);
           setTotal(data.pagination.total);
