@@ -420,6 +420,14 @@ export class AdminProfileRepository {
         last_seen_at
       )
       VALUES ($1::uuid, $2, $3, $4, $5, NOW(), NOW())
+      ON CONFLICT (session_token)
+      DO UPDATE SET
+        admin_id = EXCLUDED.admin_id,
+        device_fingerprint = EXCLUDED.device_fingerprint,
+        ip = EXCLUDED.ip,
+        user_agent = EXCLUDED.user_agent,
+        last_seen_at = NOW(),
+        revoked_at = NULL
       `,
       [input.adminId, input.sessionToken, input.fingerprint, input.ip, input.userAgent],
     );

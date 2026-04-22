@@ -39,6 +39,7 @@ export const superadminSecurityQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
   status: z.enum(["pending", "approved", "rejected"]).optional(),
   type: z.enum(["new_device_login", "logout_others_request", "admin_registration"]).optional(),
+  adminId: z.string().uuid().optional(),
 });
 
 export const superadminSecurityEventParamsSchema = z.object({

@@ -303,26 +303,38 @@ export function DashboardPage(): ReactElement {
           </Card>
         </div>
 
-        <Card title={t("securityQueueSignals")}>
-          <p className="muted">
-            {t("securityAlertsLabel")} <strong>{superDashboard.securityAlertsCount}</strong> · {t("queueOverloadedLabel")}{" "}
-            <strong>{superDashboard.overloadedQueue ? t("yes") : t("no")}</strong>
-          </p>
-          <ul className="submission-timeline">
-            {superDashboard.alerts.length > 0 ? (
-              superDashboard.alerts.map((alert) => (
-                <li key={alert.code}>
-                  <span className="submission-timeline-label">{alert.severity.toUpperCase()}</span>
-                  <span className="submission-timeline-value">{alert.message}</span>
-                </li>
-              ))
-            ) : (
-              <li>
-                <span className="submission-timeline-label">{t("timelineOk")}</span>
-                <span className="submission-timeline-value">{t("noSystemAlerts")}</span>
-              </li>
-            )}
-          </ul>
+        <Card>
+          <div className="ops-card-heading">
+            <AlertCircle size={16} />
+            <span>{t("requestsTitle")}</span>
+          </div>
+          {superDashboard.pendingRegistrationRequests.length === 0 ? (
+            <p className="muted">{t("requestsEmpty")}</p>
+          ) : (
+            <div className="needs-attention-list">
+              {superDashboard.pendingRegistrationRequests.map((request) => {
+                const label = request.adminName?.trim() || request.adminEmail?.trim() || request.adminId;
+                return (
+                  <button
+                    key={request.eventId}
+                    type="button"
+                    className="needs-attention-row"
+                    onClick={() =>
+                      navigate(
+                        `/security?status=pending&adminId=${encodeURIComponent(request.adminId)}&eventId=${encodeURIComponent(request.eventId)}`,
+                      )
+                    }
+                  >
+                    <span>{label}</span>
+                    <span className="needs-attention-meta">
+                      <small className="muted">{t("requestsPendingLabel")}</small>
+                      <ChevronRight size={15} />
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </Card>
 
         {systemPhase ? (

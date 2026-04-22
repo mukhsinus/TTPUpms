@@ -46,9 +46,19 @@ export class SuperadminService {
     securityAlertsCount: number;
     overloadedQueue: boolean;
     alerts: Array<{ code: string; message: string; severity: "warning" | "critical" }>;
+    pendingRegistrationRequests: Array<{
+      eventId: string;
+      adminId: string;
+      adminName: string | null;
+      adminEmail: string | null;
+      createdAt: string;
+    }>;
   }> {
     const includeHidden = await this.canViewHiddenAdmin(viewerUserId);
-    const row = await this.repository.getSuperDashboardSummary(includeHidden);
+    const [row, pendingRequests] = await Promise.all([
+      this.repository.getSuperDashboardSummary(includeHidden),
+      this.repository.listPendingAdminRegistrationRequests(6, includeHidden),
+    ]);
     const pendingQueue = toNum(row.pending_queue);
     const securityAlertsCount = toNum(row.security_alerts_count);
     const activeAdminsToday = toNum(row.active_admins_today);
@@ -84,6 +94,13 @@ export class SuperadminService {
       securityAlertsCount,
       overloadedQueue,
       alerts,
+      pendingRegistrationRequests: pendingRequests.map((request) => ({
+        eventId: request.event_id,
+        adminId: request.admin_id,
+        adminName: request.admin_name,
+        adminEmail: request.admin_email,
+        createdAt: request.created_at,
+      })),
     };
   }
 

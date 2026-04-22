@@ -41,7 +41,7 @@ export function LoginPage(): ReactElement {
   );
   const registerValid = useMemo(
     () =>
-      registerName.trim().length >= 2 &&
+      registerName.trim().length >= 1 &&
       emailPattern.test(registerEmail.trim()) &&
       registerPassword.length >= PASSWORD_MIN_LENGTH,
     [emailPattern, registerEmail, registerName, registerPassword],
@@ -95,6 +95,26 @@ export function LoginPage(): ReactElement {
   const onRegisterSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
     setError(null);
+    setAuthNotice(null);
+
+    if (!registerName.trim()) {
+      const message = "Full name is required.";
+      setError(message);
+      toast.error(message);
+      return;
+    }
+    if (!emailPattern.test(registerEmail.trim())) {
+      const message = "Enter a valid email address.";
+      setError(message);
+      toast.error(message);
+      return;
+    }
+    if (registerPassword.length < PASSWORD_MIN_LENGTH) {
+      const message = `Password must be at least ${PASSWORD_MIN_LENGTH} characters.`;
+      setError(message);
+      toast.error(message);
+      return;
+    }
 
     try {
       setRegisterLoading(true);
@@ -274,7 +294,7 @@ export function LoginPage(): ReactElement {
                   </button>
                 </div>
               </label>
-              <Button type="submit" disabled={registerLoading || !registerValid}>
+              <Button type="submit" disabled={registerLoading}>
                 {registerLoading ? "Creating..." : "Create Account"}
               </Button>
               <p className="auth-switch-note">

@@ -102,6 +102,14 @@ export interface ActivityReportRow {
   details: string;
 }
 
+export interface SuperadminPendingAdminRegistrationRow {
+  event_id: string;
+  admin_id: string;
+  admin_name: string | null;
+  admin_email: string | null;
+  created_at: string;
+}
+
 export class SuperadminRepository {
   private static readonly HIDDEN_ADMIN_EMAILS = [
     "kamolovmuhsin@icloud.com",
@@ -184,6 +192,31 @@ export class SuperadminRepository {
         security_alerts_count: "0",
       }
     );
+  }
+
+  async listPendingAdminRegistrationRequests(
+    limit = 5,
+    includeHidden = false,
+  ): Promise<SuperadminPendingAdminRegistrationRow[]> {
+    const result = await this.app.db.query<SuperadminPendingAdminRegistrationRow>(
+      `
+      SELECT DISTINCT ON (ase.admin_id)
+        ase.id::text AS event_id,
+        ase.admin_id::text AS admin_id,
+        COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), '')) AS admin_name,
+        u.email::text AS admin_email,
+        ase.created_at
+      FROM public.admin_security_events ase
+      INNER JOIN public.users u ON u.id = ase.admin_id
+      WHERE ase.type = 'admin_registration'
+        AND ase.status = 'pending'
+        AND ${this.hiddenEmailWhere("u.email::text", includeHidden)}
+      ORDER BY ase.admin_id, ase.created_at DESC
+      LIMIT $1::int
+      `,
+      [limit],
+    );
+    return result.rows;
   }
 
   async countAdmins(query: SuperadminListQuery, includeHidden = false): Promise<number> {
@@ -556,6 +589,10 @@ export class SuperadminRepository {
     if (query.type) {
       where.push(`ase.type = $${i++}`);
       params.push(query.type);
+    }
+    if (query.adminId) {
+      where.push(`ase.admin_id = $${i++}::uuid`);
+      params.push(query.adminId);
     }
     return { whereSql: where.length ? `WHERE ${where.join(" AND ")}` : "", params };
   }

@@ -348,6 +348,13 @@ export interface SuperadminDashboardPayload {
     message: string;
     severity: "warning" | "critical";
   }>;
+  pendingRegistrationRequests: Array<{
+    eventId: string;
+    adminId: string;
+    adminName: string | null;
+    adminEmail: string | null;
+    createdAt: string;
+  }>;
 }
 
 export interface SuperadminAdminListPayload {
@@ -1572,6 +1579,7 @@ export const api = {
     pageSize?: number;
     status?: "pending" | "approved" | "rejected";
     type?: "new_device_login" | "logout_others_request" | "admin_registration";
+    adminId?: string;
   }): Promise<SuperadminSecurityEventsPayload> {
     const q = new URLSearchParams({
       page: String(params?.page ?? 1),
@@ -1579,6 +1587,7 @@ export const api = {
     });
     if (params?.status) q.set("status", params.status);
     if (params?.type) q.set("type", params.type);
+    if (params?.adminId) q.set("adminId", params.adminId);
     return request<SuperadminSecurityEventsPayload>(`/api/admin/security/events?${q.toString()}`);
   },
 

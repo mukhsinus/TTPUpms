@@ -1,4 +1,5 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useState, type ReactElement } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, type SuperadminSecurityEventsPayload } from "../lib/api";
 import { useToast } from "../contexts/ToastContext";
 import { Button } from "../components/ui/Button";
@@ -27,9 +28,15 @@ function statusClass(status: SuperadminSecurityEventsPayload["items"][number]["s
 
 export function SecurityCenterPage(): ReactElement {
   const toast = useToast();
+  const [searchParams] = useSearchParams();
+  const adminIdFilter = searchParams.get("adminId")?.trim() || "";
+  const eventIdFocus = searchParams.get("eventId")?.trim() || "";
+  const statusFromUrl = searchParams.get("status")?.trim();
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
-  const [status, setStatus] = useState<"pending" | "approved" | "rejected" | "">("pending");
+  const [status, setStatus] = useState<"pending" | "approved" | "rejected" | "">(
+    statusFromUrl === "approved" || statusFromUrl === "rejected" || statusFromUrl === "pending" ? statusFromUrl : "pending",
+  );
   const [data, setData] = useState<SuperadminSecurityEventsPayload | null>(null);
   const [busyEventId, setBusyEventId] = useState<string | null>(null);
 
@@ -41,6 +48,7 @@ export function SecurityCenterPage(): ReactElement {
         pageSize: 25,
         status: status || undefined,
         type: "admin_registration",
+        adminId: adminIdFilter || undefined,
       });
       setData(result);
     } catch (err) {
@@ -52,9 +60,19 @@ export function SecurityCenterPage(): ReactElement {
 
   useEffect(() => {
     void load();
-  }, [page, status]);
+  }, [page, status, adminIdFilter]);
 
-  const rows = data?.items ?? [];
+  const rows = useMemo(() => {
+    const base = data?.items ?? [];
+    if (!eventIdFocus) {
+      return base;
+    }
+    return [...base].sort((a, b) => {
+      if (a.id === eventIdFocus) return -1;
+      if (b.id === eventIdFocus) return 1;
+      return 0;
+    });
+  }, [data?.items, eventIdFocus]);
   const pagination = data?.pagination;
 
   const resolve = async (eventId: string, next: "approved" | "rejected"): Promise<void> => {
@@ -109,6 +127,11 @@ export function SecurityCenterPage(): ReactElement {
             </Button>
           </div>
         </div>
+        {adminIdFilter ? (
+          <div className="muted" style={{ marginBottom: 12 }}>
+            Showing requests for selected admin account.
+          </div>
+        ) : null}
 
         <Table>
           <thead>
@@ -121,7 +144,7 @@ export function SecurityCenterPage(): ReactElement {
           </thead>
           <tbody>
             {rows.map((row) => (
-              <tr key={row.id}>
+              <tr key={row.id} className={row.id === eventIdFocus ? "security-focus-row" : undefined}>
                 <td>{formatDate(row.createdAt)}</td>
                 <td>{row.adminName ?? row.adminEmail ?? row.adminId}</td>
                 <td>
