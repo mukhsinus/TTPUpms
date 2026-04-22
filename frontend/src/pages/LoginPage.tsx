@@ -64,6 +64,10 @@ export function LoginPage(): ReactElement {
         loginPassword,
         adminPanelLogin ? { authSource: "admin_panel" } : undefined,
       );
+      await api.syncSessionRoleFromServer({
+        authSource: adminPanelLogin ? "admin_panel" : undefined,
+        strict: true,
+      });
       toast.success("Welcome back.");
       navigate("/dashboard", { replace: true });
     } catch (err) {
