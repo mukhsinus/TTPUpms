@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useState, type ReactElement } from "react";
-import { AlertCircle, CircleUserRound, ExternalLink, FileQuestion, FileText, Medal, ShieldCheck } from "lucide-react";
+import {
+  AlertCircle,
+  BriefcaseBusiness,
+  CircleUserRound,
+  ExternalLink,
+  FileQuestion,
+  FileText,
+  Medal,
+  NotepadText,
+  ShieldCheck,
+} from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   api,
@@ -290,7 +300,6 @@ export function AdminSubmissionDetailPage(): ReactElement {
             <ModerationStatusBadge status={submission.status} />
           </div>
           <div className="admin-submission-hero-divider" />
-          {submission.description?.trim() ? <p>{submission.description}</p> : null}
           <div className="admin-submission-student-head">
             <CircleUserRound size={16} />
             <span>Student information</span>
@@ -317,6 +326,12 @@ export function AdminSubmissionDetailPage(): ReactElement {
           ) : (
             <p className="muted">No user profile joined.</p>
           )}
+          {submission.description?.trim() ? (
+            <div className="admin-submission-description-card">
+              <p className="admin-submission-description-label">Submission description</p>
+              <p className="admin-submission-description-text">{submission.description}</p>
+            </div>
+          ) : null}
           {submission.reviewedAt ? (
             <p className="muted admin-submission-meta-note">
               Reviewed: {new Date(submission.reviewedAt).toLocaleString()}
@@ -330,15 +345,7 @@ export function AdminSubmissionDetailPage(): ReactElement {
           ) : null}
         </Card>
 
-        {detail.link ? (
-          <Card title="Link">
-            <a href={detail.link} target="_blank" rel="noreferrer" className="admin-external-link">
-              {detail.link} <ExternalLink size={14} style={{ verticalAlign: "middle" }} />
-            </a>
-          </Card>
-        ) : null}
-
-        <Card title="Achievements">
+        <Card title="Achievements" className="admin-achievements-card">
           <div className="items-stack">
             {detail.items.map((item) => (
               <article className="item-card admin-achievement-item-card" key={item.id}>
@@ -347,97 +354,133 @@ export function AdminSubmissionDetailPage(): ReactElement {
                     <span className="admin-achievement-item-icon" aria-hidden>
                       <Medal size={18} />
                     </span>
-                    <h4>{item.title}</h4>
+                    <div className="admin-achievement-item-title-block">
+                      <span className="admin-achievement-item-kicker">Achievement</span>
+                      <h4>{item.title}</h4>
+                    </div>
                   </div>
-                  <ModerationStatusBadge status={item.status} />
+                  <div className="admin-achievement-item-head-right">
+                    <ModerationStatusBadge status={item.status} />
+                  </div>
                 </div>
-                <p className="muted admin-achievement-category-row">
-                  {resolveCategoryDisplay(item)}
-                  {item.subcategoryLabel || item.subcategorySlug
-                    ? ` · ${item.subcategoryLabel ?? item.subcategorySlug}`
-                    : ""}
-                </p>
-                <p>{item.description?.trim() ? item.description : "—"}</p>
+                <div className="admin-achievement-info-grid">
+                  <div className="admin-achievement-info-cell">
+                    <div className="admin-achievement-info-head-row">
+                      <div className="admin-achievement-info-head">
+                        <span className="admin-achievement-info-icon" aria-hidden>
+                          <BriefcaseBusiness size={14} />
+                        </span>
+                        <p className="admin-achievement-info-label">Category</p>
+                      </div>
+                      {item.externalLink ? (
+                        <a href={item.externalLink} target="_blank" rel="noreferrer" className="admin-achievement-category-link">
+                          View item link <ExternalLink size={13} />
+                        </a>
+                      ) : null}
+                    </div>
+                    <p className="admin-achievement-info-value admin-achievement-category-value">
+                      <span className="admin-achievement-category-main">{resolveCategoryDisplay(item)}</span>
+                      {item.subcategoryLabel || item.subcategorySlug ? (
+                        <>
+                          <span className="admin-achievement-category-sep">·</span>
+                          <span className="admin-achievement-category-sub">{item.subcategoryLabel ?? item.subcategorySlug}</span>
+                        </>
+                      ) : null}
+                    </p>
+                  </div>
+                  <div className="admin-achievement-info-cell">
+                    <div className="admin-achievement-info-head">
+                      <span className="admin-achievement-info-icon" aria-hidden>
+                        <NotepadText size={14} />
+                      </span>
+                      <p className="admin-achievement-info-label">Student description</p>
+                    </div>
+                    <p className="admin-achievement-info-value admin-achievement-description-value">
+                      {item.description?.trim() ? item.description : "—"}
+                    </p>
+                  </div>
+                </div>
                 {item.reviewerComment?.trim() ? (
                   <p className="muted">
                     <strong>Moderator comment:</strong> {item.reviewerComment}
                   </p>
                 ) : null}
-                {item.externalLink ? (
-                  <p className="muted">
-                    <a href={item.externalLink} target="_blank" rel="noreferrer">
-                      Item link
-                    </a>
-                  </p>
-                ) : null}
-                {item.proofFileUrl ? <SubmissionItemProof proofFileUrl={item.proofFileUrl} /> : null}
-                {!item.proofFileUrl && item.proofFileMissing ? (
-                  <p className="muted">
-                    <strong>Proof:</strong> file was submitted, but it is missing in storage.
-                  </p>
-                ) : null}
-                {canModerateItems ? (
-                  <div className="item-review-panel admin-item-moderation-panel">
-                    <p className="muted item-review-heading admin-item-moderation-heading">
-                      <ShieldCheck size={16} />
-                      <strong>Item moderation</strong>
-                    </p>
-                    <label className="item-review-field">
-                      <span>Approved score</span>
-                      <Input
-                        type="number"
-                        min={0}
-                        max={
-                          Number.isFinite(
+                <div className="admin-achievement-lower-grid">
+                  <div className="admin-achievement-proof-card">
+                    {item.proofFileUrl ? <SubmissionItemProof proofFileUrl={item.proofFileUrl} variant="admin" /> : null}
+                    {!item.proofFileUrl && item.proofFileMissing ? (
+                      <p className="muted">
+                        <strong>Proof:</strong> file was submitted, but it is missing in storage.
+                      </p>
+                    ) : null}
+                  </div>
+                  {canModerateItems ? (
+                    <div className="item-review-panel admin-item-moderation-panel">
+                      <p className="muted item-review-heading admin-item-moderation-heading">
+                        <ShieldCheck size={16} />
+                        <strong>Item moderation</strong>
+                      </p>
+                      <label className="item-review-field">
+                        <span>Approved score</span>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={
+                            Number.isFinite(
+                              categoryCaps[normalizeCategoryKey(item.categoryCode ?? item.categoryName)] ??
+                                CATEGORY_SCORE_CAP_FALLBACKS[normalizeCategoryKey(item.categoryCode ?? item.categoryName)],
+                            )
+                              ? (categoryCaps[normalizeCategoryKey(item.categoryCode ?? item.categoryName)] ??
+                                  CATEGORY_SCORE_CAP_FALLBACKS[normalizeCategoryKey(item.categoryCode ?? item.categoryName)])
+                              : undefined
+                          }
+                          step="0.01"
+                          value={itemDrafts[item.id]?.score ?? ""}
+                          disabled={savingItemId === item.id}
+                          onChange={(event) =>
+                            setItemDrafts((drafts) => ({
+                              ...drafts,
+                              [item.id]: {
+                                ...drafts[item.id],
+                                score: event.target.value,
+                                comment: drafts[item.id]?.comment ?? "",
+                              },
+                            }))
+                          }
+                        />
+                        <small className="muted">
+                          {`Allowed range: 0-${
                             categoryCaps[normalizeCategoryKey(item.categoryCode ?? item.categoryName)] ??
-                              CATEGORY_SCORE_CAP_FALLBACKS[normalizeCategoryKey(item.categoryCode ?? item.categoryName)],
-                          )
-                            ? (categoryCaps[normalizeCategoryKey(item.categoryCode ?? item.categoryName)] ??
-                                CATEGORY_SCORE_CAP_FALLBACKS[normalizeCategoryKey(item.categoryCode ?? item.categoryName)])
-                            : undefined
-                        }
-                        step="0.01"
-                        value={itemDrafts[item.id]?.score ?? ""}
-                        disabled={savingItemId === item.id}
-                        onChange={(event) =>
-                          setItemDrafts((drafts) => ({
-                            ...drafts,
-                            [item.id]: {
-                              ...drafts[item.id],
-                              score: event.target.value,
-                              comment: drafts[item.id]?.comment ?? "",
-                            },
-                          }))
-                        }
-                      />
-                      <small className="muted">
-                        {`Allowed range: 0-${
-                          categoryCaps[normalizeCategoryKey(item.categoryCode ?? item.categoryName)] ??
-                          CATEGORY_SCORE_CAP_FALLBACKS[normalizeCategoryKey(item.categoryCode ?? item.categoryName)] ??
-                          "?"
-                        }`}
-                      </small>
-                    </label>
-                    <label className="item-review-field">
-                      <span>Comment (optional)</span>
-                      <textarea
-                        className="ui-input item-review-comment"
-                        rows={3}
-                        value={itemDrafts[item.id]?.comment ?? ""}
-                        disabled={savingItemId === item.id}
-                        onChange={(event) =>
-                          setItemDrafts((drafts) => ({
-                            ...drafts,
-                            [item.id]: {
-                              ...drafts[item.id],
-                              comment: event.target.value,
-                              score: drafts[item.id]?.score ?? "",
-                            },
-                          }))
-                        }
-                      />
-                    </label>
-                    <div className="actions-wrap">
+                            CATEGORY_SCORE_CAP_FALLBACKS[normalizeCategoryKey(item.categoryCode ?? item.categoryName)] ??
+                            "?"
+                          }`}
+                        </small>
+                      </label>
+                      <label className="item-review-field">
+                        <span>Comment (optional)</span>
+                        <textarea
+                          className="ui-input item-review-comment"
+                          rows={5}
+                          value={itemDrafts[item.id]?.comment ?? ""}
+                          disabled={savingItemId === item.id}
+                          onChange={(event) =>
+                            setItemDrafts((drafts) => ({
+                              ...drafts,
+                              [item.id]: {
+                                ...drafts[item.id],
+                                comment: event.target.value,
+                                score: drafts[item.id]?.score ?? "",
+                              },
+                            }))
+                          }
+                        />
+                      </label>
+                      <p className="admin-item-comment-counter">{(itemDrafts[item.id]?.comment ?? "").length} / 500</p>
+                    </div>
+                  ) : null}
+                </div>
+                {canModerateItems ? (
+                  <div className="actions-wrap admin-item-moderation-actions admin-achievement-actions-row">
                       <Button
                         type="button"
                         variant="secondary"
@@ -456,7 +499,6 @@ export function AdminSubmissionDetailPage(): ReactElement {
                       >
                         {savingItemId === item.id ? "Saving…" : "Reject item"}
                       </Button>
-                    </div>
                   </div>
                 ) : null}
               </article>

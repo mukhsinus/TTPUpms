@@ -1,3 +1,4 @@
+import { Download, ExternalLink, Search, ShieldCheck } from "lucide-react";
 import { memo, useEffect, useRef, useState, type ReactElement } from "react";
 
 function proofKindFromUrl(url: string): "image" | "pdf" | "unknown" {
@@ -19,6 +20,7 @@ function proofKindFromUrl(url: string): "image" | "pdf" | "unknown" {
 
 interface SubmissionItemProofProps {
   proofFileUrl: string;
+  variant?: "default" | "admin";
 }
 
 /**
@@ -27,6 +29,7 @@ interface SubmissionItemProofProps {
  */
 export const SubmissionItemProof = memo(function SubmissionItemProof({
   proofFileUrl,
+  variant = "default",
 }: SubmissionItemProofProps): ReactElement {
   const rootRef = useRef<HTMLDivElement>(null);
   const [showEmbed, setShowEmbed] = useState(false);
@@ -51,6 +54,60 @@ export const SubmissionItemProof = memo(function SubmissionItemProof({
 
   const kind = proofKindFromUrl(proofFileUrl);
   const wantsEmbed = kind === "image" || kind === "pdf";
+
+  if (variant === "admin") {
+    return (
+      <div ref={rootRef} className="item-proof-block item-proof-block-admin">
+        <p className="muted item-proof-label item-proof-admin-head">
+          <span className="item-proof-admin-icon" aria-hidden>
+            <ShieldCheck size={14} />
+          </span>
+          <strong>Proof</strong>
+        </p>
+        <div className="item-proof-thumb-frame">
+          <a
+            className="item-proof-open-btn"
+            href={proofFileUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Open proof"
+          >
+            <Search size={14} />
+          </a>
+          {wantsEmbed && !showEmbed ? <div className="item-proof-thumb-skeleton" aria-hidden /> : null}
+          {showEmbed && kind === "image" ? (
+            <img
+              src={proofFileUrl}
+              alt=""
+              className="item-proof-thumb-image"
+              loading="lazy"
+              decoding="async"
+              fetchPriority="low"
+            />
+          ) : null}
+          {showEmbed && kind === "pdf" ? (
+            <object
+              className="item-proof-thumb-pdf"
+              data={proofFileUrl}
+              type="application/pdf"
+              title="PDF preview"
+            />
+          ) : null}
+        </div>
+        <div className="item-proof-actions item-proof-actions-under">
+          <a className="ui-link" href={proofFileUrl} target="_blank" rel="noopener noreferrer">
+            Open in new tab <ExternalLink size={13} />
+          </a>
+          <a className="ui-link item-proof-download" href={proofFileUrl} download rel="noopener noreferrer">
+            Download <Download size={13} />
+          </a>
+        </div>
+        {kind === "unknown" ? (
+          <p className="muted item-proof-fallback">Preview unavailable - use open or download.</p>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div ref={rootRef} className="item-proof-block">
