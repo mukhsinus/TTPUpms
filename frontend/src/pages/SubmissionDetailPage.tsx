@@ -30,7 +30,25 @@ const CATEGORY_SCORE_CAP_FALLBACKS: Record<string, number> = {
 };
 
 function normalizeCategoryKey(value: string | null | undefined): string {
-  return (value ?? "").trim().toLowerCase();
+  return (value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+}
+
+function resolveCategoryCap(item: SubmissionItem, categoryCaps: Record<string, number>): number | undefined {
+  const keys = [normalizeCategoryKey(item.category)].filter(Boolean);
+  for (const key of keys) {
+    const fromApi = categoryCaps[key];
+    if (Number.isFinite(fromApi) && fromApi > 0) {
+      return fromApi;
+    }
+    const fallback = CATEGORY_SCORE_CAP_FALLBACKS[key];
+    if (Number.isFinite(fallback) && fallback > 0) {
+      return fallback;
+    }
+  }
+  return undefined;
 }
 
 function displayItemStatus(item: SubmissionItem): string {
@@ -210,15 +228,13 @@ export function SubmissionDetailPage(): ReactElement {
   const submitItemReview = async (item: SubmissionItem, decision: "approved" | "rejected"): Promise<void> => {
     if (!submissionId || !canReview) return;
     const draft = itemDrafts[item.id];
-    const categoryKey = normalizeCategoryKey(item.category);
-    const capFromApi = categoryCaps[categoryKey];
-    const cap = Number.isFinite(capFromApi) ? capFromApi : CATEGORY_SCORE_CAP_FALLBACKS[categoryKey];
+    const cap = resolveCategoryCap(item, categoryCaps);
     const score = Number(draft?.score ?? "");
     if (Number.isNaN(score) || score < 0) {
       setActionError("Enter a valid score for this item.");
       return;
     }
-    if (Number.isFinite(cap) && score > cap) {
+    if (cap !== undefined && score > cap) {
       setActionError(`Allowed range: 0-${cap}`);
       return;
     }
@@ -422,13 +438,7 @@ export function SubmissionDetailPage(): ReactElement {
                           type="number"
                           min={0}
                           max={
-                            Number.isFinite(
-                              categoryCaps[normalizeCategoryKey(item.category)] ??
-                                CATEGORY_SCORE_CAP_FALLBACKS[normalizeCategoryKey(item.category)],
-                            )
-                              ? (categoryCaps[normalizeCategoryKey(item.category)] ??
-                                  CATEGORY_SCORE_CAP_FALLBACKS[normalizeCategoryKey(item.category)])
-                              : undefined
+                            resolveCategoryCap(item, categoryCaps)
                           }
                           step="0.01"
                           value={itemDrafts[item.id]?.score ?? ""}
@@ -442,9 +452,7 @@ export function SubmissionDetailPage(): ReactElement {
                         />
                         <small className="muted">
                           Allowed range: 0-
-                          {categoryCaps[normalizeCategoryKey(item.category)] ??
-                            CATEGORY_SCORE_CAP_FALLBACKS[normalizeCategoryKey(item.category)] ??
-                            "?"}
+                          {resolveCategoryCap(item, categoryCaps) ?? "?"}
                         </small>
                       </label>
                       <label className="item-review-field">

@@ -118,7 +118,14 @@ export class CategoriesRepository {
   async listCategories(): Promise<CategoryListItem[]> {
     const result = await this.app.db.query<CategoryListRow>(
       `
-      SELECT id, name, type, min_score, max_score, requires_review, created_at
+      SELECT
+        id,
+        name,
+        type,
+        COALESCE(min_points, min_score)::text AS min_score,
+        COALESCE(NULLIF(max_points, 0), NULLIF(max_score, 0), max_points, max_score)::text AS max_score,
+        requires_review,
+        created_at
       FROM public.categories
       ORDER BY name ASC
       `,
@@ -137,9 +144,16 @@ export class CategoriesRepository {
   }): Promise<CategoryListItem> {
     const result = await this.app.db.query<CategoryListRow>(
       `
-      INSERT INTO public.categories (name, type, min_score, max_score, description, requires_review)
-      VALUES ($1, $2::public.category_scoring_type, $3, $4, $5, $6)
-      RETURNING id, name, type, min_score, max_score, requires_review, created_at
+      INSERT INTO public.categories (name, type, min_score, max_score, min_points, max_points, description, requires_review)
+      VALUES ($1, $2::public.category_scoring_type, $3, $4, $3, $4, $5, $6)
+      RETURNING
+        id,
+        name,
+        type,
+        COALESCE(min_points, min_score)::text AS min_score,
+        COALESCE(NULLIF(max_points, 0), NULLIF(max_score, 0), max_points, max_score)::text AS max_score,
+        requires_review,
+        created_at
       `,
       [input.name, input.type, input.minScore, input.maxScore, input.description, input.requiresReview],
     );
@@ -150,7 +164,15 @@ export class CategoriesRepository {
   async listScoringConfiguration(): Promise<CategoryEntity[]> {
     const categoriesResult = await this.app.db.query<CategoryRow>(
       `
-      SELECT id, name, type, min_score, max_score, description, requires_review, created_at
+      SELECT
+        id,
+        name,
+        type,
+        COALESCE(min_points, min_score)::text AS min_score,
+        COALESCE(NULLIF(max_points, 0), NULLIF(max_score, 0), max_points, max_score)::text AS max_score,
+        description,
+        requires_review,
+        created_at
       FROM public.categories
       ORDER BY name ASC
       `,
