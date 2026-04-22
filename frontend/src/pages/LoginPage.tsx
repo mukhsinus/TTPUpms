@@ -9,6 +9,7 @@ import { validateSupabaseEnvForUi } from "../lib/supabase-env";
 import { useToast } from "../contexts/ToastContext";
 
 type AuthTab = "login" | "register";
+type AuthNoticeTone = "info" | "success" | "warning";
 
 const PASSWORD_MIN_LENGTH = 6;
 
@@ -24,6 +25,7 @@ export function LoginPage(): ReactElement {
   const [loginLoading, setLoginLoading] = useState(false);
   const [registerLoading, setRegisterLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [authNotice, setAuthNotice] = useState<{ tone: AuthNoticeTone; text: string } | null>(null);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const supabaseEnv = validateSupabaseEnvForUi();
@@ -72,6 +74,18 @@ export function LoginPage(): ReactElement {
             ? err.message
             : "Invalid credentials";
       setError(message);
+      const normalized = message.toLowerCase();
+      if (normalized.includes("pending superadmin approval")) {
+        setAuthNotice({
+          tone: "warning",
+          text: "Your request is under review by superadmin. Access will unlock right after approval.",
+        });
+      } else if (normalized.includes("rejected by superadmin")) {
+        setAuthNotice({
+          tone: "warning",
+          text: "This admin account was rejected by superadmin and cannot access the admin panel.",
+        });
+      }
       toast.error(message);
     } finally {
       setLoginLoading(false);
@@ -89,11 +103,15 @@ export function LoginPage(): ReactElement {
         email: registerEmail,
         password: registerPassword,
       });
-      toast.success("Account created successfully");
+      toast.success("Registration request sent");
       setActiveTab("login");
       setLoginEmail(registerEmail.trim());
       setLoginPassword("");
       setRegisterPassword("");
+      setAuthNotice({
+        tone: "success",
+        text: "Your admin request is submitted. You can sign in after superadmin approval.",
+      });
     } catch (err) {
       const message =
         err instanceof ApiError
@@ -123,6 +141,26 @@ export function LoginPage(): ReactElement {
             ? "Admin panel — only allowlisted operator accounts can access moderation."
             : "Sign in with your university account"}
         </p>
+        {adminPanelLogin ? (
+          <div className={`auth-notice ${authNotice?.tone === "warning" ? "auth-notice-warning" : "auth-notice-info"}`}>
+            <strong>Approval flow:</strong> New admin accounts become active only after superadmin confirmation.
+          </div>
+        ) : null}
+        {authNotice ? (
+          <div
+            className={`auth-notice ${
+              authNotice.tone === "success"
+                ? "auth-notice-success"
+                : authNotice.tone === "warning"
+                  ? "auth-notice-warning"
+                  : "auth-notice-info"
+            }`}
+            role="status"
+            aria-live="polite"
+          >
+            {authNotice.text}
+          </div>
+        ) : null}
         <div className="auth-tabs" role="tablist" aria-label="Authentication mode">
           <button
             type="button"

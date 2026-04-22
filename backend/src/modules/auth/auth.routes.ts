@@ -70,6 +70,31 @@ function toClientRegisterErrorMessage(error: unknown): string {
   return "Unexpected server error";
 }
 
+async function ensureAdminSecurityTables(app: FastifyInstance): Promise<void> {
+  await app.db.query(`
+    CREATE TABLE IF NOT EXISTS public.admin_security_events (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      admin_id uuid NOT NULL REFERENCES public.users (id) ON DELETE CASCADE,
+      type text NOT NULL,
+      metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+      status text NOT NULL DEFAULT 'pending',
+      approved_by uuid NULL REFERENCES public.users (id) ON DELETE SET NULL,
+      approved_at timestamptz NULL,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      CONSTRAINT admin_security_events_status_check CHECK (status IN ('pending', 'approved', 'rejected')),
+      CONSTRAINT admin_security_events_type_check CHECK (
+        type IN ('new_device_login', 'logout_others_request', 'admin_registration')
+      )
+    )
+  `);
+  await app.db.query(`
+    CREATE INDEX IF NOT EXISTS idx_admin_security_events_pending
+    ON public.admin_security_events (status, type, created_at DESC)
+    WHERE status = 'pending'
+  `);
+}
+
 export async function authRoutes(app: FastifyInstance): Promise<void> {
   const notifications = new NotificationService(app);
   const audit = new AuditLogRepository(app);
@@ -89,7 +114,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
           fullName: body.full_name,
           email: body.email.trim().toLowerCase(),
           password: body.password,
-        });
+        }, notifications);
         reply.status(201).send(success({ ok: true }));
       } catch (error) {
         request.log.error({ err: error }, "Admin registration failed");
@@ -114,7 +139,9 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 async function registerAdminAccount(
   app: FastifyInstance,
   input: { fullName: string; email: string; password: string },
+  notifications: NotificationService,
 ): Promise<void> {
+  await ensureAdminSecurityTables(app);
   const { data, error } = await app.supabaseAdmin.auth.admin.createUser({
     email: input.email,
     password: input.password,
@@ -165,6 +192,35 @@ async function registerAdminAccount(
       `,
       [userId, input.email],
     );
+    await client.query(
+      `
+      INSERT INTO public.admin_security_events (
+        admin_id,
+        type,
+        metadata,
+        status,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        $1::uuid,
+        'admin_registration',
+        $2::jsonb,
+        'pending',
+        NOW(),
+        NOW()
+      )
+      `,
+      [
+        userId,
+        JSON.stringify({
+          fullName: input.fullName,
+          email: input.email,
+          requestedAt: new Date().toISOString(),
+          source: "self_register",
+        }),
+      ],
+    );
     await client.query("COMMIT");
   } catch (dbErr) {
     await client.query("ROLLBACK");
@@ -177,6 +233,11 @@ async function registerAdminAccount(
   } finally {
     client.release();
   }
+
+  app.log.info({ userId, email: input.email }, "Admin registration request created and queued for superadmin approval");
+  notifications.notifySuperadminsSecurityAlert(
+    `New admin registration request: ${input.fullName} <${input.email}>. Review in Security Center.`,
+  );
 }
 
 async function handleMe(
@@ -218,6 +279,46 @@ async function handleMe(
   }
 
   const role = toRole(roleText) ?? request.user.role;
+
+  if (adminPanelLogin && role === "admin") {
+    await ensureAdminSecurityTables(app);
+    const regDecision = await pool.query<{ status: "pending" | "approved" | "rejected" }>(
+      `
+      SELECT status::text AS status
+      FROM public.admin_security_events
+      WHERE admin_id = $1::uuid
+        AND type = 'admin_registration'
+      ORDER BY created_at DESC
+      LIMIT 1
+      `,
+      [id],
+    );
+    const latestRegistrationStatus = regDecision.rows[0]?.status;
+    if (latestRegistrationStatus === "pending") {
+      reply
+        .status(403)
+        .send(
+          failure(
+            "Your admin account is pending superadmin approval. You can sign in after confirmation.",
+            "ADMIN_APPROVAL_PENDING",
+            {},
+          ),
+        );
+      return;
+    }
+    if (latestRegistrationStatus === "rejected") {
+      reply
+        .status(403)
+        .send(
+          failure(
+            "Access denied. This admin account was rejected by superadmin.",
+            "ADMIN_APPROVAL_REJECTED",
+            {},
+          ),
+        );
+      return;
+    }
+  }
 
   if (adminPanelLogin && (role === "admin" || role === "superadmin")) {
     const rawSessionToken = request.headers["x-admin-session-id"];

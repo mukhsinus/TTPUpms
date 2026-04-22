@@ -348,7 +348,6 @@ export class AdminProfileService {
     }
 
     const fingerprint = fingerprintFromSignals(input.userAgent, input.ip);
-    const hadAnySession = await this.repository.hasAnySessionHistory(input.adminId);
     const knownFingerprint = await this.repository.hasKnownFingerprint(input.adminId, fingerprint);
     await this.repository.createSession({
       adminId: input.adminId,
@@ -357,22 +356,6 @@ export class AdminProfileService {
       ip: input.ip,
       userAgent: input.userAgent,
     });
-
-    if (!hadAnySession) {
-      await this.repository.createSecurityEvent({
-        adminId: input.adminId,
-        type: "admin_registration",
-        metadata: {
-          sessionToken: input.sessionToken,
-          ip: input.ip,
-          userAgent: input.userAgent,
-          createdAt: new Date().toISOString(),
-        },
-      });
-      this.notifications.notifySuperadminsSecurityAlert(
-        `Security alert: new admin registration/login detected for ${input.displayName} (${input.adminId}).`,
-      );
-    }
 
     if (!knownFingerprint) {
       await this.repository.createSecurityEvent({

@@ -343,10 +343,106 @@ export class SuperadminService {
     status: "approved" | "rejected";
     actorUserId: string;
   }): Promise<void> {
-    const ok = await this.repository.resolveSecurityEvent(input.eventId, input.status, input.actorUserId);
-    if (!ok) {
-      throw new ServiceError(404, "Pending security event not found");
+    const client = await this.app.db.connect();
+    try {
+      await client.query("BEGIN");
+      const eventResult = await client.query<{
+        admin_id: string;
+        type: "new_device_login" | "logout_others_request" | "admin_registration";
+      }>(
+        `
+        SELECT admin_id::text AS admin_id, type::text AS type
+        FROM public.admin_security_events
+        WHERE id = $1::uuid
+          AND status = 'pending'
+        FOR UPDATE
+        `,
+        [input.eventId],
+      );
+      const eventRow = eventResult.rows[0];
+      if (!eventRow) {
+        throw new ServiceError(404, "Pending security event not found");
+      }
+
+      await client.query(
+        `
+        UPDATE public.admin_security_events
+        SET
+          status = $2,
+          approved_by = $3::uuid,
+          approved_at = NOW(),
+          updated_at = NOW()
+        WHERE id = $1::uuid
+        `,
+        [input.eventId, input.status, input.actorUserId],
+      );
+
+      if (eventRow.type === "admin_registration") {
+        if (input.status === "approved") {
+          await client.query(
+            `
+            UPDATE public.users
+            SET role = 'admin'::public.user_role, updated_at = NOW()
+            WHERE id = $1::uuid
+            `,
+            [eventRow.admin_id],
+          );
+          await client.query(
+            `
+            INSERT INTO public.admin_users (id, email, role, status, created_at)
+            SELECT u.id, u.email, 'admin'::public.user_role, 'active'::public.admin_account_status, COALESCE(u.created_at, NOW())
+            FROM public.users u
+            WHERE u.id = $1::uuid
+            ON CONFLICT (id) DO UPDATE SET
+              email = EXCLUDED.email,
+              role = CASE
+                WHEN public.admin_users.role::text = 'superadmin' THEN public.admin_users.role
+                ELSE 'admin'::public.user_role
+              END,
+              status = 'active'::public.admin_account_status,
+              suspended_at = NULL,
+              suspended_by = NULL,
+              suspension_reason = NULL
+            `,
+            [eventRow.admin_id],
+          );
+        } else {
+          await client.query(
+            `
+            UPDATE public.users
+            SET role = 'student'::public.user_role, updated_at = NOW()
+            WHERE id = $1::uuid
+            `,
+            [eventRow.admin_id],
+          );
+          await client.query(
+            `
+            DELETE FROM public.admin_users
+            WHERE id = $1::uuid
+              AND role::text <> 'superadmin'
+            `,
+            [eventRow.admin_id],
+          );
+          await client.query(
+            `
+            UPDATE public.admin_sessions
+            SET revoked_at = NOW(), last_seen_at = NOW()
+            WHERE admin_id = $1::uuid
+              AND revoked_at IS NULL
+            `,
+            [eventRow.admin_id],
+          );
+        }
+      }
+
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
     }
+
     await this.audit.insert({
       actorUserId: input.actorUserId,
       entityTable: "admin_security_events",

@@ -955,7 +955,7 @@ export const api = {
   },
 
   /** Fetches `public.users.role` from the API and stores it for `getSessionUser` / RequireRole. */
-  async syncSessionRoleFromServer(options?: { authSource?: "admin_panel"; token?: string }): Promise<void> {
+  async syncSessionRoleFromServer(options?: { authSource?: "admin_panel"; token?: string; strict?: boolean }): Promise<void> {
     if (!sessionIsValid()) {
       return;
     }
@@ -977,8 +977,16 @@ export const api = {
             forceAdminSessionHeader: options?.authSource === "admin_panel",
           },
         );
+        if (result.error) {
+          if (options?.strict) {
+            throw new ApiError(result.error, result.statusCode);
+          }
+          return;
+        }
         if (result.data?.role) {
           setSessionRoleFromServer(result.data.role);
+        } else if (options?.strict) {
+          throw new ApiError("Unable to validate admin access state.", 500);
         }
       } finally {
         syncSessionRoleInFlight = null;
@@ -1010,6 +1018,15 @@ export const api = {
     adminSubmissionDetailCache.clear();
     adminSubmissionDetailInFlight.clear();
     adminSearchSuggestionsCache.clear();
+    if (options?.authSource === "admin_panel") {
+      try {
+        await this.syncSessionRoleFromServer({ authSource: options.authSource, token, strict: true });
+      } catch (error) {
+        this.logout();
+        throw error;
+      }
+      return;
+    }
     void this.syncSessionRoleFromServer({ authSource: options?.authSource, token }).catch(() => undefined);
   },
 
