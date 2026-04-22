@@ -826,6 +826,214 @@ body {
   font-family: inherit;
 }
 
+.admin-submission-detail-page {
+  gap: 16px;
+}
+
+.admin-submission-detail-page .detail-main {
+  gap: 14px;
+}
+
+.admin-submission-detail-page .ui-card {
+  border-radius: 18px;
+  border-color: #e7ebf3;
+  box-shadow:
+    0 1px 1px rgba(15, 23, 42, 0.02),
+    0 10px 24px rgba(15, 23, 42, 0.04);
+  padding: 18px;
+}
+
+.admin-submission-hero-head {
+  align-items: flex-start;
+}
+
+.admin-submission-hero-title-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.admin-submission-hero-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: #4f46e5;
+  background: #f1efff;
+  flex-shrink: 0;
+}
+
+.admin-submission-hero-title-wrap h2 {
+  margin: 0;
+  font-size: 2rem;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+
+.admin-submission-hero-divider {
+  margin: 12px 0 14px;
+  border-top: 1px solid #e8edf5;
+}
+
+.admin-submission-student-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #334155;
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.admin-submission-student-head svg {
+  color: #3b82f6;
+}
+
+.admin-submission-student-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid #e8edf5;
+  border-radius: 14px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.admin-submission-student-cell {
+  padding: 12px 16px;
+  border-right: 1px solid #edf2f8;
+  display: grid;
+  gap: 4px;
+}
+
+.admin-submission-student-cell:last-child {
+  border-right: 0;
+}
+
+.admin-submission-student-cell span {
+  color: #64748b;
+  font-size: 0.82rem;
+}
+
+.admin-submission-student-cell strong {
+  color: #0f172a;
+  font-size: 1.02rem;
+  font-weight: 700;
+}
+
+.admin-submission-meta-note {
+  margin-bottom: 0;
+}
+
+.admin-achievement-item-card {
+  border-radius: 14px;
+  border-color: #e8edf5;
+  padding: 14px;
+}
+
+.admin-achievement-item-head {
+  align-items: flex-start;
+}
+
+.admin-achievement-item-title-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.admin-achievement-item-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: #4f46e5;
+  background: #f4f2ff;
+  flex-shrink: 0;
+}
+
+.admin-achievement-item-title-wrap h4 {
+  margin: 1px 0 0;
+  font-size: 1.05rem;
+}
+
+.admin-achievement-category-row {
+  margin-top: 10px;
+}
+
+.admin-submission-detail-page .item-proof-block {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top-color: #e8edf5;
+}
+
+.admin-submission-detail-page .item-proof-label {
+  margin-bottom: 8px;
+}
+
+.admin-submission-detail-page .item-proof-actions {
+  margin-bottom: 10px;
+}
+
+.admin-submission-detail-page .item-proof-image {
+  border-radius: 10px;
+  border-color: #dfe7f4;
+  max-height: 245px;
+}
+
+.admin-item-moderation-panel {
+  margin-top: 14px;
+  border-top: 0;
+  border: 1px solid #e8edf5;
+  border-radius: 14px;
+  padding: 14px;
+  gap: 12px;
+  background: #ffffff;
+}
+
+.admin-item-moderation-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #1e293b;
+}
+
+.admin-item-moderation-heading svg {
+  color: #8b5cf6;
+}
+
+.admin-submission-detail-page .item-review-field .ui-input {
+  border-color: #e2e8f0;
+  border-radius: 11px;
+}
+
+.admin-submission-detail-page .item-review-comment {
+  min-height: 82px;
+}
+
+@media (max-width: 900px) {
+  .admin-submission-student-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-submission-student-cell:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .admin-submission-student-cell {
+    border-bottom: 1px solid #edf2f8;
+  }
+
+  .admin-submission-student-cell:nth-last-child(-n + 2) {
+    border-bottom: 0;
+  }
+
+  .admin-submission-hero-title-wrap h2 {
+    font-size: 1.6rem;
+  }
+}
+
 .ui-link {
   color: #1d4ed8;
   text-decoration: none;

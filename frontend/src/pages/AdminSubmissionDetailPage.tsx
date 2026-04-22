@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactElement } from "react";
-import { AlertCircle, ExternalLink, FileQuestion } from "lucide-react";
+import { AlertCircle, CircleUserRound, ExternalLink, FileQuestion, FileText, Medal, ShieldCheck } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   api,
@@ -178,7 +178,6 @@ export function AdminSubmissionDetailPage(): ReactElement {
   }, [detail?.items]);
 
   const submission = detail?.submission;
-  const itemModeration = detail?.itemModeration;
   const canModerateItems =
     submission?.workflowStatus === "submitted" ||
     submission?.workflowStatus === "review" ||
@@ -277,62 +276,58 @@ export function AdminSubmissionDetailPage(): ReactElement {
   const user = detail.user;
 
   return (
-    <section className="detail-layout detail-layout--single">
+    <section className="detail-layout detail-layout--single admin-submission-detail-page">
       <div className="detail-main">
         {actionError ? <p className="error submission-page-alert">{actionError}</p> : null}
-        <Card>
-          <div className="row-between">
-            <h2>{submission.title}</h2>
+        <Card className="admin-submission-hero-card">
+          <div className="row-between admin-submission-hero-head">
+            <div className="admin-submission-hero-title-wrap">
+              <span className="admin-submission-hero-icon" aria-hidden>
+                <FileText size={24} />
+              </span>
+              <h2>{submission.title}</h2>
+            </div>
             <ModerationStatusBadge status={submission.status} />
           </div>
-          <p>{submission.description?.trim() ? submission.description : "—"}</p>
-          <p className="muted">
-            Workflow: <code>{submission.workflowStatus ?? "—"}</code>
-          </p>
-          <p className="muted">
-            Item moderation aggregate:{" "}
-            <code>{itemModeration?.aggregateStatus ?? "pending"}</code>
-            {itemModeration
-              ? ` (${itemModeration.approvedCount} approved, ${itemModeration.rejectedCount} rejected, ${itemModeration.pendingCount} pending)`
-              : ""}
-          </p>
-          <p className="muted">Total score (approved lines): {submission.totalPoints.toFixed(2)}</p>
+          <div className="admin-submission-hero-divider" />
+          {submission.description?.trim() ? <p>{submission.description}</p> : null}
+          <div className="admin-submission-student-head">
+            <CircleUserRound size={16} />
+            <span>Student information</span>
+          </div>
+          {user ? (
+            <div className="admin-submission-student-grid">
+              <div className="admin-submission-student-cell">
+                <span>Name</span>
+                <strong>{user.studentFullName ?? "—"}</strong>
+              </div>
+              <div className="admin-submission-student-cell">
+                <span>Student ID</span>
+                <strong>{user.studentId ?? "—"}</strong>
+              </div>
+              <div className="admin-submission-student-cell">
+                <span>Faculty</span>
+                <strong>{user.faculty ?? "—"}</strong>
+              </div>
+              <div className="admin-submission-student-cell">
+                <span>Telegram</span>
+                <strong>{user.telegramUsername ?? "—"}</strong>
+              </div>
+            </div>
+          ) : (
+            <p className="muted">No user profile joined.</p>
+          )}
           {submission.reviewedAt ? (
-            <p className="muted">
+            <p className="muted admin-submission-meta-note">
               Reviewed: {new Date(submission.reviewedAt).toLocaleString()}
               {submission.reviewerEmail ? ` · ${submission.reviewerEmail}` : ""}
             </p>
           ) : null}
           {submission.reviewedById ? (
-            <p className="muted">
+            <p className="muted admin-submission-meta-note">
               Processed by: {submission.reviewerEmail ?? submission.reviewedById}
             </p>
           ) : null}
-        </Card>
-
-        <Card title="Student">
-          {user ? (
-            <ul className="submission-timeline">
-              <li>
-                <span className="submission-timeline-label">Name</span>
-                <span className="submission-timeline-value">{user.studentFullName ?? "—"}</span>
-              </li>
-              <li>
-                <span className="submission-timeline-label">Student ID</span>
-                <span className="submission-timeline-value">{user.studentId ?? "—"}</span>
-              </li>
-              <li>
-                <span className="submission-timeline-label">Faculty</span>
-                <span className="submission-timeline-value">{user.faculty ?? "—"}</span>
-              </li>
-              <li>
-                <span className="submission-timeline-label">Telegram</span>
-                <span className="submission-timeline-value">{user.telegramUsername ?? "—"}</span>
-              </li>
-            </ul>
-          ) : (
-            <p className="muted">No user profile joined.</p>
-          )}
         </Card>
 
         {detail.link ? (
@@ -346,12 +341,17 @@ export function AdminSubmissionDetailPage(): ReactElement {
         <Card title="Achievements">
           <div className="items-stack">
             {detail.items.map((item) => (
-              <article className="item-card" key={item.id}>
-                <div className="row-between">
-                  <h4>{item.title}</h4>
+              <article className="item-card admin-achievement-item-card" key={item.id}>
+                <div className="row-between admin-achievement-item-head">
+                  <div className="admin-achievement-item-title-wrap">
+                    <span className="admin-achievement-item-icon" aria-hidden>
+                      <Medal size={18} />
+                    </span>
+                    <h4>{item.title}</h4>
+                  </div>
                   <ModerationStatusBadge status={item.status} />
                 </div>
-                <p className="muted">
+                <p className="muted admin-achievement-category-row">
                   {resolveCategoryDisplay(item)}
                   {item.subcategoryLabel || item.subcategorySlug
                     ? ` · ${item.subcategoryLabel ?? item.subcategorySlug}`
@@ -377,8 +377,9 @@ export function AdminSubmissionDetailPage(): ReactElement {
                   </p>
                 ) : null}
                 {canModerateItems ? (
-                  <div className="item-review-panel">
-                    <p className="muted item-review-heading">
+                  <div className="item-review-panel admin-item-moderation-panel">
+                    <p className="muted item-review-heading admin-item-moderation-heading">
+                      <ShieldCheck size={16} />
                       <strong>Item moderation</strong>
                     </p>
                     <label className="item-review-field">
