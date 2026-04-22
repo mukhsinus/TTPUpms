@@ -53,6 +53,7 @@ export function AdminLayout({ children, onLogout }: AdminLayoutProps): ReactElem
     if (location.pathname.startsWith("/submissions")) return "Submissions";
     return "Dashboard";
   }, [location.pathname]);
+  const isDashboardRoute = location.pathname === "/dashboard";
 
   const prefetchDashboard = (): void => {
     void api.getAdminDashboard({ page: 1, pageSize: 12 }).catch(() => undefined);
@@ -67,7 +68,7 @@ export function AdminLayout({ children, onLogout }: AdminLayoutProps): ReactElem
   const navClose = drawer.isMobileDrawer ? closeDrawer : undefined;
 
   return (
-    <div className="dashboard-shell">
+    <div className={`dashboard-shell${isDashboardRoute ? " dashboard-shell--dashboard" : ""}`}>
       {drawer.isMobileDrawer ? (
         <button
           type="button"

@@ -323,17 +323,17 @@ export function UsersPage(): ReactElement {
                 ))}
               </tbody>
             </Table>
-            <div className="pagination-bar">
+            <div className="pagination-bar admin-pagination">
               <span className="muted">
                 Page {page} of {totalPages} ({total} students)
               </span>
-              <div className="pagination-actions admin-pagination-actions students-pagination-actions">
-                <Button type="button" variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-                  Prev
+              <div className="pagination-actions admin-pagination-actions">
+                <Button type="button" variant="ghost" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+                  Previous
                 </Button>
                 <Button
                   type="button"
-                  variant="secondary"
+                  variant="ghost"
                   disabled={page >= totalPages}
                   onClick={() => setPage((p) => p + 1)}
                 >

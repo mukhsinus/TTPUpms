@@ -3,6 +3,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type
 import {
   AlertCircle,
   Award,
+  ChevronRight,
   CheckCircle2,
   ClipboardList,
   Gavel,
@@ -83,6 +84,15 @@ function formatDateTime(value: string, t: DashT): string {
   const mo = String(d.getMonth() + 1).padStart(2, "0");
   const yy = String(d.getFullYear());
   return `${hh}:${mm} ${dd}/${mo}/${yy}`;
+}
+
+function formatDateOnly(value: string, t: DashT): string {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return t("dateUnavailable");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const yy = String(d.getFullYear());
+  return `${dd}.${mo}.${yy}`;
 }
 
 function reasonLabel(reason: AdminDashboardPayload["needsAttention"][number]["reason"], t: DashT): string {
@@ -363,7 +373,7 @@ export function DashboardPage(): ReactElement {
         </Card>
 
         {systemPhase ? (
-          <Card title={t("systemPhaseTitle")} subtitle={t("systemPhaseSubtitle")}>
+          <Card title={t("systemPhaseTitle")}>
             <p className="muted">
               <strong>{t("systemPhaseCurrent")}: </strong>
               {systemPhase.phase === "submission" ? t("phaseSubmission") : t("phaseEvaluation")}
@@ -377,12 +387,8 @@ export function DashboardPage(): ReactElement {
               {systemPhase.evaluationDeadline ? formatDateTime(systemPhase.evaluationDeadline, t) : t("dateUnavailable")}
             </p>
             <p className="muted">
-              {t("systemPhaseLastChangedAt")}:{" "}
-              {systemPhase.lastChangedAt ? formatDateTime(systemPhase.lastChangedAt, t) : t("dateUnavailable")}
-            </p>
-            <p className="muted">
-              {t("systemPhaseLastChangedBy")}:{" "}
-              {systemPhase.lastChangedBy?.name ?? systemPhase.lastChangedBy?.email ?? t("dateUnavailable")}
+              Last changed by {systemPhase.lastChangedBy?.name ?? systemPhase.lastChangedBy?.email ?? t("dateUnavailable")} at{" "}
+              {systemPhase.lastChangedAt ? formatDateOnly(systemPhase.lastChangedAt, t) : t("dateUnavailable")}
             </p>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
               <Button
@@ -505,6 +511,7 @@ export function DashboardPage(): ReactElement {
               <ClipboardList className="stat-card-icon" size={20} />
             </div>
             <h2 className="stat-card-value">{adminDashboard.pendingCount}</h2>
+            <div className="stat-card-spark stat-card-spark-primary" aria-hidden="true" />
           </Card>
           <Card className="stat-card stat-card-success">
             <div className="stat-card-header">
@@ -516,6 +523,7 @@ export function DashboardPage(): ReactElement {
               {" "}
               {t("hoursShort")}
             </h2>
+            <div className="stat-card-spark stat-card-spark-success" aria-hidden="true" />
           </Card>
           <Card className="stat-card stat-card-warn">
             <div className="stat-card-header">
@@ -527,6 +535,7 @@ export function DashboardPage(): ReactElement {
               {" "}
               {t("hoursShort")}
             </h2>
+            <div className="stat-card-spark stat-card-spark-warn" aria-hidden="true" />
           </Card>
           <Card className="stat-card stat-card-accent">
             <div className="stat-card-header">
@@ -534,10 +543,15 @@ export function DashboardPage(): ReactElement {
               <TrendingUp className="stat-card-icon" size={20} />
             </div>
             <h2 className="stat-card-value">{adminDashboard.processed7d}</h2>
+            <div className="stat-card-spark stat-card-spark-accent" aria-hidden="true" />
           </Card>
         </div>
 
-        <Card title={t("queueHealth")}>
+        <Card>
+          <div className="ops-card-heading">
+            <Award size={16} />
+            <span>{t("queueHealth")}</span>
+          </div>
           <div className="queue-health-row">
             <div className="queue-health-track">
               <div
@@ -550,7 +564,11 @@ export function DashboardPage(): ReactElement {
         </Card>
 
         <section className="ops-main-grid">
-          <Card title={t("needsAttention")}>
+          <Card>
+            <div className="ops-card-heading">
+              <AlertCircle size={16} />
+              <span>{t("needsAttention")}</span>
+            </div>
             {adminDashboard.needsAttention.length === 0 ? (
               <p className="muted">{t("queueClear")}</p>
             ) : (
@@ -563,7 +581,10 @@ export function DashboardPage(): ReactElement {
                     onClick={() => navigate(`/submissions/${row.submissionId}`)}
                   >
                     <span>{row.label}</span>
-                    <small className="muted">{reasonLabel(row.reason, t)}</small>
+                    <span className="needs-attention-meta">
+                      <small className="muted">{reasonLabel(row.reason, t)}</small>
+                      <ChevronRight size={15} />
+                    </span>
                   </button>
                 ))}
               </div>
@@ -571,28 +592,36 @@ export function DashboardPage(): ReactElement {
           </Card>
 
           {systemPhase ? (
-            <Card title={t("systemPhaseTitle")} subtitle={t("systemPhaseSubtitle")}>
-              <div className="system-phase-summary-grid">
-                <p className="muted">
-                  <strong>{t("systemPhaseCurrent")}: </strong>
-                  {systemPhase.phase === "submission" ? t("phaseSubmission") : t("phaseEvaluation")}
-                </p>
-                <p className="muted">
-                  {t("systemPhaseSubmissionDeadline")}:{" "}
-                  {systemPhase.submissionDeadline ? formatDateTime(systemPhase.submissionDeadline, t) : t("dateUnavailable")}
-                </p>
-                <p className="muted">
-                  {t("systemPhaseEvaluationDeadline")}:{" "}
-                  {systemPhase.evaluationDeadline ? formatDateTime(systemPhase.evaluationDeadline, t) : t("dateUnavailable")}
-                </p>
-                <p className="muted">
-                  {t("systemPhaseLastChangedAt")}:{" "}
-                  {systemPhase.lastChangedAt ? formatDateTime(systemPhase.lastChangedAt, t) : t("dateUnavailable")}
-                </p>
-                <p className="muted">
-                  {t("systemPhaseLastChangedBy")}:{" "}
-                  {systemPhase.lastChangedBy?.name ?? systemPhase.lastChangedBy?.email ?? t("dateUnavailable")}
-                </p>
+            <Card>
+              <div className="ops-card-heading">
+                <Gavel size={16} />
+                <span>{t("systemPhaseTitle")}</span>
+              </div>
+              <div className="system-phase-overview">
+                <div className="system-phase-meta-block">
+                  <p className="muted">
+                    <strong>{t("systemPhaseCurrent")}: </strong>
+                    {systemPhase.phase === "submission" ? t("phaseSubmission") : t("phaseEvaluation")}
+                  </p>
+                  <p className="muted">
+                    {t("systemPhaseEvaluationDeadline")}:{" "}
+                    {systemPhase.evaluationDeadline ? formatDateTime(systemPhase.evaluationDeadline, t) : t("dateUnavailable")}
+                  </p>
+                  <p className="muted system-phase-last-change">
+                    Last changed by {systemPhase.lastChangedBy?.name ?? systemPhase.lastChangedBy?.email ?? t("dateUnavailable")} at{" "}
+                    {systemPhase.lastChangedAt ? formatDateOnly(systemPhase.lastChangedAt, t) : t("dateUnavailable")}
+                  </p>
+                </div>
+                <div className="system-phase-deadlines-block">
+                  <p className="system-phase-deadline-row">
+                    <span>{t("systemPhaseSubmissionDeadline")}</span>
+                    <strong>{systemPhase.submissionDeadline ? formatDateTime(systemPhase.submissionDeadline, t) : t("dateUnavailable")}</strong>
+                  </p>
+                  <p className="system-phase-deadline-row">
+                    <span>{t("systemPhaseEvaluationDeadline")}</span>
+                    <strong>{systemPhase.evaluationDeadline ? formatDateTime(systemPhase.evaluationDeadline, t) : t("dateUnavailable")}</strong>
+                  </p>
+                </div>
               </div>
               <div className="system-phase-actions">
                 <Button
