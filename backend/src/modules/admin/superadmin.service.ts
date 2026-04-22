@@ -361,15 +361,22 @@ export class SuperadminService {
     actorUserId: string;
   }): Promise<void> {
     const client = await this.app.db.connect();
+    let resolvedAdminId: string | null = null;
+    let resolvedAdminEmail: string | null = null;
     try {
       await client.query("BEGIN");
       const eventResult = await client.query<{
         admin_id: string;
+        admin_email: string | null;
         type: "new_device_login" | "logout_others_request" | "admin_registration";
       }>(
         `
-        SELECT admin_id::text AS admin_id, type::text AS type
-        FROM public.admin_security_events
+        SELECT
+          ase.admin_id::text AS admin_id,
+          u.email::text AS admin_email,
+          ase.type::text AS type
+        FROM public.admin_security_events ase
+        LEFT JOIN public.users u ON u.id = ase.admin_id
         WHERE id = $1::uuid
           AND status = 'pending'
         FOR UPDATE
@@ -380,6 +387,8 @@ export class SuperadminService {
       if (!eventRow) {
         throw new ServiceError(404, "Pending security event not found");
       }
+      resolvedAdminId = eventRow.admin_id;
+      resolvedAdminEmail = eventRow.admin_email ?? null;
 
       await client.query(
         `
@@ -399,7 +408,7 @@ export class SuperadminService {
           await client.query(
             `
             UPDATE public.users
-            SET role = 'admin'::public.user_role, updated_at = NOW()
+            SET role = 'admin', updated_at = NOW()
             WHERE id = $1::uuid
             `,
             [eventRow.admin_id],
@@ -407,16 +416,16 @@ export class SuperadminService {
           await client.query(
             `
             INSERT INTO public.admin_users (id, email, role, status, created_at)
-            SELECT u.id, u.email, 'admin'::public.user_role, 'active'::public.admin_account_status, COALESCE(u.created_at, NOW())
+            SELECT u.id, u.email, 'admin', 'active', COALESCE(u.created_at, NOW())
             FROM public.users u
             WHERE u.id = $1::uuid
             ON CONFLICT (id) DO UPDATE SET
               email = EXCLUDED.email,
               role = CASE
                 WHEN public.admin_users.role::text = 'superadmin' THEN public.admin_users.role
-                ELSE 'admin'::public.user_role
+                ELSE 'admin'
               END,
-              status = 'active'::public.admin_account_status,
+              status = 'active',
               suspended_at = NULL,
               suspended_by = NULL,
               suspension_reason = NULL
@@ -427,7 +436,7 @@ export class SuperadminService {
           await client.query(
             `
             UPDATE public.users
-            SET role = 'student'::public.user_role, updated_at = NOW()
+            SET role = 'student', updated_at = NOW()
             WHERE id = $1::uuid
             `,
             [eventRow.admin_id],
@@ -462,9 +471,15 @@ export class SuperadminService {
 
     await this.audit.insert({
       actorUserId: input.actorUserId,
+      targetUserId: resolvedAdminId,
       entityTable: "admin_security_events",
       entityId: input.eventId,
       action: input.status === "approved" ? "security_event_approved" : "security_event_rejected",
+      newValues: {
+        page: "security",
+        targetEmail: resolvedAdminEmail,
+        result: input.status,
+      },
     });
   }
 

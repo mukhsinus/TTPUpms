@@ -10,6 +10,8 @@ export class AuditLogRepository {
     "moderation_submission_approved",
     "moderation_submission_rejected",
     "student_profile_updated",
+    "security_event_approved",
+    "security_event_rejected",
   ]);
   private readonly actorSuppressionCache = new Map<string, boolean>();
 

@@ -280,26 +280,42 @@ export function DashboardPage(): ReactElement {
 
     return (
       <section className="dashboard-stack ops-dashboard">
-        <div className="stats-grid stats-grid-four ops-kpis">
+        <div className={`stats-grid stats-grid-four ops-kpis ${kpiPulse ? "kpi-refresh-pulse" : ""}`}>
           <Card className="stat-card stat-card-primary">
-            <p className="stat-card-label">{t("pendingQueue")}</p>
+            <div className="stat-card-header">
+              <p className="stat-card-label">{t("pendingQueue")}</p>
+              <ClipboardList className="stat-card-icon" size={20} />
+            </div>
             <h2 className="stat-card-value">{superDashboard.pendingQueue}</h2>
+            <div className="stat-card-spark stat-card-spark-primary" aria-hidden="true" />
           </Card>
           <Card className="stat-card stat-card-success">
-            <p className="stat-card-label">{t("processed7d")}</p>
+            <div className="stat-card-header">
+              <p className="stat-card-label">{t("processed7d")}</p>
+              <TrendingUp className="stat-card-icon" size={20} />
+            </div>
             <h2 className="stat-card-value">{superDashboard.processed7d}</h2>
+            <div className="stat-card-spark stat-card-spark-success" aria-hidden="true" />
           </Card>
           <Card className="stat-card stat-card-warn">
-            <p className="stat-card-label">{t("avgReviewTime")}</p>
+            <div className="stat-card-header">
+              <p className="stat-card-label">{t("avgReviewTime")}</p>
+              <Timer className="stat-card-icon" size={20} />
+            </div>
             <h2 className="stat-card-value">
-              {superDashboard.avgReviewMinutes.toFixed(2)}
+              {(superDashboard.avgReviewMinutes / 60).toFixed(1)}
               {" "}
-              {t("minutesShort")}
+              {t("hoursShort")}
             </h2>
+            <div className="stat-card-spark stat-card-spark-warn" aria-hidden="true" />
           </Card>
           <Card className="stat-card stat-card-accent">
-            <p className="stat-card-label">{t("activeAdminsToday")}</p>
+            <div className="stat-card-header">
+              <p className="stat-card-label">{t("activeAdminsToday")}</p>
+              <ShieldAlert className="stat-card-icon" size={20} />
+            </div>
             <h2 className="stat-card-value">{superDashboard.activeAdminsToday}</h2>
+            <div className="stat-card-spark stat-card-spark-accent" aria-hidden="true" />
           </Card>
         </div>
 

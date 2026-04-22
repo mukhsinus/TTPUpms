@@ -5,17 +5,35 @@ import type { FastifyInstance } from "fastify";
 import { env } from "../config/env";
 import { failure } from "../utils/http-response";
 
+function normalizeOrigin(input: string): string {
+  return input.trim().replace(/\/+$/, "");
+}
+
 export async function registerSecurityPlugins(app: FastifyInstance): Promise<void> {
   const baselineAllowedOrigins = [
     "https://ttp-upms-frontend.vercel.app",
+    "https://ttpupms-frontend.vercel.app",
     "http://localhost:5173",
     "http://localhost:3000",
+    "*.vercel.app",
   ];
-  const allowedOrigins = new Set(
-    [...baselineAllowedOrigins, ...env.CORS_ORIGIN.split(",")]
-      .map((origin) => origin.trim())
-      .filter((origin) => origin.length > 0),
-  );
+  const configuredOrigins = [
+    ...baselineAllowedOrigins,
+    ...env.CORS_ORIGIN.split(","),
+    ...(process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(",") : []),
+  ]
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0);
+  const allowedOriginSuffixes = new Set<string>();
+  const allowedOrigins = new Set<string>();
+  for (const origin of configuredOrigins) {
+    const normalized = normalizeOrigin(origin);
+    if (normalized.startsWith("*.")) {
+      allowedOriginSuffixes.add(normalized.slice(1).toLowerCase());
+      continue;
+    }
+    allowedOrigins.add(normalized);
+  }
 
   await app.register(helmet, {
     global: true,
@@ -31,7 +49,22 @@ export async function registerSecurityPlugins(app: FastifyInstance): Promise<voi
         callback(null, true);
         return;
       }
-      callback(null, allowedOrigins.has(origin));
+      const normalizedOrigin = normalizeOrigin(origin);
+      if (allowedOrigins.has(normalizedOrigin)) {
+        callback(null, true);
+        return;
+      }
+      const host = (() => {
+        try {
+          return new URL(normalizedOrigin).hostname.toLowerCase();
+        } catch {
+          return "";
+        }
+      })();
+      const allowedBySuffix = host
+        ? Array.from(allowedOriginSuffixes).some((suffix) => host.endsWith(suffix))
+        : false;
+      callback(null, allowedBySuffix);
     },
     credentials: true,
     methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],

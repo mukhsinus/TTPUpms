@@ -43,8 +43,9 @@ function deriveDateRange(
   return { dateFrom: from.toISOString(), dateTo: to.toISOString() };
 }
 
-function pageLabel(action: string): "Dashboard" | "Submissions" | "Students" {
+function pageLabel(action: string): "Dashboard" | "Submissions" | "Students" | "Security" {
   if (action === "project_phase_changed") return "Dashboard";
+  if (action === "security_event_approved" || action === "security_event_rejected") return "Security";
   if (action === "student_profile_updated") return "Students";
   return "Submissions";
 }
@@ -52,12 +53,24 @@ function pageLabel(action: string): "Dashboard" | "Submissions" | "Students" {
 function actionLabel(action: string): string {
   if (action === "project_phase_changed") return "Project phase changed";
   if (action === "student_profile_updated") return "Student profile updated";
+  if (action === "security_event_approved") return "Security request approved";
+  if (action === "security_event_rejected") return "Security request rejected";
   if (action === "moderation_submission_rejected") return "Submission rejected";
   return "Submission approved";
 }
 
 function targetLabel(row: AuditRow): string {
   const details = toRecord(row.details);
+  if (row.action === "security_event_approved" || row.action === "security_event_rejected") {
+    const newValues = toRecord(row.newValues);
+    const targetEmail =
+      (typeof newValues.targetEmail === "string" && newValues.targetEmail.trim()) ||
+      (typeof details.targetEmail === "string" && details.targetEmail.trim()) ||
+      "";
+    if (targetEmail) {
+      return targetEmail;
+    }
+  }
   if (row.action === "moderation_submission_approved" || row.action === "moderation_submission_rejected") {
     const title =
       (typeof row.targetTitle === "string" && row.targetTitle.trim()) ||
@@ -103,6 +116,14 @@ function detailLines(row: AuditRow): string[] {
   const oldValues = toRecord(row.oldValues);
   const newValues = toRecord(row.newValues);
   const details = toRecord(row.details);
+
+  if (row.action === "security_event_approved" || row.action === "security_event_rejected") {
+    const result =
+      (typeof newValues.result === "string" && newValues.result) ||
+      (typeof details.result === "string" && details.result) ||
+      (row.action === "security_event_approved" ? "approved" : "rejected");
+    return [`Result: ${result}`];
+  }
 
   if (row.action === "project_phase_changed") {
     const fromPhase = typeof oldValues.phase === "string" ? oldValues.phase : "—";
@@ -159,6 +180,8 @@ export function AuditLogsPage(): ReactElement {
       "moderation_submission_approved",
       "moderation_submission_rejected",
       "student_profile_updated",
+      "security_event_approved",
+      "security_event_rejected",
     ];
     const q = query.trim().toLowerCase();
     return values
@@ -243,7 +266,6 @@ export function AuditLogsPage(): ReactElement {
               <th>Time</th>
               <th>Actor</th>
               <th>Activity</th>
-              <th>Target</th>
             </tr>
           </thead>
           <tbody>
@@ -257,19 +279,6 @@ export function AuditLogsPage(): ReactElement {
                     <button type="button" className="action-link-btn" onClick={() => setSelectedRow(row)}>
                       {page}
                     </button>
-                  </td>
-                  <td>
-                    {row.targetTable === "submissions" && row.targetId ? (
-                      <button type="button" className="action-link-btn" onClick={() => navigate(`/submissions/${row.targetId}`)}>
-                        {targetLabel(row)}
-                      </button>
-                    ) : row.targetTable === "users" && row.targetId ? (
-                      <button type="button" className="action-link-btn" onClick={() => navigate(`/users`)}>
-                        {targetLabel(row)}
-                      </button>
-                    ) : (
-                      targetLabel(row)
-                    )}
                   </td>
                 </tr>
               );
