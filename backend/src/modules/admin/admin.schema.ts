@@ -54,6 +54,7 @@ export const adminSubmissionsQuerySchema = z.object({
   forceRefresh: z.coerce.boolean().optional().default(false),
   status: adminModerationStatusSchema.optional(),
   category: z.string().trim().min(1).max(128).optional(),
+  categoryKey: z.string().trim().min(1).max(128).optional(),
   /** Title / student name search (server-side; uses trigram indexes when present). */
   search: z.string().trim().min(1).max(200).optional(),
   /** ISO-8601 timestamps (e.g. from `Date.toISOString()`). */

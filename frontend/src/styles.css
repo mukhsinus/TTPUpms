@@ -2235,6 +2235,20 @@ body {
   filter: brightness(1.03);
 }
 
+.security-action-btn {
+  border-radius: 999px;
+  padding: 0 14px;
+  height: 36px;
+  min-width: 96px;
+}
+
+.security-filter-btn {
+  border-radius: 999px;
+  padding: 0 14px;
+  height: 36px;
+  min-width: 96px;
+}
+
 .admin-pagination {
   padding: 14px 18px 18px;
   margin-top: 0;

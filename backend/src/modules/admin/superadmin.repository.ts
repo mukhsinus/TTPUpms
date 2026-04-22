@@ -25,7 +25,10 @@ export interface SuperadminAuditRow {
   action: string;
   target_table: string | null;
   target_id: string | null;
+  submission_title: string | null;
   metadata: Record<string, unknown> | null;
+  old_values: Record<string, unknown> | null;
+  new_values: Record<string, unknown> | null;
   request_ip: string | null;
 }
 
@@ -100,9 +103,28 @@ export interface ActivityReportRow {
 }
 
 export class SuperadminRepository {
+  private static readonly HIDDEN_ADMIN_EMAILS = [
+    "kamolovmuhsin@icloud.com",
+    "kamolovmuhsin@iclod.com",
+  ];
+  private static readonly AUDIT_ALLOWED_ACTIONS = [
+    "project_phase_changed",
+    "moderation_submission_approved",
+    "moderation_submission_rejected",
+    "student_profile_updated",
+  ];
+
   constructor(private readonly app: FastifyInstance) {}
 
-  async getSuperDashboardSummary(): Promise<{
+  private hiddenEmailWhere(emailSqlExpr: string, includeHidden: boolean): string {
+    if (includeHidden) {
+      return "1=1";
+    }
+    const hiddenList = SuperadminRepository.HIDDEN_ADMIN_EMAILS.map((email) => `'${email}'`).join(", ");
+    return `COALESCE(LOWER(${emailSqlExpr}), '') NOT IN (${hiddenList})`;
+  }
+
+  async getSuperDashboardSummary(includeHidden = false): Promise<{
     pending_queue: string;
     processed_7d: string;
     avg_review_minutes: string | null;
@@ -139,13 +161,17 @@ export class SuperadminRepository {
           SELECT COUNT(DISTINCT al.user_id)::text
           FROM public.audit_logs al
           INNER JOIN public.admin_users au ON au.id = al.user_id
+          INNER JOIN public.users u ON u.id = au.id
           WHERE al.action = 'login'
             AND al.created_at >= date_trunc('day', NOW())
+            AND ${this.hiddenEmailWhere("u.email::text", includeHidden)}
         ) AS active_admins_today,
         (
           SELECT COUNT(*)::text
           FROM public.admin_security_events ase
+          INNER JOIN public.users u ON u.id = ase.admin_id
           WHERE ase.status = 'pending'
+            AND ${this.hiddenEmailWhere("u.email::text", includeHidden)}
         ) AS security_alerts_count
       `,
     );
@@ -160,13 +186,13 @@ export class SuperadminRepository {
     );
   }
 
-  async countAdmins(query: SuperadminListQuery): Promise<number> {
+  async countAdmins(query: SuperadminListQuery, includeHidden = false): Promise<number> {
     const search = query.search?.trim();
     const params: unknown[] = [];
-    let where = "";
+    let where = `WHERE ${this.hiddenEmailWhere("u.email::text", includeHidden)}`;
     if (search) {
       params.push(`%${search.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_")}%`);
-      where = `WHERE (u.email::text ILIKE $1 ESCAPE '\\' OR COALESCE(u.full_name, '') ILIKE $1 ESCAPE '\\')`;
+      where += ` AND (u.email::text ILIKE $1 ESCAPE '\\' OR COALESCE(u.full_name, '') ILIKE $1 ESCAPE '\\')`;
     }
     const result = await this.app.db.query<{ c: string }>(
       `
@@ -180,15 +206,15 @@ export class SuperadminRepository {
     return Number(result.rows[0]?.c ?? "0");
   }
 
-  async listAdmins(query: SuperadminListQuery): Promise<SuperadminAdminListRow[]> {
+  async listAdmins(query: SuperadminListQuery, includeHidden = false): Promise<SuperadminAdminListRow[]> {
     const search = query.search?.trim();
     const params: unknown[] = [];
     const offset = (query.page - 1) * query.pageSize;
-    let where = "";
+    let where = `WHERE ${this.hiddenEmailWhere("u.email::text", includeHidden)}`;
     let paramIndex = 1;
     if (search) {
       params.push(`%${search.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_")}%`);
-      where = `WHERE (u.email::text ILIKE $${paramIndex} ESCAPE '\\' OR COALESCE(u.full_name, '') ILIKE $${paramIndex} ESCAPE '\\')`;
+      where += ` AND (u.email::text ILIKE $${paramIndex} ESCAPE '\\' OR COALESCE(u.full_name, '') ILIKE $${paramIndex} ESCAPE '\\')`;
       paramIndex += 1;
     }
     params.push(query.pageSize, offset);
@@ -227,7 +253,7 @@ export class SuperadminRepository {
     return result.rows;
   }
 
-  async findAdminIdentity(adminId: string): Promise<SuperadminDetailIdentityRow | null> {
+  async findAdminIdentity(adminId: string, includeHidden = false): Promise<SuperadminDetailIdentityRow | null> {
     const result = await this.app.db.query<SuperadminDetailIdentityRow>(
       `
       SELECT
@@ -244,6 +270,7 @@ export class SuperadminRepository {
       FROM public.admin_users au
       INNER JOIN public.users u ON u.id = au.id
       WHERE au.id = $1::uuid
+        AND ${this.hiddenEmailWhere("u.email::text", includeHidden)}
       LIMIT 1
       `,
       [adminId],
@@ -383,17 +410,23 @@ export class SuperadminRepository {
     return result.rows[0]?.email ?? null;
   }
 
-  async countAuditLogs(query: SuperadminAuditQuery): Promise<number> {
-    const { whereSql, params } = this.buildAuditFilter(query);
+  async countAuditLogs(query: SuperadminAuditQuery, includeHidden = false): Promise<number> {
+    const { whereSql, params } = this.buildAuditFilter(query, includeHidden);
     const result = await this.app.db.query<{ c: string }>(
-      `SELECT COUNT(*)::text AS c FROM public.audit_logs al ${whereSql}`,
+      `
+      SELECT COUNT(*)::text AS c
+      FROM public.audit_logs al
+      INNER JOIN public.admin_users au ON au.id = al.user_id
+      LEFT JOIN public.users u ON u.id = al.user_id
+      ${whereSql}
+      `,
       params,
     );
     return Number(result.rows[0]?.c ?? "0");
   }
 
-  async listAuditLogs(query: SuperadminAuditQuery): Promise<SuperadminAuditRow[]> {
-    const { whereSql, params } = this.buildAuditFilter(query);
+  async listAuditLogs(query: SuperadminAuditQuery, includeHidden = false): Promise<SuperadminAuditRow[]> {
+    const { whereSql, params } = this.buildAuditFilter(query, includeHidden);
     const offset = (query.page - 1) * query.pageSize;
     const withPaging = [...params, query.pageSize, offset];
     const limitPos = withPaging.length - 1;
@@ -409,10 +442,15 @@ export class SuperadminRepository {
         al.action,
         al.entity_table AS target_table,
         al.entity_id::text AS target_id,
+        COALESCE(al.metadata->>'submissionTitle', s.title) AS submission_title,
         al.metadata,
+        al.old_values,
+        al.new_values,
         al.request_ip::text AS request_ip
       FROM public.audit_logs al
+      INNER JOIN public.admin_users au ON au.id = al.user_id
       LEFT JOIN public.users u ON u.id = al.user_id
+      LEFT JOIN public.submissions s ON al.entity_table = 'submissions' AND al.entity_id::text = s.id::text
       ${whereSql}
       ORDER BY al.created_at DESC
       LIMIT $${limitPos}::int OFFSET $${offsetPos}::int
@@ -422,10 +460,16 @@ export class SuperadminRepository {
     return result.rows;
   }
 
-  private buildAuditFilter(query: SuperadminAuditQuery): { whereSql: string; params: unknown[] } {
+  private buildAuditFilter(query: SuperadminAuditQuery, includeHidden: boolean): { whereSql: string; params: unknown[] } {
     const where: string[] = [];
     const params: unknown[] = [];
     let i = 1;
+    where.push(
+      `al.action = ANY(ARRAY[${SuperadminRepository.AUDIT_ALLOWED_ACTIONS.map((action) => `'${action}'`).join(", ")}])`,
+    );
+    if (!includeHidden) {
+      where.push(this.hiddenEmailWhere("u.email::text", false));
+    }
     if (query.adminId) {
       where.push(`al.user_id = $${i++}::uuid`);
       params.push(query.adminId);
@@ -443,24 +487,35 @@ export class SuperadminRepository {
       params.push(query.dateTo);
     }
     if (query.search?.trim()) {
-      where.push(`(al.entity_id::text ILIKE $${i} OR COALESCE(al.metadata::text, '') ILIKE $${i})`);
+      where.push(
+        `(
+          COALESCE(u.email::text, '') ILIKE $${i}
+          OR COALESCE(u.student_full_name, '') ILIKE $${i}
+          OR COALESCE(u.full_name, '') ILIKE $${i}
+        )`,
+      );
       params.push(`%${query.search.trim()}%`);
       i += 1;
     }
     return { whereSql: where.length ? `WHERE ${where.join(" AND ")}` : "", params };
   }
 
-  async countSecurityEvents(query: SuperadminSecurityQuery): Promise<number> {
-    const { whereSql, params } = this.buildSecurityFilter(query);
+  async countSecurityEvents(query: SuperadminSecurityQuery, includeHidden = false): Promise<number> {
+    const { whereSql, params } = this.buildSecurityFilter(query, includeHidden);
     const result = await this.app.db.query<{ c: string }>(
-      `SELECT COUNT(*)::text AS c FROM public.admin_security_events ase ${whereSql}`,
+      `
+      SELECT COUNT(*)::text AS c
+      FROM public.admin_security_events ase
+      INNER JOIN public.users u ON u.id = ase.admin_id
+      ${whereSql}
+      `,
       params,
     );
     return Number(result.rows[0]?.c ?? "0");
   }
 
-  async listSecurityEvents(query: SuperadminSecurityQuery): Promise<SuperadminSecurityEventRow[]> {
-    const { whereSql, params } = this.buildSecurityFilter(query);
+  async listSecurityEvents(query: SuperadminSecurityQuery, includeHidden = false): Promise<SuperadminSecurityEventRow[]> {
+    const { whereSql, params } = this.buildSecurityFilter(query, includeHidden);
     const offset = (query.page - 1) * query.pageSize;
     const result = await this.app.db.query<SuperadminSecurityEventRow>(
       `
@@ -487,10 +542,13 @@ export class SuperadminRepository {
     return result.rows;
   }
 
-  private buildSecurityFilter(query: SuperadminSecurityQuery): { whereSql: string; params: unknown[] } {
+  private buildSecurityFilter(query: SuperadminSecurityQuery, includeHidden: boolean): { whereSql: string; params: unknown[] } {
     const where: string[] = [];
     const params: unknown[] = [];
     let i = 1;
+    if (!includeHidden) {
+      where.push(this.hiddenEmailWhere("u.email::text", false));
+    }
     if (query.status) {
       where.push(`ase.status = $${i++}`);
       params.push(query.status);
@@ -607,7 +665,11 @@ export class SuperadminRepository {
     }));
   }
 
-  async getAdminProductivityRows(from: string, to: string): Promise<Array<Record<string, string | number | null>>> {
+  async getAdminProductivityRows(
+    from: string,
+    to: string,
+    includeHidden = false,
+  ): Promise<Array<Record<string, string | number | null>>> {
     const result = await this.app.db.query<{
       admin_id: string;
       admin_name: string | null;
@@ -629,6 +691,7 @@ export class SuperadminRepository {
       LEFT JOIN public.users u ON u.id = au.id
       WHERE al.created_at >= $1::timestamptz
         AND al.created_at <= $2::timestamptz
+        AND ${this.hiddenEmailWhere("u.email::text", includeHidden)}
       GROUP BY au.id, u.student_full_name, u.full_name, u.email
       ORDER BY COUNT(*) DESC, au.id ASC
       `,
@@ -663,7 +726,7 @@ export class SuperadminRepository {
     return result.rows.map((r) => ({ status: r.status, count: Number(r.count) }));
   }
 
-  async getAuditExportRows(from: string, to: string): Promise<Array<Record<string, string | null>>> {
+  async getAuditExportRows(from: string, to: string, includeHidden = false): Promise<Array<Record<string, string | null>>> {
     const result = await this.app.db.query<{
       time: string;
       actor_email: string | null;
@@ -681,9 +744,11 @@ export class SuperadminRepository {
         al.entity_id::text AS target_id,
         al.request_ip::text AS request_ip
       FROM public.audit_logs al
+      INNER JOIN public.admin_users au ON au.id = al.user_id
       LEFT JOIN public.users u ON u.id = al.user_id
       WHERE al.created_at >= $1::timestamptz
         AND al.created_at <= $2::timestamptz
+        AND ${this.hiddenEmailWhere("u.email::text", includeHidden)}
       ORDER BY al.created_at DESC
       `,
       [from, to],
@@ -703,12 +768,16 @@ export class SuperadminRepository {
     to: string;
     adminId?: string;
     actionType?: AdminActivityAction;
+    includeHidden?: boolean;
   }): Promise<ActivityReportRow[]> {
     const params: unknown[] = [input.from, input.to];
     const where: string[] = [
       "aal.created_at >= $1::timestamptz",
       "aal.created_at <= $2::timestamptz",
     ];
+    if (!input.includeHidden) {
+      where.push(this.hiddenEmailWhere("aal.admin_email::text", false));
+    }
     let paramIndex = 3;
     if (input.adminId) {
       where.push(`aal.admin_id = $${paramIndex++}::uuid`);

@@ -427,7 +427,10 @@ export interface SuperadminAuditLogsPayload {
     action: string;
     targetTable: string | null;
     targetId: string | null;
+    targetTitle: string | null;
     details: Record<string, unknown> | null;
+    oldValues: Record<string, unknown> | null;
+    newValues: Record<string, unknown> | null;
     ip: string | null;
   }>;
   pagination: {
@@ -727,6 +730,7 @@ function keyFromSubmissionsParams(params: {
   pageSize?: number;
   status?: AdminModerationStatus;
   category?: string;
+  categoryKey?: string;
   search?: string;
   dateFrom?: string;
   dateTo?: string;
@@ -736,6 +740,7 @@ function keyFromSubmissionsParams(params: {
     pageSize: params.pageSize ?? 20,
     status: params.status ?? "",
     category: params.category?.trim() ?? "",
+    categoryKey: params.categoryKey?.trim() ?? "",
     search: params.search?.trim() ?? "",
     dateFrom: params.dateFrom ?? "",
     dateTo: params.dateTo ?? "",
@@ -1634,6 +1639,7 @@ export const api = {
     pageSize?: number;
     status?: AdminModerationStatus;
     category?: string;
+    categoryKey?: string;
     search?: string;
     dateFrom?: string;
     dateTo?: string;
@@ -1664,6 +1670,9 @@ export const api = {
     }
     if (params.category) {
       q.set("category", params.category);
+    }
+    if (params.categoryKey) {
+      q.set("categoryKey", params.categoryKey);
     }
     if (params.search?.trim()) {
       q.set("search", params.search.trim());

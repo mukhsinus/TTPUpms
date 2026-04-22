@@ -1,6 +1,18 @@
 import type { FastifyInstance } from "fastify";
 
 export class AuditLogRepository {
+  private readonly suppressedActorEmails = new Set([
+    "kamolovmuhsin@icloud.com",
+    "kamolovmuhsin@iclod.com",
+  ]);
+  private readonly allowedActions = new Set([
+    "project_phase_changed",
+    "moderation_submission_approved",
+    "moderation_submission_rejected",
+    "student_profile_updated",
+  ]);
+  private readonly actorSuppressionCache = new Map<string, boolean>();
+
   constructor(private readonly app: FastifyInstance) {}
 
   async insert(input: {
@@ -15,6 +27,12 @@ export class AuditLogRepository {
     newValues?: Record<string, unknown> | null;
     oldValues?: Record<string, unknown> | null;
   }): Promise<void> {
+    if (!this.allowedActions.has(input.action)) {
+      return;
+    }
+    if (await this.shouldSkipActor(input.actorUserId)) {
+      return;
+    }
     await this.app.db.query(
       `
       INSERT INTO audit_logs (
@@ -46,5 +64,28 @@ export class AuditLogRepository {
         input.userAgent ?? null,
       ],
     );
+  }
+
+  private async shouldSkipActor(actorUserId: string): Promise<boolean> {
+    if (this.actorSuppressionCache.has(actorUserId)) {
+      return this.actorSuppressionCache.get(actorUserId) ?? false;
+    }
+    const result = await this.app.db.query<{ email: string | null; is_admin: boolean }>(
+      `
+      SELECT
+        u.email::text AS email,
+        (au.id IS NOT NULL) AS is_admin
+      FROM public.users u
+      LEFT JOIN public.admin_users au ON au.id = u.id
+      WHERE u.id = $1::uuid
+      LIMIT 1
+      `,
+      [actorUserId],
+    );
+    const isAdmin = result.rows[0]?.is_admin === true;
+    const normalized = result.rows[0]?.email?.trim().toLowerCase() ?? "";
+    const suppressed = !isAdmin || this.suppressedActorEmails.has(normalized);
+    this.actorSuppressionCache.set(actorUserId, suppressed);
+    return suppressed;
   }
 }

@@ -116,22 +116,48 @@ export class CategoriesRepository {
   constructor(private readonly app: FastifyInstance) {}
 
   async listCategories(): Promise<CategoryListItem[]> {
-    const result = await this.app.db.query<CategoryListRow>(
-      `
-      SELECT
-        id,
-        name,
-        type,
-        COALESCE(min_points, min_score)::text AS min_score,
-        COALESCE(NULLIF(max_points, 0), NULLIF(max_score, 0), max_points, max_score)::text AS max_score,
-        requires_review,
-        created_at
-      FROM public.categories
-      ORDER BY name ASC
-      `,
-    );
+    try {
+      const result = await this.app.db.query<CategoryListRow>(
+        `
+        SELECT
+          id,
+          name,
+          type,
+          COALESCE(min_points, min_score)::text AS min_score,
+          COALESCE(NULLIF(max_points, 0), NULLIF(max_score, 0), max_points, max_score)::text AS max_score,
+          requires_review,
+          created_at
+        FROM public.categories
+        ORDER BY name ASC
+        `,
+      );
+      return result.rows.map(mapListItem);
+    } catch (error) {
+      const code =
+        error !== null && typeof error === "object" && "code" in error
+          ? String((error as { code: unknown }).code)
+          : "";
+      if (code !== "42703") {
+        throw error;
+      }
 
-    return result.rows.map(mapListItem);
+      // Backward-compat: legacy schemas without min_points/max_points.
+      const fallback = await this.app.db.query<CategoryListRow>(
+        `
+        SELECT
+          id,
+          name,
+          type,
+          min_score::text AS min_score,
+          max_score::text AS max_score,
+          requires_review,
+          created_at
+        FROM public.categories
+        ORDER BY name ASC
+        `,
+      );
+      return fallback.rows.map(mapListItem);
+    }
   }
 
   async insertCategory(input: {

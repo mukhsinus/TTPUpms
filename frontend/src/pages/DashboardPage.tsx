@@ -137,7 +137,6 @@ export function DashboardPage(): ReactElement {
   const [superDashboard, setSuperDashboard] = useState<SuperadminDashboardPayload | null>(null);
   const [activityPage, setActivityPage] = useState(1);
   const [drawerAdminId, setDrawerAdminId] = useState<string | null>(null);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [kpiPulse, setKpiPulse] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -215,7 +214,6 @@ export function DashboardPage(): ReactElement {
       }
       void (async () => {
         try {
-          setIsRefreshing(true);
           const tasks: Array<Promise<unknown>> = [
             loadAdminDashboard(activityPage, true),
             api.getSystemPhase({ forceRefresh: true }).then((phase) => setSystemPhase(phase)),
@@ -228,8 +226,6 @@ export function DashboardPage(): ReactElement {
           window.setTimeout(() => setKpiPulse(false), 450);
         } catch {
           // Silent realtime refresh; user can still refresh manually on errors.
-        } finally {
-          setIsRefreshing(false);
         }
       })();
     });
@@ -266,24 +262,6 @@ export function DashboardPage(): ReactElement {
   }
 
   if (isSuperadmin && superDashboard) {
-    const handleSuperRefresh = async (): Promise<void> => {
-      try {
-        setIsRefreshing(true);
-        const [ops, adminData] = await Promise.all([
-          api.getSuperadminDashboard(),
-          api.getAdminDashboard({ page: activityPage, pageSize: 12, forceRefresh: true }),
-        ]);
-        setSuperDashboard(ops);
-        setAdminDashboard(adminData);
-        setSystemPhase(await api.getSystemPhase());
-        toast.success(t("toastSuperadminUpdated"));
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : t("toastRefreshFailed"));
-      } finally {
-        setIsRefreshing(false);
-      }
-    };
-
     const saveDeadlines = async (): Promise<void> => {
       try {
         setPhaseBusy(true);
@@ -302,11 +280,6 @@ export function DashboardPage(): ReactElement {
 
     return (
       <section className="dashboard-stack ops-dashboard">
-        <Card className="ops-header-card">
-          <h2 className="ops-title">{t("title")}</h2>
-          <p className="ops-subtitle">{t("subtitleSuperadmin")}</p>
-        </Card>
-
         <div className="stats-grid stats-grid-four ops-kpis">
           <Card className="stat-card stat-card-primary">
             <p className="stat-card-label">{t("pendingQueue")}</p>
@@ -352,45 +325,39 @@ export function DashboardPage(): ReactElement {
           </ul>
         </Card>
 
-        <Card title={t("quickActions")}>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Button type="button" variant="primary" onClick={() => navigate("/submissions")}>
-              {t("openQueue")}
-            </Button>
-            <Button type="button" variant="ghost" onClick={() => navigate("/admins")}>
-              {t("manageAdmins")}
-            </Button>
-            <Button type="button" variant="ghost" onClick={() => navigate("/audit")}>
-              {t("openAuditLogs")}
-            </Button>
-            <Button type="button" variant="ghost" onClick={() => navigate("/security")}>
-              {t("securityCenter")}
-            </Button>
-            <Button type="button" variant="ghost" onClick={() => void handleSuperRefresh()} disabled={isRefreshing}>
-              {isRefreshing ? t("refreshing") : t("refresh")}
-            </Button>
-          </div>
-        </Card>
-
         {systemPhase ? (
-          <Card title={t("systemPhaseTitle")}>
-            <p className="muted">
-              <strong>{t("systemPhaseCurrent")}: </strong>
-              {systemPhase.phase === "submission" ? t("phaseSubmission") : t("phaseEvaluation")}
-            </p>
-            <p className="muted">
-              {t("systemPhaseSubmissionDeadline")}:{" "}
-              {systemPhase.submissionDeadline ? formatDateTime(systemPhase.submissionDeadline, t) : t("dateUnavailable")}
-            </p>
-            <p className="muted">
-              {t("systemPhaseEvaluationDeadline")}:{" "}
-              {systemPhase.evaluationDeadline ? formatDateTime(systemPhase.evaluationDeadline, t) : t("dateUnavailable")}
-            </p>
-            <p className="muted">
-              Last changed by {systemPhase.lastChangedBy?.name ?? systemPhase.lastChangedBy?.email ?? t("dateUnavailable")} at{" "}
-              {systemPhase.lastChangedAt ? formatDateOnly(systemPhase.lastChangedAt, t) : t("dateUnavailable")}
-            </p>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+          <Card>
+            <div className="ops-card-heading">
+              <Gavel size={16} />
+              <span>{t("systemPhaseTitle")}</span>
+            </div>
+            <div className="system-phase-overview">
+              <div className="system-phase-meta-block">
+                <p className="muted">
+                  <strong>{t("systemPhaseCurrent")}: </strong>
+                  {systemPhase.phase === "submission" ? t("phaseSubmission") : t("phaseEvaluation")}
+                </p>
+                <p className="muted">
+                  {t("systemPhaseEvaluationDeadline")}:{" "}
+                  {systemPhase.evaluationDeadline ? formatDateTime(systemPhase.evaluationDeadline, t) : t("dateUnavailable")}
+                </p>
+                <p className="muted system-phase-last-change">
+                  Last changed by {systemPhase.lastChangedBy?.name ?? systemPhase.lastChangedBy?.email ?? t("dateUnavailable")} at{" "}
+                  {systemPhase.lastChangedAt ? formatDateOnly(systemPhase.lastChangedAt, t) : t("dateUnavailable")}
+                </p>
+              </div>
+              <div className="system-phase-deadlines-block">
+                <p className="system-phase-deadline-row">
+                  <span>{t("systemPhaseSubmissionDeadline")}</span>
+                  <strong>{systemPhase.submissionDeadline ? formatDateTime(systemPhase.submissionDeadline, t) : t("dateUnavailable")}</strong>
+                </p>
+                <p className="system-phase-deadline-row">
+                  <span>{t("systemPhaseEvaluationDeadline")}</span>
+                  <strong>{systemPhase.evaluationDeadline ? formatDateTime(systemPhase.evaluationDeadline, t) : t("dateUnavailable")}</strong>
+                </p>
+              </div>
+            </div>
+            <div className="system-phase-actions">
               <Button
                 type="button"
                 variant="secondary"
@@ -408,8 +375,8 @@ export function DashboardPage(): ReactElement {
                 {t("switchToEvaluation")}
               </Button>
             </div>
-            <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-              <label className="muted">
+            <div className="system-phase-form-grid">
+              <label className="muted system-phase-field">
                 {t("systemPhaseSubmissionDeadline")}
                 <input
                   className="ui-input"
@@ -418,7 +385,7 @@ export function DashboardPage(): ReactElement {
                   onChange={(event) => setSubmissionDeadlineInput(event.target.value)}
                 />
               </label>
-              <label className="muted">
+              <label className="muted system-phase-field">
                 {t("systemPhaseEvaluationDeadline")}
                 <input
                   className="ui-input"
@@ -427,7 +394,7 @@ export function DashboardPage(): ReactElement {
                   onChange={(event) => setEvaluationDeadlineInput(event.target.value)}
                 />
               </label>
-              <div>
+              <div className="system-phase-save">
                 <Button type="button" variant="primary" disabled={phaseBusy} onClick={() => void saveDeadlines()}>
                   {phaseBusy ? t("refreshing") : t("saveDeadlines")}
                 </Button>

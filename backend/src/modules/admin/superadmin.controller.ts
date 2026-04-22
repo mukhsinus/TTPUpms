@@ -22,9 +22,9 @@ import {
 export class SuperadminController {
   constructor(private readonly service: SuperadminService) {}
 
-  getDashboard = async (_request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+  getDashboard = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     try {
-      const data = await this.service.getDashboard();
+      const data = await this.service.getDashboard(request.user?.id);
       reply.header("Cache-Control", "private, max-age=5, stale-while-revalidate=20");
       reply.send(success(data));
     } catch (error) {
@@ -35,7 +35,7 @@ export class SuperadminController {
   listAdmins = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     try {
       const query = superadminListQuerySchema.parse(request.query);
-      const data = await this.service.listAdmins(query);
+      const data = await this.service.listAdmins(query, request.user?.id);
       reply.send(success(data));
     } catch (error) {
       this.handleError(reply, error);
@@ -46,7 +46,7 @@ export class SuperadminController {
     try {
       const params = superadminAdminIdParamsSchema.parse(request.params);
       const query = superadminListQuerySchema.parse(request.query);
-      const data = await this.service.getAdminDetail(params.adminId, query);
+      const data = await this.service.getAdminDetail(params.adminId, query, request.user?.id);
       reply.send(success(data));
     } catch (error) {
       this.handleError(reply, error);
@@ -114,7 +114,7 @@ export class SuperadminController {
   listAuditLogs = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     try {
       const query = superadminAuditQuerySchema.parse(request.query);
-      const data = await this.service.listAuditLogs(query);
+      const data = await this.service.listAuditLogs(query, request.user?.id);
       reply.send(success(data));
     } catch (error) {
       this.handleError(reply, error);
@@ -124,7 +124,7 @@ export class SuperadminController {
   listSecurityEvents = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     try {
       const query = superadminSecurityQuerySchema.parse(request.query);
-      const data = await this.service.listSecurityEvents(query);
+      const data = await this.service.listSecurityEvents(query, request.user?.id);
       reply.send(success(data));
     } catch (error) {
       this.handleError(reply, error);

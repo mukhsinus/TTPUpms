@@ -335,6 +335,7 @@ export class AdminService {
       pageSize: query.pageSize,
       status: query.status ?? "",
       category: query.category ?? "",
+      categoryKey: query.categoryKey ?? "",
       search: query.search ?? "",
       dateFrom: query.dateFrom ?? "",
       dateTo: query.dateTo ?? "",
@@ -508,7 +509,11 @@ export class AdminService {
         action: "student_profile_updated",
         oldValues,
         newValues,
-        metadata: { changedKeys },
+        metadata: {
+          changedKeys,
+          studentName: row.student_full_name ?? row.full_name ?? null,
+          studentId: row.student_id ?? null,
+        },
       });
     }
     return this.mapStudentDetailRow(row);
@@ -921,6 +926,9 @@ export class AdminService {
           scoreProvided: body.score ?? null,
           lineCount,
         },
+        metadata: {
+          submissionTitle: updated.title,
+        },
       });
       await this.audit.insert({
         actorUserId: actor.actorUserId,
@@ -1062,6 +1070,9 @@ export class AdminService {
         action: "moderation_submission_rejected",
         oldValues: { status: oldDbStatus },
         newValues: { status: "rejected", reason: body.reason ?? null },
+        metadata: {
+          submissionTitle: updated.title,
+        },
       });
       await this.audit.insert({
         actorUserId: actor.actorUserId,

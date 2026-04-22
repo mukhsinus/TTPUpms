@@ -216,21 +216,43 @@ function buildAdminSubmissionFilters(query: AdminSubmissionsQuery): { whereSql: 
     conditions.push(f.clause);
     params.push(...f.params);
   }
-  if (query.category) {
+  if (query.category || query.categoryKey) {
+    const categoryTerms: string[] = [];
+    const pushTerm = (value: string | undefined): void => {
+      const term = value?.trim();
+      if (!term) {
+        return;
+      }
+      if (categoryTerms.some((entry) => entry.toLowerCase() === term.toLowerCase())) {
+        return;
+      }
+      categoryTerms.push(term);
+    };
+    pushTerm(query.category);
+    pushTerm(query.categoryKey);
+
+    const termClauses: string[] = [];
+    for (const term of categoryTerms) {
+      termClauses.push(`
+        c2.code = $${p}
+        OR lower(c2.name) = lower($${p})
+        OR lower(COALESCE(c2.title, '')) = lower($${p})
+        OR lower(regexp_replace(c2.name, '[_-]+', ' ', 'g')) = lower($${p})
+        OR lower(c2.name) = lower(regexp_replace($${p}, '\\s+', '_', 'g'))
+      `);
+      params.push(term);
+      p += 1;
+    }
     conditions.push(`
       EXISTS (
         SELECT 1 FROM public.submission_items si2
         INNER JOIN public.categories c2 ON c2.id = si2.category_id
         WHERE si2.submission_id = s.id
           AND (
-            c2.code = $${p}
-            OR lower(c2.name) = lower($${p})
-            OR lower(COALESCE(c2.title, '')) = lower($${p})
+            ${termClauses.map((clause) => `(${clause})`).join(" OR ")}
           )
       )
     `);
-    params.push(query.category);
-    p += 1;
   }
   if (query.dateFrom) {
     conditions.push(`COALESCE(s.submitted_at, s.created_at) >= $${p}::timestamptz`);
@@ -840,6 +862,43 @@ export class AdminRepository {
     const { whereSql, params } = buildAdminSubmissionFilters(query);
     const offset = (query.page - 1) * query.pageSize;
 
+    const categoryDisplayTerms: string[] = [];
+    const pushDisplayTerm = (value: string | undefined): void => {
+      const term = value?.trim();
+      if (!term) {
+        return;
+      }
+      if (categoryDisplayTerms.some((entry) => entry.toLowerCase() === term.toLowerCase())) {
+        return;
+      }
+      categoryDisplayTerms.push(term);
+    };
+    pushDisplayTerm(query.category);
+    pushDisplayTerm(query.categoryKey);
+
+    let displayCategoryOrderSql = "si.created_at ASC";
+    if (categoryDisplayTerms.length > 0) {
+      const matchClauses: string[] = [];
+      for (const term of categoryDisplayTerms) {
+        const paramIdx = params.length + 1;
+        params.push(term);
+        matchClauses.push(`
+          c.code = $${paramIdx}
+          OR lower(c.name) = lower($${paramIdx})
+          OR lower(COALESCE(c.title, '')) = lower($${paramIdx})
+          OR lower(regexp_replace(c.name, '[_-]+', ' ', 'g')) = lower($${paramIdx})
+          OR lower(c.name) = lower(regexp_replace($${paramIdx}, '\\s+', '_', 'g'))
+        `);
+      }
+      displayCategoryOrderSql = `
+        CASE
+          WHEN ${matchClauses.map((clause) => `(${clause})`).join(" OR ")} THEN 0
+          ELSE 1
+        END ASC,
+        si.created_at ASC
+      `;
+    }
+
     const limitParam = params.length + 1;
     const offsetParam = params.length + 2;
     params.push(query.pageSize, offset);
@@ -876,7 +935,7 @@ export class AdminRepository {
         LEFT JOIN public.categories c ON c.id = si.category_id
         LEFT JOIN public.category_subcategories cs ON cs.id = si.subcategory_id
         WHERE si.submission_id = s.id
-        ORDER BY si.created_at ASC
+        ORDER BY ${displayCategoryOrderSql}
         LIMIT 1
       ) first_item ON true
       ${whereSql}

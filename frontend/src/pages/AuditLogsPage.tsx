@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, type SuperadminAuditLogsPayload } from "../lib/api";
 import { useToast } from "../contexts/ToastContext";
@@ -14,112 +14,151 @@ function formatDate(value: string): string {
   return d.toLocaleString();
 }
 
-function humanizeAction(action: string): string {
-  const map: Record<string, string> = {
-    admin_moderation_approve: "Approved submission",
-    admin_moderation_reject: "Rejected submission",
-    admin_override_score: "Edited approved score",
-    admin_override_status: "Changed submission status",
-    submission_assigned: "Assigned submission to admin",
-    admin_note_added: "Added internal note",
-    role_changed: "Changed admin role",
-    admin_suspended: "Suspended admin account",
-    admin_unsuspended: "Unsuspended admin account",
-    password_reset: "Reset admin password",
-    security_event_approved: "Approved security event",
-    security_event_rejected: "Denied security event",
-    session_revoked: "Revoked admin sessions",
-    login: "Logged in",
-    logout_current_session: "Logged out current session",
-    logout_other_sessions: "Logged out other sessions",
-  };
-  return map[action] ?? action.replace(/_/g, " ");
+type AuditRow = SuperadminAuditLogsPayload["items"][number];
+type DatePreset = "today" | "last7" | "last30" | "custom";
+
+function deriveDateRange(
+  preset: DatePreset,
+  customFrom: string,
+  customTo: string,
+): { dateFrom?: string; dateTo?: string } {
+  const now = new Date();
+  if (preset === "custom") {
+    const dateFrom = customFrom ? new Date(`${customFrom}T00:00:00`) : null;
+    const dateTo = customTo ? new Date(`${customTo}T23:59:59.999`) : null;
+    return {
+      dateFrom: dateFrom ? dateFrom.toISOString() : undefined,
+      dateTo: dateTo ? dateTo.toISOString() : undefined,
+    };
+  }
+  const from = new Date(now);
+  from.setHours(0, 0, 0, 0);
+  if (preset === "last7") {
+    from.setDate(from.getDate() - 6);
+  } else if (preset === "last30") {
+    from.setDate(from.getDate() - 29);
+  }
+  const to = new Date(now);
+  to.setHours(23, 59, 59, 999);
+  return { dateFrom: from.toISOString(), dateTo: to.toISOString() };
 }
 
-function humanizeDetails(details: Record<string, unknown> | null): string {
-  if (!details) return "—";
-  if (typeof details.noteLength === "number") {
-    return `Internal note added (${details.noteLength} chars)`;
-  }
-  if (typeof details.assignedAdminId === "string") {
-    return `Assigned to admin ${details.assignedAdminId.slice(0, 8)}…`;
-  }
-  if (typeof details.revokedCount === "number") {
-    return `Revoked ${details.revokedCount} session(s)`;
-  }
-  if (typeof details.status === "string") {
-    return `Status changed to ${details.status}`;
-  }
-  if (typeof details.reason === "string" && details.reason.trim().length > 0) {
-    return details.reason;
-  }
-  return "Activity recorded";
+function pageLabel(action: string): "Dashboard" | "Submissions" | "Students" {
+  if (action === "project_phase_changed") return "Dashboard";
+  if (action === "student_profile_updated") return "Students";
+  return "Submissions";
 }
 
-function targetLabel(row: SuperadminAuditLogsPayload["items"][number]): string {
+function actionLabel(action: string): string {
+  if (action === "project_phase_changed") return "Project phase changed";
+  if (action === "student_profile_updated") return "Student profile updated";
+  if (action === "moderation_submission_rejected") return "Submission rejected";
+  return "Submission approved";
+}
+
+function targetLabel(row: AuditRow): string {
+  const details = toRecord(row.details);
+  if (row.action === "moderation_submission_approved" || row.action === "moderation_submission_rejected") {
+    const title =
+      (typeof row.targetTitle === "string" && row.targetTitle.trim()) ||
+      (typeof details.submissionTitle === "string" && details.submissionTitle.trim()) ||
+      (typeof toRecord(row.newValues).submissionTitle === "string" && String(toRecord(row.newValues).submissionTitle).trim()) ||
+      "";
+    if (title) {
+      return title;
+    }
+  }
+  if (row.action === "student_profile_updated") {
+    const source = toRecord(row.newValues);
+    const name = typeof source.fullName === "string" ? source.fullName.trim() : "";
+    const studentIdValue = typeof source.studentId === "string" ? source.studentId.trim() : "";
+    if (name || studentIdValue) {
+      return `${name || "Student"}${studentIdValue ? ` (${studentIdValue})` : ""}`;
+    }
+  }
+  if (row.action === "project_phase_changed") {
+    const oldValues = toRecord(row.oldValues);
+    const newValues = toRecord(row.newValues);
+    const fromPhase = typeof oldValues.phase === "string" ? oldValues.phase : "—";
+    const toPhase = typeof newValues.phase === "string" ? newValues.phase : "—";
+    return `${fromPhase} -> ${toPhase}`;
+  }
   if (row.targetTable === "submissions" && row.targetId) {
     return `Submission ${row.targetId.slice(0, 8)}…`;
   }
-  if (row.targetTable === "admin_users" && row.targetId) {
-    return `Admin ${row.targetId.slice(0, 8)}…`;
+  if (row.targetTable === "users" && row.targetId) {
+    return `Student ${row.targetId.slice(0, 8)}…`;
   }
-  if (row.targetTable === "admin_security_events" && row.targetId) {
-    return `Security event ${row.targetId.slice(0, 8)}…`;
+  if (row.targetTable === "system_settings" && row.targetId) {
+    return "Project settings";
   }
   return "System event";
+}
+
+function toRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
+function detailLines(row: AuditRow): string[] {
+  const oldValues = toRecord(row.oldValues);
+  const newValues = toRecord(row.newValues);
+  const details = toRecord(row.details);
+
+  if (row.action === "project_phase_changed") {
+    const fromPhase = typeof oldValues.phase === "string" ? oldValues.phase : "—";
+    const toPhase = typeof newValues.phase === "string" ? newValues.phase : "—";
+    return [`Changed to: ${toPhase}`, `Transition: ${fromPhase} -> ${toPhase}`];
+  }
+
+  if (row.action === "student_profile_updated") {
+    const lines: string[] = [];
+    const fieldPairs: Array<{ key: string; label: string }> = [
+      { key: "fullName", label: "Full name" },
+      { key: "degree", label: "Degree" },
+      { key: "faculty", label: "Faculty" },
+      { key: "studentId", label: "Student ID" },
+    ];
+    for (const field of fieldPairs) {
+      const before = oldValues[field.key];
+      const after = newValues[field.key];
+      if (before !== after) {
+        lines.push(`New ${field.label}: ${String(after ?? "—")} (was ${String(before ?? "—")})`);
+      }
+    }
+    return lines.length > 0 ? lines : ["Student profile fields updated"];
+  }
+
+  const nextStatus =
+    (typeof newValues.status === "string" && newValues.status) ||
+    (typeof newValues.decision === "string" && newValues.decision) ||
+    "—";
+  return [`Result: ${nextStatus}`];
 }
 
 export function AuditLogsPage(): ReactElement {
   const navigate = useNavigate();
   const toast = useToast();
   const [page, setPage] = useState(1);
-  const [pageSize] = useState(25);
-  const [search, setSearch] = useState("");
+  const [pageSize] = useState(7);
+  const [adminSearch, setAdminSearch] = useState("");
   const [action, setAction] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [datePreset, setDatePreset] = useState<DatePreset>("last7");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<SuperadminAuditLogsPayload | null>(null);
   const [selectedRow, setSelectedRow] = useState<SuperadminAuditLogsPayload["items"][number] | null>(null);
-
-  const fetchSearchSuggestions = useCallback(
-    async (query: string): Promise<SearchAutocompleteSuggestion[]> => {
-      const result = await api.getSuperadminAuditLogs({
-        page: 1,
-        pageSize: 8,
-        search: query,
-        action: action.trim() || undefined,
-        dateFrom: dateFrom || undefined,
-        dateTo: dateTo || undefined,
-      });
-      return result.items.map((row, index) => ({
-        id: `${row.id}-${index}`,
-        value: row.targetId ?? row.action,
-        label: humanizeAction(row.action),
-        meta: `${targetLabel(row)} · ${formatDate(row.time)}`,
-      }));
-    },
-    [action, dateFrom, dateTo],
+  const dateRange = useMemo(
+    () => deriveDateRange(datePreset, customFrom, customTo),
+    [datePreset, customFrom, customTo],
   );
 
   const fetchActionSuggestions = useCallback(async (query: string): Promise<SearchAutocompleteSuggestion[]> => {
     const values = [
-      "admin_moderation_approve",
-      "admin_moderation_reject",
-      "admin_override_score",
-      "admin_override_status",
-      "submission_assigned",
-      "admin_note_added",
-      "role_changed",
-      "admin_suspended",
-      "admin_unsuspended",
-      "password_reset",
-      "security_event_approved",
-      "security_event_rejected",
-      "session_revoked",
-      "login",
-      "logout_current_session",
-      "logout_other_sessions",
+      "project_phase_changed",
+      "moderation_submission_approved",
+      "moderation_submission_rejected",
+      "student_profile_updated",
     ];
     const q = query.trim().toLowerCase();
     return values
@@ -128,7 +167,7 @@ export function AuditLogsPage(): ReactElement {
       .map((v) => ({
         id: v,
         value: v,
-        label: humanizeAction(v),
+        label: actionLabel(v),
         meta: v,
       }));
   }, []);
@@ -139,10 +178,10 @@ export function AuditLogsPage(): ReactElement {
       const result = await api.getSuperadminAuditLogs({
         page,
         pageSize,
-        search: search.trim() || undefined,
+        search: adminSearch.trim() || undefined,
         action: action.trim() || undefined,
-        dateFrom: dateFrom || undefined,
-        dateTo: dateTo || undefined,
+        dateFrom: dateRange.dateFrom,
+        dateTo: dateRange.dateTo,
       });
       setData(result);
     } catch (err) {
@@ -160,28 +199,41 @@ export function AuditLogsPage(): ReactElement {
   const pagination = data?.pagination;
 
   return (
-    <section className="dashboard-stack">
-      <Card title="Audit Logs" subtitle="Immutable searchable activity history.">
-        <div className="row-between" style={{ gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
-          <SearchAutocomplete
-            value={search}
-            onChange={setSearch}
-            onSelect={(item) => setSearch(item.value)}
-            fetchSuggestions={fetchSearchSuggestions}
-            placeholder="Search target/details"
-            ariaLabel="Search target/details"
+    <section className="dashboard-stack admin-submissions-page">
+      <Card className="admin-submissions-controls">
+        <div className="table-toolbar moderation-queue-toolbar admin-submissions-toolbar">
+          <Input
+            value={adminSearch}
+            onChange={(e) => setAdminSearch(e.target.value)}
+            placeholder="Search by admin email"
+            aria-label="Search by admin email"
           />
           <SearchAutocomplete
             value={action}
             onChange={setAction}
             onSelect={(item) => setAction(item.value)}
             fetchSuggestions={fetchActionSuggestions}
-            placeholder="Action (e.g. role_changed)"
-            ariaLabel="Action"
+            placeholder="Activity"
+            ariaLabel="Activity"
           />
-          <Input type="datetime-local" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-          <Input type="datetime-local" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-          <Button type="button" variant="primary" onClick={() => void load()} disabled={loading}>
+          <select
+            className="ui-input"
+            value={datePreset}
+            onChange={(e) => setDatePreset(e.target.value as DatePreset)}
+            aria-label="Date range"
+          >
+            <option value="today">Today</option>
+            <option value="last7">Last 7 days</option>
+            <option value="last30">Last 30 days</option>
+            <option value="custom">Custom</option>
+          </select>
+          {datePreset === "custom" ? (
+            <>
+              <Input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} aria-label="Custom date from" />
+              <Input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} aria-label="Custom date to" />
+            </>
+          ) : null}
+          <Button type="button" variant="secondary" onClick={() => void load()} disabled={loading}>
             Apply
           </Button>
         </div>
@@ -192,53 +244,45 @@ export function AuditLogsPage(): ReactElement {
               <th>Actor</th>
               <th>Activity</th>
               <th>Target</th>
-              <th>Open</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
-              <tr key={row.id}>
-                <td>{formatDate(row.time)}</td>
-                <td>{row.actorName ?? row.actorEmail ?? "System"}</td>
-                <td>
-                  <strong>{humanizeAction(row.action)}</strong>
-                  <p className="muted" style={{ margin: "4px 0 0" }}>
-                    {humanizeDetails(row.details)}
-                  </p>
-                </td>
-                <td>
-                  {row.targetTable === "submissions" && row.targetId ? (
-                    <button type="button" className="action-link-btn" onClick={() => navigate(`/submissions/${row.targetId}`)}>
-                      {targetLabel(row)}
+            {rows.map((row) => {
+              const page = pageLabel(row.action);
+              return (
+                <tr key={row.id}>
+                  <td>{formatDate(row.time)}</td>
+                  <td>{row.actorEmail ?? row.actorName ?? "System"}</td>
+                  <td>
+                    <button type="button" className="action-link-btn" onClick={() => setSelectedRow(row)}>
+                      {page}
                     </button>
-                  ) : row.targetTable === "admin_users" && row.targetId ? (
-                    <button type="button" className="action-link-btn" onClick={() => navigate(`/admins`)}>
-                      {targetLabel(row)}
-                    </button>
-                  ) : row.targetTable === "admin_security_events" ? (
-                    <button type="button" className="action-link-btn" onClick={() => navigate(`/security`)}>
-                      {targetLabel(row)}
-                    </button>
-                  ) : (
-                    targetLabel(row)
-                  )}
-                </td>
-                <td>
-                  <button type="button" className="action-link-btn" onClick={() => setSelectedRow(row)}>
-                    View Details
-                  </button>
-                </td>
-              </tr>
-            ))}
+                  </td>
+                  <td>
+                    {row.targetTable === "submissions" && row.targetId ? (
+                      <button type="button" className="action-link-btn" onClick={() => navigate(`/submissions/${row.targetId}`)}>
+                        {targetLabel(row)}
+                      </button>
+                    ) : row.targetTable === "users" && row.targetId ? (
+                      <button type="button" className="action-link-btn" onClick={() => navigate(`/users`)}>
+                        {targetLabel(row)}
+                      </button>
+                    ) : (
+                      targetLabel(row)
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </Table>
-        <div className="row-between" style={{ marginTop: 12 }}>
-          <span className="muted">
+        <div className="pagination-bar admin-pagination">
+          <span className="muted admin-pagination-label">
             {pagination ? `Page ${pagination.page} of ${pagination.totalPages} (${pagination.total} rows)` : "—"}
           </span>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div className="pagination-actions admin-pagination-actions">
             <Button type="button" variant="ghost" disabled={!pagination?.hasPrev} onClick={() => setPage((v) => Math.max(1, v - 1))}>
-              Prev
+              Previous
             </Button>
             <Button type="button" variant="ghost" disabled={!pagination?.hasNext} onClick={() => setPage((v) => v + 1)}>
               Next
@@ -251,13 +295,11 @@ export function AuditLogsPage(): ReactElement {
           <div className="modal-panel" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
             <h3>Audit Event Details</h3>
             <p className="muted">Time: {formatDate(selectedRow.time)}</p>
-            <p className="muted">Actor: {selectedRow.actorName ?? selectedRow.actorEmail ?? "System"}</p>
-            <p className="muted">Activity: {humanizeAction(selectedRow.action)}</p>
-            <p className="muted">
-              Target: {selectedRow.targetTable ?? "—"} / {selectedRow.targetId ?? "—"}
-            </p>
-            <p className="muted">IP: {selectedRow.ip ?? "—"}</p>
-            <p className="muted">Details: {humanizeDetails(selectedRow.details)}</p>
+            <p className="muted">Actor: {selectedRow.actorEmail ?? selectedRow.actorName ?? "System"}</p>
+            <p className="muted">Target: {targetLabel(selectedRow)}</p>
+            {detailLines(selectedRow).map((line, index) => (
+              <p key={`${selectedRow.id}-${index}`} className="muted">{line}</p>
+            ))}
             <div className="modal-actions">
               <Button type="button" variant="ghost" className="action-link-btn" onClick={() => setSelectedRow(null)}>
                 Close

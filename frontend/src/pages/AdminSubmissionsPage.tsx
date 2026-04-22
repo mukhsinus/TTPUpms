@@ -183,11 +183,16 @@ export function AdminSubmissionsPage(): ReactElement {
     void (async () => {
       try {
         const categories = await api.getCategories();
-        const options = categories
-          .map((categoryRow) => ({
-            value: categoryRow.name,
-            label: humanizeCategoryLabel(categoryRow.name),
-          }))
+        const options = Array.from(
+          new Map(
+            categories.map((categoryRow) => {
+              const value = categoryRow.name?.trim() ?? "";
+              const label = humanizeCategoryLabel(categoryRow.name);
+              return [value.toLowerCase(), { value, label }] as const;
+            }),
+          ).values(),
+        )
+          .filter((option) => option.value.length > 0)
           .sort((a, b) => a.label.localeCompare(b.label));
         setCategoryOptions(options);
       } catch {
@@ -244,11 +249,13 @@ export function AdminSubmissionsPage(): ReactElement {
         setLoading(true);
       }
       setError(null);
+      const selectedCategory = categoryOptions.find((option) => option.value === category);
       const data = await api.getAdminSubmissions({
         page,
         pageSize: PAGE_SIZE,
         status: status || undefined,
-        category: category.trim() || undefined,
+        category: selectedCategory?.label.trim() || undefined,
+        categoryKey: category.trim() || undefined,
         search: debouncedSearch || undefined,
         dateFrom: dateRange.dateFrom,
         dateTo: dateRange.dateTo,
@@ -270,7 +277,7 @@ export function AdminSubmissionsPage(): ReactElement {
         setRefreshing(false);
       }
     }
-  }, [page, status, category, debouncedSearch, dateRange.dateFrom, dateRange.dateTo, items.length, total]);
+  }, [page, status, category, categoryOptions, debouncedSearch, dateRange.dateFrom, dateRange.dateTo, items.length, total]);
 
   useEffect(() => {
     void load();
