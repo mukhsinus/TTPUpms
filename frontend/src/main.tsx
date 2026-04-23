@@ -5,6 +5,12 @@ import { ToastProvider } from "./contexts/ToastContext";
 import "./i18n";
 import "./styles.css";
 
+window.addEventListener("vite:preloadError", (event) => {
+  // Recover from stale chunk references after a fresh deployment.
+  event.preventDefault();
+  window.location.reload();
+});
+
 createRoot(document.getElementById("root")!).render(
   <BrowserRouter>
     <ToastProvider>
