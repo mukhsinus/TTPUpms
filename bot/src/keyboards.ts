@@ -94,6 +94,9 @@ export function olympiadPlacementKeyboard() {
 
 export const cancelOnlyKeyboard = () => Markup.inlineKeyboard([CANCEL_ROW]);
 
+export const phoneRequestKeyboard = () =>
+  Markup.keyboard([[Markup.button.contactRequest("Send phone number")]]).resize().oneTime();
+
 export const submitFlowNavKeyboard = () => Markup.inlineKeyboard([SUBMIT_FLOW_NAV_ROW]);
 
 export const skipOptionalLinkKeyboard = () =>

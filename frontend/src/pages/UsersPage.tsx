@@ -279,7 +279,7 @@ export function UsersPage(): ReactElement {
               <thead>
                 <tr>
                   <th>Full Name</th>
-                  <th>Telegram username</th>
+                  <th>Phone</th>
                   <th>Degree</th>
                   <th>Faculty</th>
                   <th>Student ID</th>
@@ -297,7 +297,7 @@ export function UsersPage(): ReactElement {
                     onClick={() => setSelectedStudentId(row.id)}
                   >
                     <td>{row.fullName}</td>
-                    <td>{row.telegramUsername ?? "—"}</td>
+                    <td>{row.phone ?? "—"}</td>
                     <td>{degreeLabel(row.degree)}</td>
                     <td>{row.faculty ?? "—"}</td>
                     <td>{row.studentId ?? "—"}</td>

@@ -44,6 +44,7 @@ export interface AdminUserRow {
   faculty: string | null;
   student_id: string | null;
   telegram_username: string | null;
+  phone: string | null;
 }
 
 export interface AdminItemRow {
@@ -154,6 +155,7 @@ export interface AdminStudentListRow {
   student_full_name: string | null;
   telegram_username: string | null;
   telegram_id: string | null;
+  phone: string | null;
   degree: string | null;
   faculty: string | null;
   student_id: string | null;
@@ -169,6 +171,7 @@ export interface AdminStudentDetailRow {
   student_full_name: string | null;
   telegram_username: string | null;
   telegram_id: string | null;
+  phone: string | null;
   degree: string | null;
   faculty: string | null;
   student_id: string | null;
@@ -183,6 +186,10 @@ export interface AdminStudentDetailRow {
 }
 
 export type AdminDbExecutor = FastifyInstance["db"] | PoolClient;
+
+function isPgUndefinedColumnError(error: unknown): boolean {
+  return getPostgresDriverErrorFields(error)?.code === "42703";
+}
 
 function moderationStatusFilterSql(status: AdminModerationStatus): { clause: string; params: unknown[] } {
   if (status === "pending") {
@@ -1069,14 +1076,14 @@ export class AdminRepository {
       orderBy = "COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), '')) ASC NULLS LAST, u.created_at DESC";
     }
 
-    const result = await this.app.db.query<AdminStudentListRow>(
-      `
+    const sqlWithPhone = `
       SELECT
         u.id::text AS id,
         u.full_name::text AS full_name,
         u.student_full_name::text AS student_full_name,
         u.telegram_username::text AS telegram_username,
         u.telegram_id::text AS telegram_id,
+        u.phone::text AS phone,
         u.degree::text AS degree,
         u.faculty::text AS faculty,
         u.student_id::text AS student_id,
@@ -1097,21 +1104,57 @@ export class AdminRepository {
       ${whereSql}
       ORDER BY ${orderBy}
       LIMIT $${limitParam}::int OFFSET $${offsetParam}::int
-      `,
-      params,
-    );
-    return result.rows;
-  }
-
-  async findStudentById(studentId: string): Promise<AdminStudentDetailRow | null> {
-    const result = await this.app.db.query<AdminStudentDetailRow>(
-      `
+    `;
+    const sqlLegacy = `
       SELECT
         u.id::text AS id,
         u.full_name::text AS full_name,
         u.student_full_name::text AS student_full_name,
         u.telegram_username::text AS telegram_username,
         u.telegram_id::text AS telegram_id,
+        NULL::text AS phone,
+        u.degree::text AS degree,
+        u.faculty::text AS faculty,
+        u.student_id::text AS student_id,
+        u.created_at::timestamptz::text AS registration_date,
+        COALESCE(activity.last_activity_at, u.updated_at)::timestamptz::text AS last_activity_at,
+        COALESCE(activity.total_achievements_submitted, 0)::text AS total_achievements_submitted,
+        COALESCE(activity.total_approved_score, 0)::text AS total_approved_score
+      FROM public.users u
+      LEFT JOIN LATERAL (
+        SELECT
+          MAX(COALESCE(s.updated_at, s.submitted_at, s.created_at)) AS last_activity_at,
+          COALESCE(COUNT(si.id), 0) AS total_achievements_submitted,
+          COALESCE(SUM(s.total_score) FILTER (WHERE s.status = 'approved'), 0) AS total_approved_score
+        FROM public.submissions s
+        LEFT JOIN public.submission_items si ON si.submission_id = s.id
+        WHERE s.user_id = u.id
+      ) activity ON true
+      ${whereSql}
+      ORDER BY ${orderBy}
+      LIMIT $${limitParam}::int OFFSET $${offsetParam}::int
+    `;
+    try {
+      const result = await this.app.db.query<AdminStudentListRow>(sqlWithPhone, params);
+      return result.rows;
+    } catch (error) {
+      if (!isPgUndefinedColumnError(error)) {
+        throw error;
+      }
+      const legacy = await this.app.db.query<AdminStudentListRow>(sqlLegacy, params);
+      return legacy.rows;
+    }
+  }
+
+  async findStudentById(studentId: string): Promise<AdminStudentDetailRow | null> {
+    const sqlWithPhone = `
+      SELECT
+        u.id::text AS id,
+        u.full_name::text AS full_name,
+        u.student_full_name::text AS student_full_name,
+        u.telegram_username::text AS telegram_username,
+        u.telegram_id::text AS telegram_id,
+        u.phone::text AS phone,
         u.degree::text AS degree,
         u.faculty::text AS faculty,
         u.student_id::text AS student_id,
@@ -1138,10 +1181,52 @@ export class AdminRepository {
         AND u.role::text = 'student'
         AND u.telegram_id IS NOT NULL
       LIMIT 1
-      `,
-      [studentId],
-    );
-    return result.rows[0] ?? null;
+    `;
+    const sqlLegacy = `
+      SELECT
+        u.id::text AS id,
+        u.full_name::text AS full_name,
+        u.student_full_name::text AS student_full_name,
+        u.telegram_username::text AS telegram_username,
+        u.telegram_id::text AS telegram_id,
+        NULL::text AS phone,
+        u.degree::text AS degree,
+        u.faculty::text AS faculty,
+        u.student_id::text AS student_id,
+        u.email::text AS email,
+        u.is_profile_completed,
+        u.created_at::timestamptz::text AS created_at,
+        u.updated_at::timestamptz::text AS updated_at,
+        COALESCE(activity.last_activity_at, u.updated_at)::timestamptz::text AS last_activity_at,
+        COALESCE(activity.total_achievements_submitted, 0)::text AS total_achievements_submitted,
+        COALESCE(activity.total_submissions, 0)::text AS total_submissions,
+        COALESCE(activity.total_approved_score, 0)::text AS total_approved_score
+      FROM public.users u
+      LEFT JOIN LATERAL (
+        SELECT
+          MAX(COALESCE(s.updated_at, s.submitted_at, s.created_at)) AS last_activity_at,
+          COALESCE(COUNT(si.id), 0) AS total_achievements_submitted,
+          COALESCE(COUNT(DISTINCT s.id), 0) AS total_submissions,
+          COALESCE(SUM(s.total_score) FILTER (WHERE s.status = 'approved'), 0) AS total_approved_score
+        FROM public.submissions s
+        LEFT JOIN public.submission_items si ON si.submission_id = s.id
+        WHERE s.user_id = u.id
+      ) activity ON true
+      WHERE u.id = $1::uuid
+        AND u.role::text = 'student'
+        AND u.telegram_id IS NOT NULL
+      LIMIT 1
+    `;
+    try {
+      const result = await this.app.db.query<AdminStudentDetailRow>(sqlWithPhone, [studentId]);
+      return result.rows[0] ?? null;
+    } catch (error) {
+      if (!isPgUndefinedColumnError(error)) {
+        throw error;
+      }
+      const legacy = await this.app.db.query<AdminStudentDetailRow>(sqlLegacy, [studentId]);
+      return legacy.rows[0] ?? null;
+    }
   }
 
   async updateStudentById(studentId: string, body: AdminUpdateStudentBody): Promise<void> {
@@ -1262,20 +1347,40 @@ export class AdminRepository {
 
   async findUserById(client: AdminDbExecutor, userId: string): Promise<AdminUserRow | null> {
     const db = client;
-    const result = await db.query<AdminUserRow>(
-      `
-      SELECT
-        student_full_name,
-        faculty,
-        student_id,
-        telegram_username
-      FROM public.users
-      WHERE id = $1
-      `,
-      [userId],
-    );
-
-    return result.rows[0] ?? null;
+    try {
+      const result = await db.query<AdminUserRow>(
+        `
+        SELECT
+          student_full_name,
+          faculty,
+          student_id,
+          telegram_username,
+          phone
+        FROM public.users
+        WHERE id = $1
+        `,
+        [userId],
+      );
+      return result.rows[0] ?? null;
+    } catch (error) {
+      if (!isPgUndefinedColumnError(error)) {
+        throw error;
+      }
+      const legacy = await db.query<AdminUserRow>(
+        `
+        SELECT
+          student_full_name,
+          faculty,
+          student_id,
+          telegram_username,
+          NULL::text AS phone
+        FROM public.users
+        WHERE id = $1
+        `,
+        [userId],
+      );
+      return legacy.rows[0] ?? null;
+    }
   }
 
   async listItemsForSubmission(

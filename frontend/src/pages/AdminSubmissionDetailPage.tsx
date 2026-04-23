@@ -350,6 +350,10 @@ export function AdminSubmissionDetailPage(): ReactElement {
                 <span>Telegram</span>
                 <strong>{user.telegramUsername ?? "—"}</strong>
               </div>
+              <div className="admin-submission-student-cell">
+                <span>Phone</span>
+                <strong>{user.phone ?? "—"}</strong>
+              </div>
             </div>
           ) : (
             <p className="muted">No user profile joined.</p>

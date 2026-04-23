@@ -10,6 +10,7 @@ export interface UserProfileEntity {
   degree: "bachelor" | "master" | null;
   faculty: string | null;
   studentId: string | null;
+  phone: string | null;
   isProfileCompleted: boolean;
   role: "student" | "reviewer" | "admin" | "superadmin";
 }
@@ -22,6 +23,7 @@ interface UserProfileRow {
   degree: string | null;
   faculty: string | null;
   student_id: string | null;
+  phone: string | null;
   is_profile_completed: boolean;
   role: string;
 }
@@ -43,6 +45,7 @@ function mapProfile(row: UserProfileRow): UserProfileEntity {
     degree: deg === "bachelor" || deg === "master" ? deg : null,
     faculty: row.faculty,
     studentId: row.student_id,
+    phone: row.phone,
     isProfileCompleted: row.is_profile_completed,
     role: parseRole(row.role),
   };
@@ -62,6 +65,7 @@ export class UsersRepository {
         degree::text AS degree,
         faculty,
         student_id,
+        phone,
         is_profile_completed,
         role::text AS role
       FROM public.users
@@ -110,6 +114,7 @@ export class UsersRepository {
     degree: "bachelor" | "master";
     faculty: string;
     studentId: string;
+    phone?: string;
   }): Promise<UserProfileEntity> {
     const normalizedStudentId = normalizeStudentId(input.studentId);
     const duplicate = await this.app.db.query<{ id: string }>(
@@ -126,6 +131,13 @@ export class UsersRepository {
       throw new ServiceError(409, "Student ID already exists", "DUPLICATE_STUDENT_ID");
     }
 
+    const params: unknown[] = [userId, input.studentFullName, input.degree, input.faculty, normalizedStudentId];
+    let phoneSql = "";
+    if (input.phone !== undefined) {
+      params.push(input.phone);
+      phoneSql = `, phone = $${params.length}::text`;
+    }
+
     const result = await this.app.db.query<UserProfileRow>(
       `
       UPDATE public.users
@@ -134,6 +146,7 @@ export class UsersRepository {
         degree = $3::text,
         faculty = $4,
         student_id = $5,
+        ${phoneSql ? phoneSql.slice(2) : "phone = phone"},
         is_profile_completed = true,
         updated_at = NOW()
       WHERE id = $1
@@ -145,10 +158,11 @@ export class UsersRepository {
         degree::text AS degree,
         faculty,
         student_id,
+        phone,
         is_profile_completed,
         role::text AS role
       `,
-      [userId, input.studentFullName, input.degree, input.faculty, normalizedStudentId],
+      params,
     );
 
     const row = result.rows[0];

@@ -24,6 +24,7 @@ export class UsersService {
       degree: body.degree,
       faculty: body.faculty,
       studentId: body.student_id,
+      phone: body.phone,
     });
   }
 }

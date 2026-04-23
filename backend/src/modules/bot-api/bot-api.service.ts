@@ -48,6 +48,7 @@ interface UserRow {
   student_full_name: string | null;
   faculty: string | null;
   student_id: string | null;
+  phone: string | null;
   degree: string | null;
   is_profile_completed: boolean;
 }
@@ -96,6 +97,7 @@ export interface BotUser {
   studentFullName: string | null;
   faculty: string | null;
   studentId: string | null;
+  phone: string | null;
   degree: "bachelor" | "master" | null;
   isProfileCompleted: boolean;
 }
@@ -205,7 +207,7 @@ function isPgUndefinedColumnError(error: unknown): boolean {
 
 export class BotApiService {
   private telegramUsernameColumnAvailable: boolean | null = null;
-  /** When true, all five student profile columns are present (cached after information_schema check). */
+  /** When true, all student profile columns are present (cached after information_schema check). */
   private studentProfileColumnsFullyPresentCached: true | null = null;
 
   constructor(
@@ -264,7 +266,7 @@ export class BotApiService {
   }
 
   /**
-   * True when all five student profile columns exist on public.users.
+   * True when all profile columns exist on public.users.
    * Only `true` is cached so a later migration is picked up without redeploying.
    */
   private async resolveStudentProfileColumnsFullyPresent(): Promise<boolean> {
@@ -282,12 +284,13 @@ export class BotApiService {
           'degree',
           'faculty',
           'student_id',
+          'phone',
           'is_profile_completed'
         )
       `,
     );
     const count = Number(result.rows[0]?.c ?? "0");
-    if (count === 5) {
+    if (count === 6) {
       this.studentProfileColumnsFullyPresentCached = true;
       return true;
     }
@@ -299,21 +302,23 @@ export class BotApiService {
       return `student_full_name,
         faculty,
         student_id,
+        phone,
         degree::text AS degree,
         is_profile_completed`;
     }
     return `NULL::text AS student_full_name,
         NULL::text AS faculty,
         NULL::text AS student_id,
+        NULL::text AS phone,
         NULL::text AS degree,
         false AS is_profile_completed`;
   }
 
   private profileReturningFragment(include: boolean): string {
     if (include) {
-      return ", student_full_name, faculty, student_id, degree::text AS degree, is_profile_completed";
+      return ", student_full_name, faculty, student_id, phone, degree::text AS degree, is_profile_completed";
     }
-    return ", NULL::text AS student_full_name, NULL::text AS faculty, NULL::text AS student_id, NULL::text AS degree, false AS is_profile_completed";
+    return ", NULL::text AS student_full_name, NULL::text AS faculty, NULL::text AS student_id, NULL::text AS phone, NULL::text AS degree, false AS is_profile_completed";
   }
 
   private async resolveGeneralSubmissionTitleForUser(
@@ -357,6 +362,7 @@ export class BotApiService {
       studentFullName: row.student_full_name,
       faculty: row.faculty,
       studentId: row.student_id,
+      phone: row.phone,
       degree: deg === "bachelor" || deg === "master" ? deg : null,
       isProfileCompleted: Boolean(row.is_profile_completed),
     };
@@ -517,6 +523,7 @@ export class BotApiService {
       degree: "bachelor" | "master";
       faculty: string;
       student_id: string;
+      phone: string;
     },
   ): Promise<BotUser> {
     try {
@@ -530,6 +537,7 @@ export class BotApiService {
         degree: input.degree,
         faculty: input.faculty.trim(),
         studentId: normalizeStudentId(input.student_id),
+        phone: input.phone,
       });
 
       const refreshed = await this.findUserByTelegramId(telegramId);

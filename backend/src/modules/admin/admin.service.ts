@@ -643,6 +643,7 @@ export class AdminService {
     fullName: string;
     telegramUsername: string | null;
     telegramId: string | null;
+    phone: string | null;
     degree: "bachelor" | "master" | null;
     faculty: string | null;
     studentId: string | null;
@@ -659,6 +660,7 @@ export class AdminService {
       fullName,
       telegramUsername: row.telegram_username,
       telegramId: row.telegram_id,
+      phone: row.phone,
       degree,
       faculty: row.faculty,
       studentId: row.student_id,
@@ -674,6 +676,7 @@ export class AdminService {
     fullName: string;
     telegramUsername: string | null;
     telegramId: string | null;
+    phone: string | null;
     degree: "bachelor" | "master" | null;
     faculty: string | null;
     studentId: string | null;
@@ -693,6 +696,7 @@ export class AdminService {
       fullName: row.student_full_name?.trim() || row.full_name?.trim() || "—",
       telegramUsername: row.telegram_username,
       telegramId: row.telegram_id,
+      phone: row.phone,
       degree,
       faculty: row.faculty,
       studentId: row.student_id,
@@ -1300,6 +1304,7 @@ export class AdminService {
       faculty: row.faculty,
       studentId: row.student_id,
       telegramUsername: row.telegram_username,
+      phone: row.phone,
     };
   }
 }

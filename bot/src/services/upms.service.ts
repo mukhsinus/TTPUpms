@@ -15,6 +15,7 @@ interface BotApiUserRow {
   studentFullName: string | null;
   faculty: string | null;
   studentId: string | null;
+  phone: string | null;
   degree: "bachelor" | "master" | null;
   isProfileCompleted: boolean;
 }
@@ -65,6 +66,7 @@ export interface AuthenticatedTelegramUser {
   studentFullName: string | null;
   faculty: string | null;
   studentId: string | null;
+  phone: string | null;
   degree: "bachelor" | "master" | null;
   isProfileCompleted: boolean;
 }
@@ -78,6 +80,7 @@ function mapBotUserRow(user: BotApiUserRow): AuthenticatedTelegramUser {
     studentFullName: user.studentFullName ?? null,
     faculty: user.faculty ?? null,
     studentId: user.studentId ?? null,
+    phone: user.phone ?? null,
     degree: user.degree ?? null,
     isProfileCompleted: Boolean(user.isProfileCompleted),
   };
@@ -314,6 +317,7 @@ export class UpmsService {
   async completeStudentProfile(input: {
     telegramId: string;
     studentFullName: string;
+    phone: string;
     degree: "bachelor" | "master";
     faculty: string;
     studentId: string;
@@ -323,6 +327,7 @@ export class UpmsService {
       body: JSON.stringify({
         telegram_id: input.telegramId,
         student_full_name: input.studentFullName,
+        phone: input.phone,
         degree: input.degree,
         faculty: input.faculty,
         student_id: normalizeStudentId(input.studentId),

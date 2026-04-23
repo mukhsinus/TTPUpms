@@ -17,7 +17,7 @@ import { UsersRepository } from "../users/users.repository";
 import { AntiFraudError, AntiFraudService } from "../validation/anti-fraud.service";
 import { ServiceError } from "../../utils/service-error";
 import { BotApiHttpError } from "./bot-api-errors";
-import { updateUserProfileBodySchema } from "../users/users.schema";
+import { phoneSchema, updateUserProfileBodySchema } from "../users/users.schema";
 import { BotApiService } from "./bot-api.service";
 
 const linkSchema = z.object({
@@ -121,6 +121,7 @@ const submitDraftBodySchema = z.object({
 /** telegram_id binds the Telegram principal; body fields are the student profile only (no extra uniqueness rules). */
 const botStudentProfileCompleteSchema = updateUserProfileBodySchema.extend({
   telegram_id: z.string().regex(/^\d+$/, "telegram_id must be numeric"),
+  phone: phoneSchema,
 });
 
 function pickHeaderValue(value: string | string[] | undefined): string | undefined {
@@ -348,6 +349,7 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
           degree: body.degree,
           faculty: body.faculty,
           student_id: body.student_id,
+          phone: body.phone,
         });
         reply.status(200).send(success(user));
       } catch (error) {

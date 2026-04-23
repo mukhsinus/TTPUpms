@@ -533,6 +533,7 @@ export interface AdminSubmissionDetailPayload {
     faculty: string | null;
     studentId: string | null;
     telegramUsername: string | null;
+    phone: string | null;
   } | null;
 }
 
@@ -567,6 +568,7 @@ export interface AdminStudentListItem {
   fullName: string;
   telegramUsername: string | null;
   telegramId: string | null;
+  phone: string | null;
   degree: AdminStudentDegree | null;
   faculty: string | null;
   studentId: string | null;
@@ -593,6 +595,7 @@ export interface AdminStudentDetailPayload {
   fullName: string;
   telegramUsername: string | null;
   telegramId: string | null;
+  phone: string | null;
   degree: AdminStudentDegree | null;
   faculty: string | null;
   studentId: string | null;
