@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { ServiceError } from "../../utils/service-error";
 import { normalizeStudentId } from "../../utils/student-id";
+import { getUsersPhoneColumnPresent } from "../../utils/users-phone-column";
 
 export interface UserProfileEntity {
   id: string;
@@ -55,6 +56,8 @@ export class UsersRepository {
   constructor(private readonly app: FastifyInstance) {}
 
   async findProfileByUserId(userId: string): Promise<UserProfileEntity | null> {
+    const hasPhone = await getUsersPhoneColumnPresent(this.app);
+    const phoneSelect = hasPhone ? "phone" : "NULL::text AS phone";
     const result = await this.app.db.query<UserProfileRow>(
       `
       SELECT
@@ -65,7 +68,7 @@ export class UsersRepository {
         degree::text AS degree,
         faculty,
         student_id,
-        phone,
+        ${phoneSelect},
         is_profile_completed,
         role::text AS role
       FROM public.users
@@ -131,22 +134,30 @@ export class UsersRepository {
       throw new ServiceError(409, "Student ID already exists", "DUPLICATE_STUDENT_ID");
     }
 
+    const hasPhoneCol = await getUsersPhoneColumnPresent(this.app);
     const params: unknown[] = [userId, input.studentFullName, input.degree, input.faculty, normalizedStudentId];
-    let phoneSql = "";
-    if (input.phone !== undefined) {
-      params.push(input.phone);
-      phoneSql = `, phone = $${params.length}::text`;
+    const setParts = [
+      "student_full_name = $2",
+      "degree = $3::text",
+      "faculty = $4",
+      "student_id = $5",
+    ];
+    if (hasPhoneCol) {
+      if (input.phone !== undefined) {
+        params.push(input.phone);
+        setParts.push(`phone = $${params.length}::text`);
+      } else {
+        setParts.push("phone = phone");
+      }
     }
+
+    const phoneReturning = hasPhoneCol ? "phone" : "NULL::text AS phone";
 
     const result = await this.app.db.query<UserProfileRow>(
       `
       UPDATE public.users
       SET
-        student_full_name = $2,
-        degree = $3::text,
-        faculty = $4,
-        student_id = $5,
-        ${phoneSql ? phoneSql.slice(2) : "phone = phone"},
+        ${setParts.join(", ")},
         is_profile_completed = true,
         updated_at = NOW()
       WHERE id = $1
@@ -158,7 +169,7 @@ export class UsersRepository {
         degree::text AS degree,
         faculty,
         student_id,
-        phone,
+        ${phoneReturning},
         is_profile_completed,
         role::text AS role
       `,

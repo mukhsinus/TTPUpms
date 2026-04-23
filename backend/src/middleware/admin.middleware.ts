@@ -14,6 +14,9 @@ function toRole(value: string): AppRole | null {
  * Requires a row in `public.admin_users` (allowlisted panel operators). Run after `authMiddleware`.
  */
 export async function requireAdmin(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  if (request.method === "OPTIONS") {
+    return;
+  }
   if (!request.user) {
     reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED", {}));
     return;
@@ -36,6 +39,9 @@ export async function requireAdmin(request: FastifyRequest, reply: FastifyReply)
 
 /** Superadmin-only gate for control-plane endpoints. Must run after `requireAdmin`. */
 export async function requireSuperadmin(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  if (request.method === "OPTIONS") {
+    return;
+  }
   if (!request.user) {
     reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED", {}));
     return;
@@ -54,6 +60,9 @@ export async function requireActiveAdminForSensitiveAction(
   request: FastifyRequest,
   reply: FastifyReply,
 ): Promise<void> {
+  if (request.method === "OPTIONS") {
+    return;
+  }
   if (!request.user) {
     reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED", {}));
     return;

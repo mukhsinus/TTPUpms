@@ -15,6 +15,8 @@ export async function registerSecurityPlugins(app: FastifyInstance): Promise<voi
     "https://ttpupms-frontend.vercel.app",
     "http://localhost:5173",
     "http://localhost:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
     "*.vercel.app",
   ];
   const configuredOrigins = [
@@ -83,6 +85,7 @@ export async function registerSecurityPlugins(app: FastifyInstance): Promise<voi
     max: (request) => (request.url.startsWith("/api/bot/") ? env.RATE_LIMIT_MAX * 10 : env.RATE_LIMIT_MAX),
     timeWindow: env.RATE_LIMIT_TIME_WINDOW,
     ban: env.RATE_LIMIT_BAN,
+    allowList: (request) => request.method === "OPTIONS",
     addHeadersOnExceeding: {
       "x-ratelimit-limit": true,
       "x-ratelimit-remaining": true,

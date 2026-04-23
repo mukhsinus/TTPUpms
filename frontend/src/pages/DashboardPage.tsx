@@ -392,6 +392,8 @@ export function DashboardPage(): ReactElement {
               <Button
                 type="button"
                 variant="secondary"
+                className={`system-phase-toggle${systemPhase.phase === "submission" ? " is-selected" : ""}`}
+                aria-pressed={systemPhase.phase === "submission"}
                 disabled={phaseBusy || systemPhase.phase === "submission"}
                 onClick={() => setPendingPhaseSwitch("submission")}
               >
@@ -400,6 +402,8 @@ export function DashboardPage(): ReactElement {
               <Button
                 type="button"
                 variant="secondary"
+                className={`system-phase-toggle${systemPhase.phase === "evaluation" ? " is-selected" : ""}`}
+                aria-pressed={systemPhase.phase === "evaluation"}
                 disabled={phaseBusy || systemPhase.phase === "evaluation"}
                 onClick={() => setPendingPhaseSwitch("evaluation")}
               >
@@ -427,6 +431,8 @@ export function DashboardPage(): ReactElement {
                 <Button
                   type="button"
                   variant="secondary"
+                  className={`system-phase-toggle${(systemPhase.semester ?? "first") === "first" ? " is-selected" : ""}`}
+                  aria-pressed={(systemPhase.semester ?? "first") === "first"}
                   disabled={phaseBusy || (systemPhase.semester ?? "first") === "first"}
                   onClick={async () => {
                     try {
@@ -446,6 +452,8 @@ export function DashboardPage(): ReactElement {
                 <Button
                   type="button"
                   variant="secondary"
+                  className={`system-phase-toggle${(systemPhase.semester ?? "first") === "second" ? " is-selected" : ""}`}
+                  aria-pressed={(systemPhase.semester ?? "first") === "second"}
                   disabled={phaseBusy || (systemPhase.semester ?? "first") === "second"}
                   onClick={async () => {
                     try {
@@ -683,6 +691,8 @@ export function DashboardPage(): ReactElement {
                 <Button
                   type="button"
                   variant="secondary"
+                  className={`system-phase-toggle${systemPhase.phase === "submission" ? " is-selected" : ""}`}
+                  aria-pressed={systemPhase.phase === "submission"}
                   disabled={phaseBusy || systemPhase.phase === "submission"}
                   onClick={() => setPendingPhaseSwitch("submission")}
                 >
@@ -691,6 +701,8 @@ export function DashboardPage(): ReactElement {
                 <Button
                   type="button"
                   variant="secondary"
+                  className={`system-phase-toggle${systemPhase.phase === "evaluation" ? " is-selected" : ""}`}
+                  aria-pressed={systemPhase.phase === "evaluation"}
                   disabled={phaseBusy || systemPhase.phase === "evaluation"}
                   onClick={() => setPendingPhaseSwitch("evaluation")}
                 >
@@ -718,6 +730,8 @@ export function DashboardPage(): ReactElement {
                   <Button
                     type="button"
                     variant="secondary"
+                    className={`system-phase-toggle${(systemPhase.semester ?? "first") === "first" ? " is-selected" : ""}`}
+                    aria-pressed={(systemPhase.semester ?? "first") === "first"}
                     disabled={phaseBusy || (systemPhase.semester ?? "first") === "first"}
                     onClick={async () => {
                       try {
@@ -737,6 +751,8 @@ export function DashboardPage(): ReactElement {
                   <Button
                     type="button"
                     variant="secondary"
+                    className={`system-phase-toggle${(systemPhase.semester ?? "first") === "second" ? " is-selected" : ""}`}
+                    aria-pressed={(systemPhase.semester ?? "first") === "second"}
                     disabled={phaseBusy || (systemPhase.semester ?? "first") === "second"}
                     onClick={async () => {
                       try {

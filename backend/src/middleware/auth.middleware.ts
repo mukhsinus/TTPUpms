@@ -151,6 +151,11 @@ async function enforceAdminRegistrationGate(
  * Otherwise falls back to `auth.getUser` (network round-trip — slow under load).
  */
 export async function authMiddleware(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  // CORS preflight must not hit Supabase or return 401/503 — browsers omit Authorization on OPTIONS.
+  if (request.method === "OPTIONS") {
+    return;
+  }
+
   const token = parseBearerToken(request.headers.authorization);
 
   if (!token) {

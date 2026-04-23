@@ -11,6 +11,9 @@ interface SubmissionAccessContext {
 
 export function allowRoles(allowedRoles: AppRole[]): preHandlerHookHandler {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (request.method === "OPTIONS") {
+      return;
+    }
     if (!request.user) {
       reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
       return;
