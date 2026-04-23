@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { ADMIN_ACTIVITY_ACTIONS } from "../audit/admin-activity";
 
 export const superadminListQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -56,7 +55,6 @@ export const superadminActivityPdfQuerySchema = z
     from: z.string().trim().min(1).optional(),
     to: z.string().trim().min(1).optional(),
     adminId: z.string().uuid().optional(),
-    actionType: z.enum(ADMIN_ACTIVITY_ACTIONS).optional(),
   })
   .superRefine((value, ctx) => {
     if (value.range !== "custom") {

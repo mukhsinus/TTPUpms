@@ -62,14 +62,19 @@ function actionLabel(action: string): string {
 
 function targetLabel(row: AuditRow): string {
   const details = toRecord(row.details);
+  const targetEmail = typeof row.targetEmail === "string" ? row.targetEmail.trim() : "";
+  const targetName = typeof row.targetName === "string" ? row.targetName.trim() : "";
   if (row.action === "security_event_approved" || row.action === "security_event_rejected") {
+    if (targetEmail) {
+      return targetName ? `${targetName} (${targetEmail})` : targetEmail;
+    }
     const newValues = toRecord(row.newValues);
-    const targetEmail =
+    const metadataTargetEmail =
       (typeof newValues.targetEmail === "string" && newValues.targetEmail.trim()) ||
       (typeof details.targetEmail === "string" && details.targetEmail.trim()) ||
       "";
-    if (targetEmail) {
-      return targetEmail;
+    if (metadataTargetEmail) {
+      return metadataTargetEmail;
     }
   }
   if (row.action === "moderation_submission_approved" || row.action === "moderation_submission_rejected") {
@@ -83,6 +88,9 @@ function targetLabel(row: AuditRow): string {
     }
   }
   if (row.action === "student_profile_updated") {
+    if (targetName) {
+      return targetEmail ? `${targetName} (${targetEmail})` : targetName;
+    }
     const source = toRecord(row.newValues);
     const name = typeof source.fullName === "string" ? source.fullName.trim() : "";
     const studentIdValue = typeof source.studentId === "string" ? source.studentId.trim() : "";
@@ -108,6 +116,12 @@ function targetLabel(row: AuditRow): string {
     return `Submission ${row.targetId.slice(0, 8)}…`;
   }
   if (row.targetTable === "users" && row.targetId) {
+    if (targetName) {
+      return targetEmail ? `${targetName} (${targetEmail})` : targetName;
+    }
+    if (targetEmail) {
+      return targetEmail;
+    }
     return `Student ${row.targetId.slice(0, 8)}…`;
   }
   if (row.targetTable === "system_settings" && row.targetId) {

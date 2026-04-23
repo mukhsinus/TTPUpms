@@ -474,6 +474,8 @@ export interface SuperadminAuditLogsPayload {
     action: string;
     targetTable: string | null;
     targetId: string | null;
+    targetName: string | null;
+    targetEmail: string | null;
     targetTitle: string | null;
     details: Record<string, unknown> | null;
     oldValues: Record<string, unknown> | null;
@@ -1753,14 +1755,12 @@ export const api = {
     from?: string;
     to?: string;
     adminId?: string;
-    actionType?: string;
   }): Promise<Blob> {
     const token = getAuthToken();
     const q = new URLSearchParams({ range: params.range });
     if (params.from) q.set("from", params.from);
     if (params.to) q.set("to", params.to);
     if (params.adminId) q.set("adminId", params.adminId);
-    if (params.actionType) q.set("actionType", params.actionType);
     const path = `/api/admin/reports/activity.pdf?${q.toString()}`;
     const headers = new Headers();
     if (token) {

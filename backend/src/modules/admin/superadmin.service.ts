@@ -302,6 +302,8 @@ export class SuperadminService {
         action: r.action,
         targetTable: r.target_table,
         targetId: r.target_id,
+        targetName: r.target_name,
+        targetEmail: r.target_email,
         targetTitle: r.submission_title,
         details: r.metadata,
         oldValues: r.old_values,
@@ -542,9 +544,16 @@ export class SuperadminService {
       from: range.from,
       to: range.to,
       adminId: query.adminId,
-      actionType: query.actionType,
-      includeHidden,
+      includeHidden: false,
     });
+    const selectedAdmin =
+      query.adminId ? await this.repository.findAdminIdentity(query.adminId, includeHidden) : null;
+    const selectedAdminLabel = selectedAdmin
+      ? selectedAdmin.email ??
+        selectedAdmin.full_name ??
+        query.adminId ??
+        "All admins"
+      : "All admins";
     const actor = await this.repository.findAdminIdentity(actorUserId);
     const generatedBy =
       actor?.email ?? actor?.full_name ?? actorUserId;
@@ -556,8 +565,7 @@ export class SuperadminService {
         range: query.range,
         from: normalizeDisplayDateTime(range.from),
         to: normalizeDisplayDateTime(range.to),
-        adminId: query.adminId,
-        actionType: query.actionType,
+        adminLabel: selectedAdminLabel,
       },
       rows,
     });

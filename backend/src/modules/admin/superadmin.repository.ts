@@ -1,6 +1,5 @@
 import type { FastifyInstance } from "fastify";
 import type { SuperadminAuditQuery, SuperadminListQuery, SuperadminSecurityQuery } from "./superadmin.schema";
-import type { AdminActivityAction } from "../audit/admin-activity";
 
 export interface SuperadminAdminListRow {
   id: string;
@@ -25,6 +24,8 @@ export interface SuperadminAuditRow {
   action: string;
   target_table: string | null;
   target_id: string | null;
+  target_name: string | null;
+  target_email: string | null;
   submission_title: string | null;
   metadata: Record<string, unknown> | null;
   old_values: Record<string, unknown> | null;
@@ -477,6 +478,8 @@ export class SuperadminRepository {
         al.action,
         al.entity_table AS target_table,
         al.entity_id::text AS target_id,
+        COALESCE(NULLIF(BTRIM(tu.student_full_name), ''), NULLIF(BTRIM(tu.full_name), '')) AS target_name,
+        tu.email::text AS target_email,
         COALESCE(al.metadata->>'submissionTitle', s.title) AS submission_title,
         al.metadata,
         al.old_values,
@@ -485,6 +488,7 @@ export class SuperadminRepository {
       FROM public.audit_logs al
       INNER JOIN public.admin_users au ON au.id = al.user_id
       LEFT JOIN public.users u ON u.id = al.user_id
+      LEFT JOIN public.users tu ON tu.id = al.target_user_id
       LEFT JOIN public.submissions s ON al.entity_table = 'submissions' AND al.entity_id::text = s.id::text
       ${whereSql}
       ORDER BY al.created_at DESC
@@ -806,7 +810,6 @@ export class SuperadminRepository {
     from: string;
     to: string;
     adminId?: string;
-    actionType?: AdminActivityAction;
     includeHidden?: boolean;
   }): Promise<ActivityReportRow[]> {
     const params: unknown[] = [input.from, input.to];
@@ -822,27 +825,173 @@ export class SuperadminRepository {
       where.push(`aal.admin_id = $${paramIndex++}::uuid`);
       params.push(input.adminId);
     }
-    if (input.actionType) {
-      where.push(`aal.action_type = $${paramIndex++}`);
-      params.push(input.actionType);
-    }
     const result = await this.app.db.query<ActivityReportRow>(
       `
       SELECT
         to_char(aal.created_at, 'YYYY-MM-DD HH24:MI:SS') AS time,
         COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), '')) AS admin_name,
         aal.admin_email::text AS admin_email,
-        aal.action_type,
+        CASE
+          WHEN aal.action_type = 'project_phase_changed' THEN 'Project phase changed'
+          WHEN aal.action_type = 'project_deadlines_changed' THEN 'Project deadlines changed'
+          WHEN aal.action_type = 'academic_semester_changed' THEN 'Academic semester changed'
+          WHEN aal.action_type = 'student_profile_updated' THEN 'Student profile updated'
+          WHEN aal.action_type = 'security_event_approved' THEN 'Security request approved'
+          WHEN aal.action_type = 'security_event_rejected' THEN 'Security request rejected'
+          WHEN aal.action_type = 'moderation_submission_approved' THEN 'Submission approved'
+          WHEN aal.action_type = 'moderation_submission_rejected' THEN 'Submission rejected'
+          WHEN aal.action_type = 'moderation_submission_status_overridden' THEN 'Submission status overridden'
+          WHEN aal.action_type = 'moderation_submission_score_overridden' THEN 'Submission score overridden'
+          WHEN aal.action_type = 'moderation_item_approved' THEN 'Item approved'
+          WHEN aal.action_type = 'moderation_item_rejected' THEN 'Item rejected'
+          WHEN aal.action_type = 'moderation_item_score_changed' THEN 'Item score changed'
+          WHEN aal.action_type = 'moderation_item_comment_changed' THEN 'Item comment changed'
+          ELSE initcap(replace(aal.action_type, '_', ' '))
+        END AS action_type,
         aal.entity_type,
-        aal.entity_label,
-        CONCAT(
-          COALESCE(NULLIF(aal.old_value::text, '{}'), ''),
-          CASE
-            WHEN aal.old_value::text <> '{}'::text AND aal.new_value::text <> '{}'::text THEN ' -> '
-            ELSE ''
-          END,
-          COALESCE(NULLIF(aal.new_value::text, '{}'), '')
-        ) AS details
+        CASE
+          WHEN aal.action_type IN (
+            'moderation_submission_approved',
+            'moderation_submission_rejected',
+            'moderation_submission_status_overridden',
+            'moderation_submission_score_overridden'
+          ) THEN COALESCE(
+            NULLIF(BTRIM(aal.new_value->>'submissionTitle'), ''),
+            NULLIF(BTRIM(aal.entity_label), ''),
+            'Submission'
+          )
+          WHEN aal.action_type = 'student_profile_updated' THEN COALESCE(
+            NULLIF(BTRIM(aal.new_value->>'fullName'), ''),
+            NULLIF(BTRIM(aal.entity_label), ''),
+            'Student'
+          )
+          WHEN aal.action_type IN ('security_event_approved', 'security_event_rejected') THEN COALESCE(
+            NULLIF(BTRIM(aal.new_value->>'targetEmail'), ''),
+            NULLIF(BTRIM(aal.entity_label), ''),
+            'Security request'
+          )
+          WHEN aal.action_type IN ('project_phase_changed', 'project_deadlines_changed', 'academic_semester_changed')
+            THEN 'Project settings'
+          ELSE COALESCE(NULLIF(BTRIM(aal.entity_label), ''), 'System event')
+        END AS entity_label,
+        CASE
+          WHEN aal.action_type = 'project_phase_changed' THEN CONCAT(
+            COALESCE(NULLIF(aal.old_value->>'phase', ''), '—'),
+            ' -> ',
+            COALESCE(NULLIF(aal.new_value->>'phase', ''), '—')
+          )
+          WHEN aal.action_type = 'academic_semester_changed' THEN CONCAT(
+            COALESCE(NULLIF(aal.old_value->>'semester', ''), '—'),
+            ' -> ',
+            COALESCE(NULLIF(aal.new_value->>'semester', ''), '—')
+          )
+          WHEN aal.action_type = 'project_deadlines_changed' THEN CONCAT(
+            'Submission deadline: ',
+            COALESCE(NULLIF(aal.new_value->>'submissionDeadline', ''), '—'),
+            '; Evaluation deadline: ',
+            COALESCE(NULLIF(aal.new_value->>'evaluationDeadline', ''), '—')
+          )
+          WHEN aal.action_type = 'student_profile_updated' THEN COALESCE(
+            NULLIF(
+              TRIM(BOTH '; ' FROM CONCAT(
+                CASE
+                  WHEN COALESCE(aal.old_value->>'fullName', '') <> COALESCE(aal.new_value->>'fullName', '')
+                    THEN CONCAT(
+                      'Full name: ',
+                      COALESCE(NULLIF(aal.old_value->>'fullName', ''), '—'),
+                      ' -> ',
+                      COALESCE(NULLIF(aal.new_value->>'fullName', ''), '—'),
+                      '; '
+                    )
+                  ELSE ''
+                END,
+                CASE
+                  WHEN COALESCE(aal.old_value->>'faculty', '') <> COALESCE(aal.new_value->>'faculty', '')
+                    THEN CONCAT(
+                      'Faculty: ',
+                      COALESCE(NULLIF(aal.old_value->>'faculty', ''), '—'),
+                      ' -> ',
+                      COALESCE(NULLIF(aal.new_value->>'faculty', ''), '—'),
+                      '; '
+                    )
+                  ELSE ''
+                END,
+                CASE
+                  WHEN COALESCE(aal.old_value->>'degree', '') <> COALESCE(aal.new_value->>'degree', '')
+                    THEN CONCAT(
+                      'Degree: ',
+                      COALESCE(NULLIF(aal.old_value->>'degree', ''), '—'),
+                      ' -> ',
+                      COALESCE(NULLIF(aal.new_value->>'degree', ''), '—'),
+                      '; '
+                    )
+                  ELSE ''
+                END,
+                CASE
+                  WHEN COALESCE(aal.old_value->>'studentId', '') <> COALESCE(aal.new_value->>'studentId', '')
+                    THEN CONCAT(
+                      'Student ID: ',
+                      COALESCE(NULLIF(aal.old_value->>'studentId', ''), '—'),
+                      ' -> ',
+                      COALESCE(NULLIF(aal.new_value->>'studentId', ''), '—'),
+                      '; '
+                    )
+                  ELSE ''
+                END
+              )),
+              ''
+            ),
+            'Student profile fields updated'
+          )
+          WHEN aal.action_type IN ('security_event_approved', 'security_event_rejected') THEN CONCAT(
+            'Result: ',
+            COALESCE(
+              NULLIF(aal.new_value->>'result', ''),
+              CASE
+                WHEN aal.action_type = 'security_event_approved' THEN 'approved'
+                ELSE 'rejected'
+              END
+            )
+          )
+          WHEN aal.action_type = 'moderation_submission_status_overridden' THEN CONCAT(
+            'Status: ',
+            COALESCE(NULLIF(aal.old_value->>'status', ''), '—'),
+            ' -> ',
+            COALESCE(NULLIF(aal.new_value->>'status', ''), '—')
+          )
+          WHEN aal.action_type = 'moderation_submission_score_overridden' THEN CONCAT(
+            'Score: ',
+            COALESCE(NULLIF(aal.old_value->>'totalPoints', ''), '—'),
+            ' -> ',
+            COALESCE(NULLIF(aal.new_value->>'totalPoints', ''), '—')
+          )
+          WHEN aal.action_type = 'moderation_item_score_changed' THEN CONCAT(
+            'Approved score: ',
+            COALESCE(NULLIF(aal.old_value->>'approvedScore', ''), '—'),
+            ' -> ',
+            COALESCE(NULLIF(aal.new_value->>'approvedScore', ''), '—')
+          )
+          WHEN aal.action_type IN ('moderation_item_approved', 'moderation_item_rejected') THEN CONCAT(
+            'Status: ',
+            COALESCE(NULLIF(aal.new_value->>'status', ''), '—')
+          )
+          WHEN aal.action_type = 'moderation_submission_approved' THEN 'Result: approved'
+          WHEN aal.action_type = 'moderation_submission_rejected' THEN 'Result: rejected'
+          ELSE COALESCE(
+            NULLIF(
+              TRIM(BOTH FROM CONCAT(
+                COALESCE(NULLIF(aal.old_value::text, '{}'), ''),
+                CASE
+                  WHEN aal.old_value::text <> '{}'::text AND aal.new_value::text <> '{}'::text THEN ' -> '
+                  ELSE ''
+                END,
+                COALESCE(NULLIF(aal.new_value::text, '{}'), '')
+              )),
+              ''
+            ),
+            '-'
+          )
+        END AS details
       FROM public.admin_activity_logs aal
       LEFT JOIN public.users u ON u.id = aal.admin_id
       WHERE ${where.join(" AND ")}
