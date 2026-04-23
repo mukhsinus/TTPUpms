@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { getSubmissionsSemesterColumnPresent } from "../../utils/submissions-semester-schema";
 import type { SystemPhaseService } from "../system/system-phase.service";
 
 interface TopStudentRow {
@@ -48,26 +49,46 @@ export class AnalyticsService {
   ) {}
 
   async getTopStudents(limit: number): Promise<TopStudent[]> {
+    const hasSem = await getSubmissionsSemesterColumnPresent(this.app);
     const semester = await this.phase.getCurrentSemester();
-    const result = await this.app.db.query<TopStudentRow>(
-      `
-      SELECT
-        s.user_id,
-        u.full_name,
-        to_jsonb(u)->>'telegram_username' AS telegram_username,
-        u.telegram_id::text AS telegram_id,
-        COALESCE(SUM(s.total_score), 0)::text AS approved_points,
-        COUNT(*)::text AS approved_submissions
-      FROM submissions s
-      INNER JOIN users u ON u.id = s.user_id
-      WHERE s.status = 'approved'
-        AND s.semester = $2
-      GROUP BY s.user_id, u.full_name, to_jsonb(u)->>'telegram_username', u.telegram_id
-      ORDER BY COALESCE(SUM(s.total_score), 0) DESC
-      LIMIT $1
-      `,
-      [limit, semester],
-    );
+    const result = hasSem
+      ? await this.app.db.query<TopStudentRow>(
+          `
+          SELECT
+            s.user_id,
+            u.full_name,
+            to_jsonb(u)->>'telegram_username' AS telegram_username,
+            u.telegram_id::text AS telegram_id,
+            COALESCE(SUM(s.total_score), 0)::text AS approved_points,
+            COUNT(*)::text AS approved_submissions
+          FROM submissions s
+          INNER JOIN users u ON u.id = s.user_id
+          WHERE s.status = 'approved'
+            AND s.semester = $2
+          GROUP BY s.user_id, u.full_name, to_jsonb(u)->>'telegram_username', u.telegram_id
+          ORDER BY COALESCE(SUM(s.total_score), 0) DESC
+          LIMIT $1
+          `,
+          [limit, semester],
+        )
+      : await this.app.db.query<TopStudentRow>(
+          `
+          SELECT
+            s.user_id,
+            u.full_name,
+            to_jsonb(u)->>'telegram_username' AS telegram_username,
+            u.telegram_id::text AS telegram_id,
+            COALESCE(SUM(s.total_score), 0)::text AS approved_points,
+            COUNT(*)::text AS approved_submissions
+          FROM submissions s
+          INNER JOIN users u ON u.id = s.user_id
+          WHERE s.status = 'approved'
+          GROUP BY s.user_id, u.full_name, to_jsonb(u)->>'telegram_username', u.telegram_id
+          ORDER BY COALESCE(SUM(s.total_score), 0) DESC
+          LIMIT $1
+          `,
+          [limit],
+        );
 
     return result.rows.map((row) => ({
       userId: row.user_id,

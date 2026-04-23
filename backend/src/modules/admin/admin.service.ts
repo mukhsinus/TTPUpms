@@ -38,6 +38,7 @@ import type {
 } from "./admin.schema";
 import type { AdminSemesterDb } from "./admin.repository";
 import { SystemPhaseService } from "../system/system-phase.service";
+import { getSubmissionsSemesterColumnPresent } from "../../utils/submissions-semester-schema";
 
 export const ADMIN_PROCESSABLE_STATUSES = new Set<string>(["submitted", "review", "needs_revision"]);
 
@@ -123,6 +124,9 @@ export class AdminService {
   ) {}
 
   private async resolveAdminSemesterDb(scope: AdminSemesterScope): Promise<AdminSemesterDb> {
+    if (!(await getSubmissionsSemesterColumnPresent(this.app))) {
+      return null;
+    }
     if (scope === "all") {
       return null;
     }

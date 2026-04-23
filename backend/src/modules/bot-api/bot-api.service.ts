@@ -23,6 +23,7 @@ import type { UsersRepository } from "../users/users.repository";
 import type { SystemPhaseService } from "../system/system-phase.service";
 import { AntiFraudError, type AntiFraudService } from "../validation/anti-fraud.service";
 import { getPostgresDriverErrorFields } from "../../utils/pg-http-map";
+import { getSubmissionsSemesterColumnPresent } from "../../utils/submissions-semester-schema";
 import { normalizeStudentId } from "../../utils/student-id";
 import { BotApiHttpError } from "./bot-api-errors";
 import {
@@ -1191,7 +1192,16 @@ export class BotApiService {
 
   async getUserSubmissions(telegramId: string): Promise<BotSubmissionListRow[]> {
     const user = await this.findOrCreateUserByTelegramId(telegramId);
+    const hasSemesterCol = await getSubmissionsSemesterColumnPresent(this.app);
     const activeSemester = await this.phase.getCurrentSemester();
+    const semesterFilter = hasSemesterCol
+      ? `
+          AND (
+            s.semester = $2
+            OR (s.status = 'draft'::public.submission_status AND s.semester IS NULL)
+          )`
+      : "";
+    const queryParams: unknown[] = hasSemesterCol ? [user.id, activeSemester] : [user.id];
 
     const result = await this.app.db.query<{
       id: string;
@@ -1243,10 +1253,7 @@ export class BotApiService {
           WHERE si.submission_id = s.id
         ) items ON true
         WHERE s.user_id = $1
-          AND (
-            s.semester = $2
-            OR (s.status = 'draft'::public.submission_status AND s.semester IS NULL)
-          )
+          ${semesterFilter}
       ),
       numbered AS (
         SELECT
@@ -1278,7 +1285,7 @@ export class BotApiService {
       ORDER BY n."createdAt" DESC
       LIMIT 10
       `,
-      [user.id, activeSemester],
+      queryParams,
     );
 
     const toSummaryItems = (raw: unknown): BotSubmitDraftItemSummary[] => {
@@ -1337,17 +1344,28 @@ export class BotApiService {
 
   async getUserApprovedPoints(telegramId: string): Promise<number> {
     const user = await this.findOrCreateUserByTelegramId(telegramId);
+    const hasSemesterCol = await getSubmissionsSemesterColumnPresent(this.app);
     const activeSemester = await this.phase.getCurrentSemester();
-    const result = await this.app.db.query<{ total: string }>(
-      `
-      SELECT COALESCE(SUM(total_score), 0)::text AS total
-      FROM submissions
-      WHERE user_id = $1
-        AND status = 'approved'
-        AND semester = $2
-      `,
-      [user.id, activeSemester],
-    );
+    const result = hasSemesterCol
+      ? await this.app.db.query<{ total: string }>(
+          `
+          SELECT COALESCE(SUM(total_score), 0)::text AS total
+          FROM submissions
+          WHERE user_id = $1
+            AND status = 'approved'
+            AND semester = $2
+          `,
+          [user.id, activeSemester],
+        )
+      : await this.app.db.query<{ total: string }>(
+          `
+          SELECT COALESCE(SUM(total_score), 0)::text AS total
+          FROM submissions
+          WHERE user_id = $1
+            AND status = 'approved'
+          `,
+          [user.id],
+        );
 
     return Number(result.rows[0]?.total ?? "0");
   }

@@ -70,7 +70,7 @@ export class SubmissionsService {
     }
 
     const activeSemester = await this.phase.getCurrentSemester();
-    return this.repository.findByUserIdForActiveSemester(user.id, activeSemester);
+    return this.repository.findByUserIdForStudentView(user.id, activeSemester);
   }
 
   async getSubmissionById(user: AuthUser, submissionId: string): Promise<SubmissionEntity> {

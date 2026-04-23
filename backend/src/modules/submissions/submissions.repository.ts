@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { PoolClient } from "pg";
+import { getSubmissionsSemesterColumnPresent } from "../../utils/submissions-semester-schema";
 import type { SubmissionStatus } from "./submissions.schema";
 
 interface SubmissionRow {
@@ -38,14 +39,21 @@ export interface SubmissionEntity {
   ownerStudentId?: string | null;
 }
 
-const SUBMISSION_SELECT_WITH_OWNER = `
+const FROM_SUBMISSIONS_JOIN_OWNER = `
+  FROM submissions s
+  LEFT JOIN users u ON u.id = s.user_id
+`;
+
+function buildSubmissionSelectWithOwner(includeSemesterColumn: boolean): string {
+  const sem = includeSemesterColumn ? "s.semester" : "NULL::text AS semester";
+  return `
   s.id,
   s.user_id,
   s.title,
   s.description,
   s.total_score,
   s.status,
-  s.semester,
+  ${sem},
   s.submitted_at,
   s.reviewed_at,
   s.created_at,
@@ -54,11 +62,7 @@ const SUBMISSION_SELECT_WITH_OWNER = `
   u.faculty AS owner_faculty,
   u.student_id AS owner_student_id
 `;
-
-const FROM_SUBMISSIONS_JOIN_OWNER = `
-  FROM submissions s
-  LEFT JOIN users u ON u.id = s.user_id
-`;
+}
 
 function mapSubmission(row: SubmissionRow): SubmissionEntity {
   const base: SubmissionEntity = {
@@ -93,6 +97,11 @@ type DbExecutor = FastifyInstance["db"] | PoolClient;
 export class SubmissionsRepository {
   constructor(private readonly app: FastifyInstance) {}
 
+  private async ownerSelectSql(): Promise<string> {
+    const has = await getSubmissionsSemesterColumnPresent(this.app);
+    return buildSubmissionSelectWithOwner(has);
+  }
+
   /** Lines on a submission missing proof URL (must be zero before submit). */
   async countItemsMissingProof(submissionId: string): Promise<number> {
     const result = await this.app.db.query<{ c: string }>(
@@ -117,11 +126,15 @@ export class SubmissionsRepository {
     client?: PoolClient,
   ): Promise<SubmissionEntity> {
     const db: DbExecutor = client ?? this.app.db;
+    const hasSem = await getSubmissionsSemesterColumnPresent(this.app);
+    const returning = hasSem
+      ? `RETURNING id, user_id, title, description, total_score, status, semester, submitted_at, reviewed_at, created_at, updated_at`
+      : `RETURNING id, user_id, title, description, total_score, status, submitted_at, reviewed_at, created_at, updated_at`;
     const result = await db.query<SubmissionRow>(
       `
       INSERT INTO submissions (user_id, title, description, status)
       VALUES ($1, $2, $3, 'draft')
-      RETURNING id, user_id, title, description, total_score, status, semester, submitted_at, reviewed_at, created_at, updated_at
+      ${returning}
       `,
       [input.userId, input.title, input.description ?? null],
     );
@@ -130,9 +143,10 @@ export class SubmissionsRepository {
   }
 
   async findById(id: string): Promise<SubmissionEntity | null> {
+    const sel = await this.ownerSelectSql();
     const result = await this.app.db.query<SubmissionRow>(
       `
-      SELECT ${SUBMISSION_SELECT_WITH_OWNER}
+      SELECT ${sel}
       ${FROM_SUBMISSIONS_JOIN_OWNER}
       WHERE s.id = $1
       `,
@@ -162,9 +176,10 @@ export class SubmissionsRepository {
   }
 
   async findByUserId(userId: string): Promise<SubmissionEntity[]> {
+    const sel = await this.ownerSelectSql();
     const result = await this.app.db.query<SubmissionRow>(
       `
-      SELECT ${SUBMISSION_SELECT_WITH_OWNER}
+      SELECT ${sel}
       ${FROM_SUBMISSIONS_JOIN_OWNER}
       WHERE s.user_id = $1
       ORDER BY s.created_at DESC
@@ -175,11 +190,20 @@ export class SubmissionsRepository {
     return result.rows.map(mapSubmission);
   }
 
+  /** Student list: scoped to active semester when the DB column exists; otherwise all rows for the user. */
+  async findByUserIdForStudentView(userId: string, activeSemester: string): Promise<SubmissionEntity[]> {
+    if (!(await getSubmissionsSemesterColumnPresent(this.app))) {
+      return this.findByUserId(userId);
+    }
+    return this.findByUserIdForActiveSemester(userId, activeSemester);
+  }
+
   /** Student view: active semester submissions plus drafts (semester not yet assigned). */
   async findByUserIdForActiveSemester(userId: string, activeSemester: string): Promise<SubmissionEntity[]> {
+    const sel = await this.ownerSelectSql();
     const result = await this.app.db.query<SubmissionRow>(
       `
-      SELECT ${SUBMISSION_SELECT_WITH_OWNER}
+      SELECT ${sel}
       ${FROM_SUBMISSIONS_JOIN_OWNER}
       WHERE s.user_id = $1
         AND (
@@ -195,9 +219,10 @@ export class SubmissionsRepository {
   }
 
   async findAll(): Promise<SubmissionEntity[]> {
+    const sel = await this.ownerSelectSql();
     const result = await this.app.db.query<SubmissionRow>(
       `
-      SELECT ${SUBMISSION_SELECT_WITH_OWNER}
+      SELECT ${sel}
       ${FROM_SUBMISSIONS_JOIN_OWNER}
       ORDER BY s.created_at DESC
       `,
@@ -207,9 +232,10 @@ export class SubmissionsRepository {
   }
 
   async findAssignedToReviewer(reviewerId: string): Promise<SubmissionEntity[]> {
+    const sel = await this.ownerSelectSql();
     const result = await this.app.db.query<SubmissionRow>(
       `
-      SELECT ${SUBMISSION_SELECT_WITH_OWNER}
+      SELECT ${sel}
       FROM submissions s
       INNER JOIN reviews r ON r.submission_id = s.id
       LEFT JOIN users u ON u.id = s.user_id
@@ -223,9 +249,10 @@ export class SubmissionsRepository {
   }
 
   async findReviewerAssignedById(id: string, reviewerId: string): Promise<SubmissionEntity | null> {
+    const sel = await this.ownerSelectSql();
     const result = await this.app.db.query<SubmissionRow>(
       `
-      SELECT ${SUBMISSION_SELECT_WITH_OWNER}
+      SELECT ${sel}
       FROM submissions s
       INNER JOIN reviews r ON r.submission_id = s.id
       LEFT JOIN users u ON u.id = s.user_id
@@ -252,7 +279,28 @@ export class SubmissionsRepository {
     client?: PoolClient,
   ): Promise<SubmissionEntity> {
     const db: DbExecutor = client ?? this.app.db;
+    const hasSem = await getSubmissionsSemesterColumnPresent(this.app);
     const semesterParam = input.status === "submitted" ? input.semester ?? null : null;
+
+    if (!hasSem) {
+      const result = await db.query<SubmissionRow>(
+        `
+        UPDATE submissions
+        SET
+          status = $2,
+          submitted_at = CASE WHEN $3::boolean THEN NOW() ELSE submitted_at END,
+          updated_at = NOW()
+        WHERE id = $1
+        RETURNING id, user_id, title, description, total_score, status, submitted_at, reviewed_at, created_at, updated_at
+        `,
+        [input.id, input.status, input.submittedAt ?? false],
+      );
+      return mapSubmission({
+        ...(result.rows[0] as SubmissionRow),
+        semester: null,
+      });
+    }
+
     const result = await db.query<SubmissionRow>(
       `
       UPDATE submissions

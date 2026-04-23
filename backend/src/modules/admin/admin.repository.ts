@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { PoolClient } from "pg";
 import { getPostgresDriverErrorFields } from "../../utils/pg-http-map";
+import { getSubmissionsSemesterColumnPresent } from "../../utils/submissions-semester-schema";
 import { isLikelyStudentId, normalizeStudentId } from "../../utils/student-id";
 import { ServiceError } from "../../utils/service-error";
 import type {
@@ -889,8 +890,10 @@ export class AdminRepository {
   }
 
   async listSubmissions(query: AdminSubmissionsQuery, semesterDb: AdminSemesterDb): Promise<AdminSubmissionListRow[]> {
+    const hasSemesterCol = await getSubmissionsSemesterColumnPresent(this.app);
     const { whereSql, params } = buildAdminSubmissionFilters(query, semesterDb);
     const offset = (query.page - 1) * query.pageSize;
+    const semesterSelect = hasSemesterCol ? `s.semester::text AS semester` : `NULL::text AS semester`;
 
     const categoryDisplayTerms: string[] = [];
     const pushDisplayTerm = (value: string | undefined): void => {
@@ -941,7 +944,7 @@ export class AdminRepository {
         u.student_id,
         s.title,
         s.status::text AS db_status,
-        s.semester::text AS semester,
+        ${semesterSelect},
         s.created_at,
         COALESCE(s.submitted_at, s.created_at) AS submitted_at,
         CASE
