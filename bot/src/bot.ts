@@ -216,10 +216,14 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
           }
         }
       }
+      const createdAt = new Date(item.createdAt);
+      const day = String(createdAt.getDate()).padStart(2, "0");
+      const month = String(createdAt.getMonth() + 1).padStart(2, "0");
+      const year = String(createdAt.getFullYear());
       block.push(
         `   ${statusLine}`,
         `   Total score added: ${item.totalPoints}`,
-        `   Created: ${new Date(item.createdAt).toLocaleDateString("en-US")}`,
+        `   Created: ${day}/${month}/${year}`,
       );
       return block.join("\n");
     });
