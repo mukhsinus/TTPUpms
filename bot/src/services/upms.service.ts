@@ -88,6 +88,11 @@ function stripUnderscoresDisplay(s: string): string {
   return s.replace(/_/g, " ").replace(/\s+/g, " ").trim();
 }
 
+/** Keep original wording, but force category labels to start uppercase. */
+function ensureLeadingCapital(s: string): string {
+  return s.replace(/[A-Za-zА-Яа-яЁё]/, (ch) => ch.toUpperCase());
+}
+
 function universalWhatCounts(): string {
   return (
     "• Describe only real activities you can prove with documents.\n" +
@@ -114,7 +119,7 @@ type ApiCategoryCatalogRow = Omit<CategoryCatalogEntry, "whatCounts" | "scoring"
 
 function normalizeCategoryCatalogEntry(c: ApiCategoryCatalogRow): CategoryCatalogEntry {
   const titleSource = (c.title ?? c.name ?? c.code ?? "").toString();
-  const title = stripUnderscoresDisplay(titleSource);
+  const title = ensureLeadingCapital(stripUnderscoresDisplay(titleSource));
   const whatCountsRaw = c.whatCounts?.trim();
   const scoringRaw = c.scoring?.trim();
   return {

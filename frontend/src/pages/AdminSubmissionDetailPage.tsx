@@ -383,8 +383,12 @@ export function AdminSubmissionDetailPage(): ReactElement {
                       <Medal size={18} />
                     </span>
                     <div className="admin-achievement-item-title-block">
-                      <span className="admin-achievement-item-kicker">Achievement</span>
-                      <h4>{item.title}</h4>
+                      {detail.items.length > 1 ? (
+                        <>
+                          <span className="admin-achievement-item-kicker">Achievement</span>
+                          <h4>{item.title}</h4>
+                        </>
+                      ) : null}
                     </div>
                   </div>
                   <div className="admin-achievement-item-head-right">

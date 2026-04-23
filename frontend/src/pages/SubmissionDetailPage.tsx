@@ -378,7 +378,7 @@ export function SubmissionDetailPage(): ReactElement {
               {items.map((item) => (
                 <article className="item-card" key={item.id}>
                   <div className="row-between">
-                    <h4>{item.title}</h4>
+                    {items.length > 1 ? <h4>{item.title}</h4> : null}
                     <span className={itemStatusBadgeClass(displayItemStatus(item))}>{displayItemStatus(item)}</span>
                   </div>
                   <p className="muted">

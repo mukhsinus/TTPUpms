@@ -197,10 +197,13 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
       if (item.items.length === 0) {
         block.push("   Items: —");
       } else {
+        const isSingleItemSubmission = item.items.length === 1;
         for (let i = 0; i < item.items.length; i += 1) {
           const line = item.items[i]!;
           const categoryLabel = noSnake(line.categoryTitle || line.category);
-          block.push(`   Achievement ${i + 1}: ${line.title}`);
+          if (!isSingleItemSubmission) {
+            block.push(`   Achievement ${i + 1}: ${line.title}`);
+          }
           block.push(`      Category: ${categoryLabel}`);
           block.push(`      Status: ${prettyStatus(line.status)}`);
           block.push(`      Score: ${line.approvedScore ?? 0}`);
