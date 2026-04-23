@@ -496,11 +496,7 @@ export function AdminSubmissionsPage(): ReactElement {
                     <td>{row.studentId?.trim() || t("emDash")}</td>
                     <td>{categoryCellLabel(row, t)}</td>
                     <td>
-                      {row.semester
-                        ? row.semester === "second"
-                          ? t("semesterShortSecond")
-                          : t("semesterShortFirst")
-                        : t("emDash")}
+                      {row.semester === "second" ? "2" : row.semester === "first" ? "1" : t("emDash")}
                     </td>
                     <td className="submission-title-cell">{row.title}</td>
                     <td>

@@ -2,6 +2,7 @@ import { buildApp } from "./app";
 import { env } from "./config/env";
 import { SubmissionItemsRepository } from "./modules/submission-items/submission-items.repository";
 import { SystemPhaseService } from "./modules/system/system-phase.service";
+import { ensureSubmissionsSemesterColumn } from "./utils/submissions-semester-schema";
 import { ensureUsersPhoneColumn } from "./utils/users-phone-column";
 
 /**
@@ -19,6 +20,7 @@ async function startServer(): Promise<void> {
   }, 60_000);
 
   await ensureUsersPhoneColumn(app);
+  await ensureSubmissionsSemesterColumn(app);
 
   try {
     const submissionItemsRepo = new SubmissionItemsRepository(app);
