@@ -376,10 +376,10 @@ export class SuperadminService {
           u.email::text AS admin_email,
           ase.type::text AS type
         FROM public.admin_security_events ase
-        LEFT JOIN public.users u ON u.id = ase.admin_id
-        WHERE id = $1::uuid
-          AND status = 'pending'
-        FOR UPDATE
+        INNER JOIN public.users u ON u.id = ase.admin_id
+        WHERE ase.id = $1::uuid
+          AND ase.status = 'pending'
+        FOR UPDATE OF ase
         `,
         [input.eventId],
       );
@@ -419,7 +419,7 @@ export class SuperadminService {
             SELECT u.id, u.email, 'admin', 'active', COALESCE(u.created_at, NOW())
             FROM public.users u
             WHERE u.id = $1::uuid
-            ON CONFLICT (id) DO UPDATE SET
+            ON CONFLICT ON CONSTRAINT admin_users_pkey DO UPDATE SET
               email = EXCLUDED.email,
               role = CASE
                 WHEN public.admin_users.role::text = 'superadmin' THEN public.admin_users.role

@@ -114,7 +114,7 @@ async function ensureAdminUsersRow(db: Pool, userId: string): Promise<void> {
     WHERE u.id = $1::uuid
       AND u.role::text IN ('admin', 'superadmin')
       AND u.email IS NOT NULL
-    ON CONFLICT (id) DO UPDATE SET
+    ON CONFLICT ON CONSTRAINT admin_users_pkey DO UPDATE SET
       email = EXCLUDED.email,
       role = CASE
         WHEN public.admin_users.role::text = 'superadmin' THEN public.admin_users.role
