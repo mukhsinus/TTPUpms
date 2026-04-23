@@ -1882,6 +1882,8 @@ export const api = {
       faculty: string;
       student_id: string;
       email?: string | null;
+      /** E.164-style; optional — omit to leave unchanged */
+      phone?: string;
     },
   ): Promise<AdminStudentDetailPayload> {
     return request<AdminStudentDetailPayload>(`/api/admin/students/${studentId}`, {

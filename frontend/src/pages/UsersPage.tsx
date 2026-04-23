@@ -92,6 +92,7 @@ export function UsersPage(): ReactElement {
     faculty: "",
     student_id: "",
     email: "",
+    phone: "",
   });
   const [error, setError] = useState<string | null>(null);
 
@@ -179,6 +180,7 @@ export function UsersPage(): ReactElement {
             faculty: data.faculty ?? "",
             student_id: data.studentId ?? "",
             email: data.email ?? "",
+            phone: data.phone ?? "",
           });
         }
       } catch (err) {
@@ -202,7 +204,8 @@ export function UsersPage(): ReactElement {
       (selected.degree ?? "bachelor") !== form.degree ||
       (selected.faculty ?? "") !== form.faculty.trim() ||
       (selected.studentId ?? "") !== normalizeStudentId(form.student_id) ||
-      (selected.email ?? "") !== form.email.trim()
+      (selected.email ?? "") !== form.email.trim() ||
+      (selected.phone ?? "") !== form.phone.trim()
     );
   }, [form, selected]);
 
@@ -414,6 +417,15 @@ export function UsersPage(): ReactElement {
               />
             </label>
             <label className="item-review-field">
+              <span>Phone</span>
+              <Input
+                value={form.phone}
+                onChange={(event) => setForm((prev) => ({ ...prev, phone: event.target.value }))}
+                placeholder="+998901234567"
+                autoComplete="tel"
+              />
+            </label>
+            <label className="item-review-field">
               <span>Email (optional)</span>
               <Input
                 value={form.email}
@@ -442,12 +454,14 @@ export function UsersPage(): ReactElement {
                   }
                   try {
                     setSaving(true);
+                    const phoneTrim = form.phone.trim();
                     const updated = await api.updateAdminStudent(selectedStudentId, {
                       full_name: form.full_name.trim(),
                       degree: form.degree,
                       faculty: form.faculty.trim(),
                       student_id: normalizeStudentId(form.student_id),
                       email: form.email.trim() ? form.email.trim() : null,
+                      ...(phoneTrim ? { phone: phoneTrim } : {}),
                     });
                     setSelected(updated);
                     setForm({
@@ -456,6 +470,7 @@ export function UsersPage(): ReactElement {
                       faculty: updated.faculty ?? "",
                       student_id: updated.studentId ?? "",
                       email: updated.email ?? "",
+                      phone: updated.phone ?? "",
                     });
                     setRows((prev) =>
                       prev.map((row) =>
@@ -466,6 +481,7 @@ export function UsersPage(): ReactElement {
                               degree: updated.degree,
                               faculty: updated.faculty,
                               studentId: updated.studentId,
+                              phone: updated.phone ?? null,
                             }
                           : row,
                       ),
@@ -491,6 +507,7 @@ export function UsersPage(): ReactElement {
                     faculty: selected.faculty ?? "",
                     student_id: selected.studentId ?? "",
                     email: selected.email ?? "",
+                    phone: selected.phone ?? "",
                   });
                 }}
               >

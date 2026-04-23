@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { normalizeStudentId } from "../../utils/student-id";
+import { phoneSchema } from "../users/users.schema";
 
 /** Normalized moderation status exposed on admin APIs (maps from DB workflow states). */
 export const adminModerationStatusSchema = z.enum(["pending", "approved", "rejected"]);
@@ -54,6 +55,8 @@ export const adminUpdateStudentBodySchema = z.object({
   faculty: z.string().trim().min(1).max(200),
   student_id: z.string().trim().min(1).max(64).transform((v) => normalizeStudentId(v)),
   email: z.string().trim().email().optional().nullable(),
+  /** When DB has `users.phone`; omitted = leave unchanged. */
+  phone: phoneSchema.optional(),
 });
 
 export const adminSubmissionsQuerySchema = z.object({

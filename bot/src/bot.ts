@@ -121,7 +121,7 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
     setSessionFromLinkedUser(ctx, user);
 
     if (user.role === "student" && !user.isProfileCompleted) {
-      await ctx.reply("Welcome to UPMS. Enter the steps below to complete your student profile.");
+      await ctx.reply("Welcome to the Student Achievement Submission System.");
       await ctx.scene.enter("student-onboarding");
       return;
     }

@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { PoolClient } from "pg";
 import { getPostgresDriverErrorFields } from "../../utils/pg-http-map";
 import { getSubmissionsSemesterColumnPresent } from "../../utils/submissions-semester-schema";
+import { getUsersPhoneColumnPresent } from "../../utils/users-phone-column";
 import { isLikelyStudentId, normalizeStudentId } from "../../utils/student-id";
 import { ServiceError } from "../../utils/service-error";
 import type {
@@ -1306,6 +1307,11 @@ export class AdminRepository {
       params.push(body.email ? body.email.trim().toLowerCase() : null);
       emailSql = `, email = $${params.length}::citext`;
     }
+    let phoneSql = "";
+    if ((await getUsersPhoneColumnPresent(this.app)) && body.phone !== undefined) {
+      params.push(body.phone);
+      phoneSql = `, phone = $${params.length}::text`;
+    }
 
     const result = await this.app.db.query(
       `
@@ -1317,7 +1323,8 @@ export class AdminRepository {
         faculty = $4,
         student_id = $5,
         is_profile_completed = true
-        ${emailSql},
+        ${emailSql}
+        ${phoneSql},
         updated_at = NOW()
       WHERE id = $1::uuid
         AND role::text = 'student'

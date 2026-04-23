@@ -1,15 +1,16 @@
 import type { FastifyInstance } from "fastify";
 
-let cached: boolean | null = null;
+/** Only cache positive detection — migrations applied after boot are detected on next check. */
+let semesterColumnKnownPresent: boolean | null = null;
 let warnedMissing = false;
 
 /**
  * Whether `public.submissions.semester` exists (academic period migration applied).
- * Result is cached for the process lifetime — restart after running migrations.
+ * When the column is confirmed present, result is cached for the process lifetime.
  */
 export async function getSubmissionsSemesterColumnPresent(app: FastifyInstance): Promise<boolean> {
-  if (cached !== null) {
-    return cached;
+  if (semesterColumnKnownPresent === true) {
+    return true;
   }
   const result = await app.db.query<{ e: boolean }>(
     `
@@ -22,18 +23,20 @@ export async function getSubmissionsSemesterColumnPresent(app: FastifyInstance):
     ) AS e
     `,
   );
-  cached = result.rows[0]?.e === true;
-  if (!cached && !warnedMissing) {
+  const present = result.rows[0]?.e === true;
+  if (present) {
+    semesterColumnKnownPresent = true;
+  } else if (!warnedMissing) {
     warnedMissing = true;
     app.log.warn(
       "submissions.semester column is missing; semester filters are disabled until migrations are applied (e.g. 20260623120000_academic_semester.sql).",
     );
   }
-  return cached;
+  return present;
 }
 
 /** For tests only */
 export function resetSubmissionsSemesterColumnCacheForTests(): void {
-  cached = null;
+  semesterColumnKnownPresent = null;
   warnedMissing = false;
 }
