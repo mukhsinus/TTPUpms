@@ -41,6 +41,7 @@ export function parseReviewItemBody(body: unknown): ReviewItemBody {
   const score = raw.approved_score ?? raw.score;
   const decision = raw.status ?? raw.decision;
   const comment = raw.reviewer_comment ?? raw.comment;
+  const normalizedComment = comment?.trim();
   if (decision === undefined) {
     throw new z.ZodError([
       {
@@ -59,12 +60,31 @@ export function parseReviewItemBody(body: unknown): ReviewItemBody {
       },
     ]);
   }
-  return { score, decision, comment };
+  if (decision === "rejected" && (!normalizedComment || normalizedComment.length === 0)) {
+    throw new z.ZodError([
+      {
+        code: "custom",
+        path: ["comment"],
+        message: "Comment is required when rejecting an item",
+      },
+    ]);
+  }
+  return { score, decision, comment: normalizedComment };
 }
 
-export const completeSubmissionReviewBodySchema = z.object({
-  decision: z.enum(["approved", "rejected"]),
-  comment: z.string().trim().max(5000).optional(),
-});
+export const completeSubmissionReviewBodySchema = z
+  .object({
+    decision: z.enum(["approved", "rejected"]),
+    comment: z.string().trim().max(5000).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.decision === "rejected" && (!value.comment || value.comment.trim().length === 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["comment"],
+        message: "Comment is required when rejecting a submission",
+      });
+    }
+  });
 
 export type CompleteSubmissionReviewBody = z.infer<typeof completeSubmissionReviewBodySchema>;

@@ -236,6 +236,11 @@ export function AdminSubmissionDetailPage(): ReactElement {
       setActionError(`Allowed range: 0-${cap}`);
       return;
     }
+    const normalizedComment = draft?.comment?.trim() ?? "";
+    if (decision === "rejected" && normalizedComment.length === 0) {
+      setActionError("Comment is required when rejecting an item.");
+      return;
+    }
 
     try {
       setSavingItemId(item.id);
@@ -244,7 +249,7 @@ export function AdminSubmissionDetailPage(): ReactElement {
         itemId: item.id,
         approved_score: score,
         status: decision,
-        reviewer_comment: draft?.comment?.trim() || undefined,
+        reviewer_comment: normalizedComment || undefined,
       });
       setDetail((prev) => {
         if (!prev) {
@@ -472,7 +477,7 @@ export function AdminSubmissionDetailPage(): ReactElement {
                         </small>
                       </label>
                       <label className="item-review-field">
-                        <span>Comment (optional)</span>
+                        <span>Comment {item.status === "pending" ? "(required for reject)" : ""}</span>
                         <textarea
                           className="ui-input item-review-comment"
                           rows={5}

@@ -238,6 +238,11 @@ export function SubmissionDetailPage(): ReactElement {
       setActionError(`Allowed range: 0-${cap}`);
       return;
     }
+    const normalizedComment = draft?.comment?.trim() ?? "";
+    if (decision === "rejected" && normalizedComment.length === 0) {
+      setActionError("Comment is required when rejecting an item.");
+      return;
+    }
 
     try {
       setActionError(null);
@@ -246,7 +251,7 @@ export function SubmissionDetailPage(): ReactElement {
         itemId: item.id,
         approved_score: score,
         status: decision,
-        reviewer_comment: draft?.comment?.trim() || undefined,
+        reviewer_comment: normalizedComment || undefined,
       });
       setItems((prev) => prev.map((i) => (i.id === item.id ? mergeReviewIntoSubmissionItem(i, updated) : i)));
       const sub = await api.getSubmissionById(submissionId);

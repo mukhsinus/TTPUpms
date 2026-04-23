@@ -85,6 +85,14 @@ export class ReviewsService {
         "VALIDATION_ERROR",
       );
     }
+    const normalizedComment = body.comment?.trim();
+    if (body.decision === "rejected" && (!normalizedComment || normalizedComment.length === 0)) {
+      throw new ServiceError(
+        400,
+        "Comment is required when rejecting an item",
+        "VALIDATION_ERROR",
+      );
+    }
 
     await this.assertValidItemScore(item, finalScore);
 
@@ -99,7 +107,7 @@ export class ReviewsService {
       itemId,
       reviewerId: user.id,
       score: finalScore,
-      comment: body.comment,
+      comment: normalizedComment,
       decision: body.decision,
     });
 
@@ -180,6 +188,14 @@ export class ReviewsService {
         'Submission review can only be completed while status is "review"',
       );
     }
+    const normalizedComment = body.comment?.trim();
+    if (body.decision === "rejected" && (!normalizedComment || normalizedComment.length === 0)) {
+      throw new ServiceError(
+        400,
+        "Comment is required when rejecting a submission",
+        "VALIDATION_ERROR",
+      );
+    }
 
     assertValidTransition(submission.status, body.decision);
 
@@ -187,7 +203,7 @@ export class ReviewsService {
       submissionId,
       reviewerId: user.id,
       decision: body.decision,
-      comment: body.comment,
+      comment: normalizedComment,
     });
 
     await this.sendSubmissionItemsSummaryNotification({
