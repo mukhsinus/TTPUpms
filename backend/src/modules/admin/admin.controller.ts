@@ -10,6 +10,7 @@ import {
   adminRejectBodySchema,
   adminSearchSuggestionsQuerySchema,
   adminStudentIdParamsSchema,
+  adminStudentDetailQuerySchema,
   adminSubmissionIdParamsSchema,
   adminStudentOverviewQuerySchema,
   adminStudentsQuerySchema,
@@ -104,7 +105,7 @@ export class AdminController {
     }
     try {
       const query = adminStudentOverviewQuerySchema.parse(request.query);
-      const data = await this.service.getStudentOverview(query.studentId);
+      const data = await this.service.getStudentOverview(query.studentId, query.semester);
       reply.send(success(data));
     } catch (error) {
       this.handleError(reply, error);
@@ -133,7 +134,8 @@ export class AdminController {
     }
     try {
       const params = adminStudentIdParamsSchema.parse(request.params);
-      const data = await this.service.getStudentById(params.id);
+      const detailQuery = adminStudentDetailQuerySchema.parse(request.query);
+      const data = await this.service.getStudentById(params.id, detailQuery.semester);
       reply.header("Cache-Control", "private, max-age=10, stale-while-revalidate=30");
       reply.send(success(data));
     } catch (error) {

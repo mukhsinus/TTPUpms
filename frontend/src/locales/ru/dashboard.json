@@ -117,5 +117,12 @@
   "confirm": "Подтвердить",
   "toastSystemPhaseUpdated": "Фаза проекта обновлена",
   "saveDeadlines": "Сохранить дедлайны",
-  "toastSystemDeadlinesUpdated": "Дедлайны обновлены"
+  "toastSystemDeadlinesUpdated": "Дедлайны обновлены",
+  "academicPeriodTitle": "Учебный период (семестр)",
+  "academicPeriodCurrent": "Текущий семестр",
+  "academicPeriodLastChanged": "Семестр последний раз изменил",
+  "academicPeriodAt": "",
+  "semesterFirst": "Первый семестр",
+  "semesterSecond": "Второй семестр",
+  "toastSemesterUpdated": "Семестр обновлён"
 }

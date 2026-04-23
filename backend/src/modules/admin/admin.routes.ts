@@ -7,6 +7,7 @@ import {
 } from "../../middleware/admin.middleware";
 import { AuditLogRepository } from "../audit/audit-log.repository";
 import { NotificationService } from "../notifications/notification.service";
+import { SystemPhaseService } from "../system/system-phase.service";
 import { AdminOverrideController } from "./admin-override.controller";
 import { AdminOverrideRepository } from "./admin-override.repository";
 import { AdminOverrideService } from "./admin-override.service";
@@ -23,7 +24,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   const audit = new AuditLogRepository(app);
 
   const moderationRepository = new AdminRepository(app);
-  const moderationService = new AdminService(app, moderationRepository, audit, notifications);
+  const phaseService = new SystemPhaseService(app);
+  const moderationService = new AdminService(app, moderationRepository, audit, notifications, phaseService);
   const moderationController = new AdminController(moderationService);
   const profileService = new AdminProfileService(app, notifications, audit);
   const profileController = new AdminProfileController(profileService);

@@ -37,6 +37,7 @@ interface UploadProofResponse {
 
 export interface BotSystemPhaseState {
   phase: "submission" | "evaluation";
+  semester?: "first" | "second";
   submissionDeadline: string | null;
   evaluationDeadline: string | null;
 }

@@ -1,11 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import { authMiddleware } from "../../middleware/auth.middleware";
 import { allowRoles } from "../../middleware/role.middleware";
+import { SystemPhaseService } from "../system/system-phase.service";
 import { AnalyticsController } from "./analytics.controller";
 import { AnalyticsService } from "./analytics.service";
 
 export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
-  const service = new AnalyticsService(app);
+  const phaseService = new SystemPhaseService(app);
+  const service = new AnalyticsService(app, phaseService);
   const controller = new AnalyticsController(service);
   const analyticsGuard = allowRoles(["admin", "superadmin", "reviewer"]);
 

@@ -117,5 +117,12 @@
   "confirm": "Confirm",
   "toastSystemPhaseUpdated": "System phase updated",
   "saveDeadlines": "Save deadlines",
-  "toastSystemDeadlinesUpdated": "Deadlines updated"
+  "toastSystemDeadlinesUpdated": "Deadlines updated",
+  "academicPeriodTitle": "Academic period (semester)",
+  "academicPeriodCurrent": "Current semester",
+  "academicPeriodLastChanged": "Semester last changed by",
+  "academicPeriodAt": "on",
+  "semesterFirst": "First semester",
+  "semesterSecond": "Second semester",
+  "toastSemesterUpdated": "Academic semester updated"
 }

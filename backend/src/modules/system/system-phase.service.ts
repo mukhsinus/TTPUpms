@@ -3,9 +3,10 @@ import { ServiceError } from "../../utils/service-error";
 import { AuditLogRepository } from "../audit/audit-log.repository";
 import { NotificationService } from "../notifications/notification.service";
 import { SystemPhaseRepository } from "./system-phase.repository";
-import type { ProjectPhase, ProjectPhaseState } from "./system-phase.types";
+import type { AcademicSemester, ProjectPhase, ProjectPhaseState } from "./system-phase.types";
 
 const DEFAULT_PHASE: ProjectPhase = "submission";
+const DEFAULT_SEMESTER: AcademicSemester = "first";
 const PHASE_CACHE_TTL_MS = 15_000;
 
 interface PhaseCache {
@@ -46,9 +47,14 @@ export class SystemPhaseService {
       "evaluation_deadline",
       "project_phase_changed_by",
       "project_phase_changed_at",
+      "academic_semester",
+      "academic_semester_changed_by",
+      "academic_semester_changed_at",
     ]);
     const phaseRaw = (map.get("project_phase")?.value ?? DEFAULT_PHASE).trim().toLowerCase();
     const phase: ProjectPhase = phaseRaw === "evaluation" ? "evaluation" : "submission";
+    const semesterRaw = (map.get("academic_semester")?.value ?? DEFAULT_SEMESTER).trim().toLowerCase();
+    const semester: AcademicSemester = semesterRaw === "second" ? "second" : "first";
     const submissionDeadline = parseDeadline(map.get("submission_deadline")?.value ?? null);
     const evaluationDeadline = parseDeadline(map.get("evaluation_deadline")?.value ?? null);
     const lastChangedByRaw = map.get("project_phase_changed_by")?.value ?? null;
@@ -64,14 +70,34 @@ export class SystemPhaseService {
       lastChangedByEmail = user?.email ?? null;
     }
 
+    const lastSemesterChangedByRaw = map.get("academic_semester_changed_by")?.value ?? null;
+    const lastSemesterChangedByUserId =
+      lastSemesterChangedByRaw && lastSemesterChangedByRaw !== "system"
+        ? lastSemesterChangedByRaw
+        : null;
+    const lastSemesterChangedAt = parseDeadline(map.get("academic_semester_changed_at")?.value ?? null);
+
+    let lastSemesterChangedByName: string | null = null;
+    let lastSemesterChangedByEmail: string | null = null;
+    if (lastSemesterChangedByUserId) {
+      const user = await this.repository.findUserBriefById(lastSemesterChangedByUserId);
+      lastSemesterChangedByName = user?.name ?? null;
+      lastSemesterChangedByEmail = user?.email ?? null;
+    }
+
     const value: ProjectPhaseState = {
       phase,
+      semester,
       submissionDeadline,
       evaluationDeadline,
       lastChangedByUserId,
       lastChangedAt,
       lastChangedByName,
       lastChangedByEmail,
+      lastSemesterChangedByUserId,
+      lastSemesterChangedAt,
+      lastSemesterChangedByName,
+      lastSemesterChangedByEmail,
     };
     this.cache = {
       expiresAt: Date.now() + PHASE_CACHE_TTL_MS,
@@ -126,6 +152,54 @@ export class SystemPhaseService {
       });
     } catch (error) {
       this.app.log.error({ err: error }, "Phase changed but notification dispatch failed");
+    }
+
+    return next;
+  }
+
+  getCurrentPhase(): Promise<ProjectPhase> {
+    return this.getPhaseState().then((s) => s.phase);
+  }
+
+  getCurrentSemester(): Promise<AcademicSemester> {
+    return this.getPhaseState().then((s) => s.semester);
+  }
+
+  async setSemester(input: {
+    semester: AcademicSemester;
+    actorUserId: string;
+    requestIp?: string | null;
+    userAgent?: string | null;
+  }): Promise<ProjectPhaseState> {
+    const prev = await this.getPhaseState({ forceRefresh: true });
+    if (prev.semester === input.semester) {
+      return prev;
+    }
+    const changedAtIso = new Date().toISOString();
+    await this.repository.setSemesterWithAuditMeta({
+      semester: input.semester,
+      actorUserId: input.actorUserId,
+      changedAtIso,
+    });
+    this.invalidateCache();
+    const next = await this.getPhaseState({ forceRefresh: true });
+
+    try {
+      await this.audit.insert({
+        actorUserId: input.actorUserId,
+        entityTable: "system_settings",
+        entityId: "academic_semester",
+        action: "academic_semester_changed",
+        oldValues: { semester: prev.semester },
+        newValues: { semester: next.semester },
+        metadata: {
+          phase: next.phase,
+        },
+        requestIp: input.requestIp ?? null,
+        userAgent: input.userAgent ?? null,
+      });
+    } catch (error) {
+      this.app.log.error({ err: error }, "Semester changed but audit logging failed");
     }
 
     return next;

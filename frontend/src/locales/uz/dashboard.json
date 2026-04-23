@@ -117,5 +117,12 @@
   "confirm": "Tasdiqlash",
   "toastSystemPhaseUpdated": "Tizim bosqichi yangilandi",
   "saveDeadlines": "Muddatlarni saqlash",
-  "toastSystemDeadlinesUpdated": "Muddatlar yangilandi"
+  "toastSystemDeadlinesUpdated": "Muddatlar yangilandi",
+  "academicPeriodTitle": "O‘quv davri (semestr)",
+  "academicPeriodCurrent": "Joriy semestr",
+  "academicPeriodLastChanged": "Semestrni oxirgi o‘zgartirgan",
+  "academicPeriodAt": "",
+  "semesterFirst": "Birinchi semestr",
+  "semesterSecond": "Ikkinchi semestr",
+  "toastSemesterUpdated": "Semestr yangilandi"
 }

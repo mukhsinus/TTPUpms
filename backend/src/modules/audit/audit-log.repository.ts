@@ -7,6 +7,7 @@ export class AuditLogRepository {
   ]);
   private readonly allowedActions = new Set([
     "project_phase_changed",
+    "academic_semester_changed",
     "moderation_submission_approved",
     "moderation_submission_rejected",
     "student_profile_updated",

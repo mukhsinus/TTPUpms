@@ -171,6 +171,8 @@ export interface FileUploadResult {
 
 export type AdminModerationStatus = "pending" | "approved" | "rejected";
 
+export type AdminSemesterScope = "active" | "first" | "second" | "all";
+
 export interface AdminSubmissionListItem {
   id: string;
   userId: string;
@@ -180,6 +182,7 @@ export interface AdminSubmissionListItem {
   categoryTitle: string | null;
   title: string;
   status: AdminModerationStatus;
+  semester: string | null;
   createdAt: string;
   submittedAt: string;
   score: number | null;
@@ -611,8 +614,11 @@ export interface AdminStudentDetailPayload {
 
 export type ProjectPhase = "submission" | "evaluation";
 
+export type AcademicSemester = "first" | "second";
+
 export interface SystemPhasePayload {
   phase: ProjectPhase;
+  semester: AcademicSemester;
   submissionDeadline: string | null;
   evaluationDeadline: string | null;
   lastChangedBy: {
@@ -621,6 +627,21 @@ export interface SystemPhasePayload {
     email: string | null;
   } | null;
   lastChangedAt: string | null;
+  lastSemesterChangedBy: {
+    userId: string;
+    name: string | null;
+    email: string | null;
+  } | null;
+  lastSemesterChangedAt: string | null;
+}
+
+function normalizeSystemPhasePayload(data: SystemPhasePayload): SystemPhasePayload {
+  return {
+    ...data,
+    semester: data.semester ?? "first",
+    lastSemesterChangedBy: data.lastSemesterChangedBy ?? null,
+    lastSemesterChangedAt: data.lastSemesterChangedAt ?? null,
+  };
 }
 
 /** Item payload from PATCH /api/reviews/items/:itemId (and POST review item). */
@@ -739,6 +760,7 @@ function keyFromSubmissionsParams(params: {
   search?: string;
   dateFrom?: string;
   dateTo?: string;
+  semester?: AdminSemesterScope;
 }): string {
   return JSON.stringify({
     page: params.page ?? 1,
@@ -749,6 +771,7 @@ function keyFromSubmissionsParams(params: {
     search: params.search?.trim() ?? "",
     dateFrom: params.dateFrom ?? "",
     dateTo: params.dateTo ?? "",
+    semester: params.semester ?? "active",
   });
 }
 
@@ -1259,11 +1282,12 @@ export const api = {
     }
     const promise = request<SystemPhasePayload>("/api/system/phase")
       .then((data) => {
+        const normalized = normalizeSystemPhasePayload(data);
         systemPhaseCache = {
           expiresAt: Date.now() + SYSTEM_PHASE_CACHE_TTL_MS,
-          data,
+          data: normalized,
         };
-        return data;
+        return normalized;
       })
       .finally(() => {
         systemPhaseInFlight = null;
@@ -1281,7 +1305,22 @@ export const api = {
     }).then((data) => {
       systemPhaseCache = null;
       systemPhaseInFlight = null;
-      return data;
+      return normalizeSystemPhasePayload(data);
+    });
+  },
+
+  setSystemSemester(semester: AcademicSemester): Promise<SystemPhasePayload> {
+    return request<SystemPhasePayload>("/api/admin/system/semester", {
+      method: "PATCH",
+      body: JSON.stringify({ semester }),
+    }).then((data) => {
+      systemPhaseCache = null;
+      systemPhaseInFlight = null;
+      adminSubmissionsCache.clear();
+      adminSubmissionsInFlight.clear();
+      adminStudentsCache.clear();
+      adminStudentsInFlight.clear();
+      return normalizeSystemPhasePayload(data);
     });
   },
 
@@ -1298,7 +1337,7 @@ export const api = {
     }).then((data) => {
       systemPhaseCache = null;
       systemPhaseInFlight = null;
-      return data;
+      return normalizeSystemPhasePayload(data);
     });
   },
 
@@ -1665,6 +1704,7 @@ export const api = {
     search?: string;
     dateFrom?: string;
     dateTo?: string;
+    semester?: AdminSemesterScope;
     forceRefresh?: boolean;
   }): Promise<AdminSubmissionsListPayload> {
     const cacheKey = keyFromSubmissionsParams(params);
@@ -1705,6 +1745,7 @@ export const api = {
     if (params.dateTo) {
       q.set("dateTo", params.dateTo);
     }
+    q.set("semester", params.semester ?? "active");
     if (params.forceRefresh) {
       q.set("forceRefresh", "true");
     }
@@ -1750,12 +1791,15 @@ export const api = {
     });
   },
 
-  getAdminStudentOverview(studentId: string): Promise<AdminStudentOverviewPayload | null> {
+  getAdminStudentOverview(
+    studentId: string,
+    semester: AdminSemesterScope = "active",
+  ): Promise<AdminStudentOverviewPayload | null> {
     const value = studentId.trim();
     if (!value) {
       return Promise.resolve(null);
     }
-    const params = new URLSearchParams({ studentId: value });
+    const params = new URLSearchParams({ studentId: value, semester });
     return request<AdminStudentOverviewPayload | null>(`/api/admin/submissions/student-overview?${params.toString()}`);
   },
 
@@ -1766,6 +1810,7 @@ export const api = {
     faculty?: string;
     degree?: AdminStudentDegree;
     sort?: "newest" | "oldest" | "name";
+    semester?: AdminSemesterScope;
     forceRefresh?: boolean;
   }): Promise<AdminStudentsListPayload> {
     const cacheKey = JSON.stringify({
@@ -1775,6 +1820,7 @@ export const api = {
       faculty: params.faculty?.trim() ?? "",
       degree: params.degree ?? "",
       sort: params.sort ?? "",
+      semester: params.semester ?? "active",
     });
     const now = Date.now();
     const cached = adminStudentsCache.get(cacheKey);
@@ -1802,6 +1848,7 @@ export const api = {
     if (params.sort) {
       q.set("sort", params.sort);
     }
+    q.set("semester", params.semester ?? "active");
     const promise = request<AdminStudentsListPayload>(`/api/admin/students?${q.toString()}`)
       .then((data) => {
         adminStudentsCache.set(cacheKey, {
@@ -1819,8 +1866,12 @@ export const api = {
     return promise;
   },
 
-  getAdminStudentById(studentId: string): Promise<AdminStudentDetailPayload> {
-    return request<AdminStudentDetailPayload>(`/api/admin/students/${studentId}`);
+  getAdminStudentById(
+    studentId: string,
+    semester: AdminSemesterScope = "active",
+  ): Promise<AdminStudentDetailPayload> {
+    const q = new URLSearchParams({ semester });
+    return request<AdminStudentDetailPayload>(`/api/admin/students/${studentId}?${q.toString()}`);
   },
 
   updateAdminStudent(

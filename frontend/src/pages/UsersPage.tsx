@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { Users } from "lucide-react";
-import { api, type AdminStudentDegree, type AdminStudentDetailPayload, type AdminStudentListItem } from "../lib/api";
+import { useTranslation } from "react-i18next";
+import {
+  api,
+  type AdminSemesterScope,
+  type AdminStudentDegree,
+  type AdminStudentDetailPayload,
+  type AdminStudentListItem,
+} from "../lib/api";
 import { onRealtimeUpdate } from "../lib/realtime-events";
 import { normalizeStudentId } from "../lib/student-id";
 import { useToast } from "../contexts/ToastContext";
@@ -64,6 +71,7 @@ function validateStudentForm(input: {
 }
 
 export function UsersPage(): ReactElement {
+  const { t: tSub } = useTranslation("submissions");
   const toast = useToast();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -73,6 +81,7 @@ export function UsersPage(): ReactElement {
   const [faculty, setFaculty] = useState("");
   const [degree, setDegree] = useState<"" | AdminStudentDegree>("");
   const [sort, setSort] = useState<"newest" | "oldest" | "name">("newest");
+  const [semester, setSemester] = useState<AdminSemesterScope>("active");
   const [rows, setRows] = useState<AdminStudentListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
@@ -108,6 +117,7 @@ export function UsersPage(): ReactElement {
           faculty: faculty.trim() || undefined,
           degree: degree || undefined,
           sort,
+          semester,
         });
         if (!cancelled) {
           setRows(data.items);
@@ -126,7 +136,7 @@ export function UsersPage(): ReactElement {
     return () => {
       cancelled = true;
     };
-  }, [page, search, faculty, degree, sort]);
+  }, [page, search, faculty, degree, sort, semester]);
 
   useEffect(() => {
     return onRealtimeUpdate((event) => {
@@ -140,6 +150,7 @@ export function UsersPage(): ReactElement {
             faculty: faculty.trim() || undefined,
             degree: degree || undefined,
             sort,
+            semester,
             forceRefresh: true,
           });
           setRows(data.items);
@@ -149,7 +160,7 @@ export function UsersPage(): ReactElement {
         }
       })();
     });
-  }, [page, search, faculty, degree, sort]);
+  }, [page, search, faculty, degree, sort, semester]);
 
   useEffect(() => {
     if (!selectedStudentId) {
@@ -159,7 +170,7 @@ export function UsersPage(): ReactElement {
     let cancelled = false;
     void (async () => {
       try {
-        const data = await api.getAdminStudentById(selectedStudentId);
+        const data = await api.getAdminStudentById(selectedStudentId, semester);
         if (!cancelled) {
           setSelected(data);
           setForm({
@@ -179,7 +190,7 @@ export function UsersPage(): ReactElement {
     return () => {
       cancelled = true;
     };
-  }, [selectedStudentId, toast]);
+  }, [selectedStudentId, semester, toast]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const dirty = useMemo(() => {
@@ -212,6 +223,20 @@ export function UsersPage(): ReactElement {
             onChange={(event) => setSearchInput(event.target.value)}
             placeholder="Search by name, student ID, Telegram username"
           />
+          <select
+            className="ui-input"
+            value={semester}
+            onChange={(event) => {
+              setPage(1);
+              setSemester(event.target.value as AdminSemesterScope);
+            }}
+            aria-label={tSub("semesterCol")}
+          >
+            <option value="active">{tSub("filterSemesterActive")}</option>
+            <option value="first">{tSub("filterSemesterFirst")}</option>
+            <option value="second">{tSub("filterSemesterSecond")}</option>
+            <option value="all">{tSub("filterSemesterAll")}</option>
+          </select>
           <Input
             value={faculty}
             onChange={(event) => {

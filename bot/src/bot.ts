@@ -22,11 +22,14 @@ function setSessionFromLinkedUser(
 
 function formatBotPhaseBanner(input: {
   phase: "submission" | "evaluation";
+  semester?: "first" | "second";
   submissionDeadline: string | null;
   evaluationDeadline: string | null;
 }): string {
   const phaseLine = input.phase === "submission" ? "🟢 Submission Open" : "🟠 Evaluation In Progress";
-  const lines = ["Current Phase:", phaseLine];
+  const sem = input.semester ?? "first";
+  const semLine = sem === "second" ? "Second semester (active)" : "First semester (active)";
+  const lines = ["Current Phase:", phaseLine, "Academic semester:", semLine];
   if (input.submissionDeadline) {
     lines.push(`Submission deadline: ${new Date(input.submissionDeadline).toLocaleString("en-GB")}`);
   }
@@ -179,7 +182,7 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
 
     const submissions = await upmsService.getUserSubmissions(ctx.session.authenticatedTelegramId);
     if (submissions.length === 0) {
-      await ctx.reply("You have no submissions yet.", mainMenuKeyboard());
+      await ctx.reply("No submissions for current semester.", mainMenuKeyboard());
       return;
     }
 
@@ -240,7 +243,7 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
 
     const totalPoints = await upmsService.getUserPoints(ctx.session.authenticatedTelegramId);
     await ctx.reply(
-      `My Points (approved submissions): ${totalPoints.toFixed(2)}`,
+      `My Points (approved submissions, current semester): ${totalPoints.toFixed(2)}`,
       Markup.inlineKeyboard([[Markup.button.callback("Back to menu", "menu_back")]]),
     );
   });

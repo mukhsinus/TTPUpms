@@ -7,6 +7,7 @@ import {
   api,
   type AdminModerationStatus,
   type AdminSearchSuggestion,
+  type AdminSemesterScope,
   type AdminStudentOverviewPayload,
   type AdminSubmissionListItem,
 } from "../lib/api";
@@ -135,6 +136,7 @@ export function AdminSubmissionsPage(): ReactElement {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [studentOverview, setStudentOverview] = useState<AdminStudentOverviewPayload | null>(null);
+  const [semester, setSemester] = useState<AdminSemesterScope>("active");
 
   useEffect(() => {
     setPage(1);
@@ -164,7 +166,7 @@ export function AdminSubmissionsPage(): ReactElement {
     let cancelled = false;
     void (async () => {
       try {
-        const overview = await api.getAdminStudentOverview(normalizeStudentId(q));
+        const overview = await api.getAdminStudentOverview(normalizeStudentId(q), semester);
         if (!cancelled) {
           setStudentOverview(overview);
         }
@@ -177,7 +179,7 @@ export function AdminSubmissionsPage(): ReactElement {
     return () => {
       cancelled = true;
     };
-  }, [debouncedSearch]);
+  }, [debouncedSearch, semester]);
 
   useEffect(() => {
     void (async () => {
@@ -216,6 +218,7 @@ export function AdminSubmissionsPage(): ReactElement {
     setCustomFrom("");
     setCustomTo("");
     setStudentOverview(null);
+    setSemester("active");
   }, []);
 
   const mapSuggestion = useCallback((item: AdminSearchSuggestion, index: number): SearchAutocompleteSuggestion => {
@@ -259,6 +262,7 @@ export function AdminSubmissionsPage(): ReactElement {
         search: debouncedSearch || undefined,
         dateFrom: dateRange.dateFrom,
         dateTo: dateRange.dateTo,
+        semester,
         forceRefresh,
       });
       if (requestSeq.current !== runId) {
@@ -277,7 +281,7 @@ export function AdminSubmissionsPage(): ReactElement {
         setRefreshing(false);
       }
     }
-  }, [page, status, category, categoryOptions, debouncedSearch, dateRange.dateFrom, dateRange.dateTo, items.length, total]);
+  }, [page, status, category, categoryOptions, debouncedSearch, dateRange.dateFrom, dateRange.dateTo, semester, items.length, total]);
 
   useEffect(() => {
     void load();
@@ -335,6 +339,20 @@ export function AdminSubmissionsPage(): ReactElement {
             <option value="pending">{t("adminStatusPending")}</option>
             <option value="approved">{t("adminStatusApproved")}</option>
             <option value="rejected">{t("adminStatusRejected")}</option>
+          </select>
+          <select
+            className="ui-input"
+            value={semester}
+            onChange={(e) => {
+              setPage(1);
+              setSemester(e.target.value as AdminSemesterScope);
+            }}
+            aria-label={t("semesterCol")}
+          >
+            <option value="active">{t("filterSemesterActive")}</option>
+            <option value="first">{t("filterSemesterFirst")}</option>
+            <option value="second">{t("filterSemesterSecond")}</option>
+            <option value="all">{t("filterSemesterAll")}</option>
           </select>
           <select
             className="ui-input"
@@ -428,7 +446,7 @@ export function AdminSubmissionsPage(): ReactElement {
 
       <Card className="admin-submissions-table-card">
         {loading ? (
-          <TableSkeleton rows={10} cols={8} />
+          <TableSkeleton rows={10} cols={9} />
         ) : isFilteredEmpty ? (
           <EmptyState icon={ClipboardList} tone="muted" title={t("emptyTitle")} description={t("emptySubtitle")}>
             <Button
@@ -450,6 +468,7 @@ export function AdminSubmissionsPage(): ReactElement {
                   <th>{t("student")}</th>
                   <th>{t("studentId")}</th>
                   <th>{t("category")}</th>
+                  <th>{t("semesterCol")}</th>
                   <th>{t("titleCol")}</th>
                   <th>{t("status")}</th>
                   <th>{t("submittedAt")}</th>
@@ -476,6 +495,13 @@ export function AdminSubmissionsPage(): ReactElement {
                     </td>
                     <td>{row.studentId?.trim() || t("emDash")}</td>
                     <td>{categoryCellLabel(row, t)}</td>
+                    <td>
+                      {row.semester
+                        ? row.semester === "second"
+                          ? t("semesterShortSecond")
+                          : t("semesterShortFirst")
+                        : t("emDash")}
+                    </td>
                     <td className="submission-title-cell">{row.title}</td>
                     <td>
                       <ModerationStatusBadge status={row.status} />

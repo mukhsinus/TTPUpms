@@ -2583,6 +2583,12 @@ body {
   text-transform: lowercase;
 }
 
+.academic-period-block {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.35);
+}
+
 /* Dashboard-only premium shell */
 .dashboard-shell--dashboard {
   background: #f2f5fb;

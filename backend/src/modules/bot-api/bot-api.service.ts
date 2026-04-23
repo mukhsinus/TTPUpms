@@ -20,6 +20,7 @@ import type { SubmissionsRepository } from "../submissions/submissions.repositor
 import { MAX_ACTIVE_SUBMISSIONS_PER_USER } from "../submissions/submission-quota";
 import type { SubmissionsService } from "../submissions/submissions.service";
 import type { UsersRepository } from "../users/users.repository";
+import type { SystemPhaseService } from "../system/system-phase.service";
 import { AntiFraudError, type AntiFraudService } from "../validation/anti-fraud.service";
 import { getPostgresDriverErrorFields } from "../../utils/pg-http-map";
 import { normalizeStudentId } from "../../utils/student-id";
@@ -220,6 +221,7 @@ export class BotApiService {
     private readonly submissionsRepository: SubmissionsRepository,
     private readonly submissionItemsRepository: SubmissionItemsRepository,
     private readonly notifications: NotificationService,
+    private readonly phase: SystemPhaseService,
   ) {}
 
   private async hasTelegramUsernameColumn(): Promise<boolean> {
@@ -773,6 +775,7 @@ export class BotApiService {
     const client = await this.app.db.connect();
     try {
       await client.query("BEGIN");
+      const semester = await this.phase.getCurrentSemester();
 
       const submissionTitle = await this.resolveSubmissionTitleForBotPayload({
         userId: user.id,
@@ -828,6 +831,7 @@ export class BotApiService {
           id: created.id,
           status: "submitted",
           submittedAt: true,
+          semester,
         },
         client,
       );
@@ -1187,6 +1191,7 @@ export class BotApiService {
 
   async getUserSubmissions(telegramId: string): Promise<BotSubmissionListRow[]> {
     const user = await this.findOrCreateUserByTelegramId(telegramId);
+    const activeSemester = await this.phase.getCurrentSemester();
 
     const result = await this.app.db.query<{
       id: string;
@@ -1238,6 +1243,10 @@ export class BotApiService {
           WHERE si.submission_id = s.id
         ) items ON true
         WHERE s.user_id = $1
+          AND (
+            s.semester = $2
+            OR (s.status = 'draft'::public.submission_status AND s.semester IS NULL)
+          )
       ),
       numbered AS (
         SELECT
@@ -1269,7 +1278,7 @@ export class BotApiService {
       ORDER BY n."createdAt" DESC
       LIMIT 10
       `,
-      [user.id],
+      [user.id, activeSemester],
     );
 
     const toSummaryItems = (raw: unknown): BotSubmitDraftItemSummary[] => {
@@ -1328,14 +1337,16 @@ export class BotApiService {
 
   async getUserApprovedPoints(telegramId: string): Promise<number> {
     const user = await this.findOrCreateUserByTelegramId(telegramId);
+    const activeSemester = await this.phase.getCurrentSemester();
     const result = await this.app.db.query<{ total: string }>(
       `
       SELECT COALESCE(SUM(total_score), 0)::text AS total
       FROM submissions
       WHERE user_id = $1
         AND status = 'approved'
+        AND semester = $2
       `,
-      [user.id],
+      [user.id, activeSemester],
     );
 
     return Number(result.rows[0]?.total ?? "0");

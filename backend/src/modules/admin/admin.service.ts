@@ -31,10 +31,13 @@ import type {
   AdminDashboardQuery,
   AdminModerationStatus,
   AdminRejectBody,
+  AdminSemesterScope,
   AdminSubmissionsQuery,
   AdminStudentsQuery,
   AdminUpdateStudentBody,
 } from "./admin.schema";
+import type { AdminSemesterDb } from "./admin.repository";
+import { SystemPhaseService } from "../system/system-phase.service";
 
 export const ADMIN_PROCESSABLE_STATUSES = new Set<string>(["submitted", "review", "needs_revision"]);
 
@@ -116,7 +119,21 @@ export class AdminService {
     private readonly repository: AdminRepository,
     private readonly audit: AuditLogRepository,
     private readonly notifications: NotificationService,
+    private readonly phase: SystemPhaseService,
   ) {}
+
+  private async resolveAdminSemesterDb(scope: AdminSemesterScope): Promise<AdminSemesterDb> {
+    if (scope === "all") {
+      return null;
+    }
+    if (scope === "first") {
+      return "first";
+    }
+    if (scope === "second") {
+      return "second";
+    }
+    return this.phase.getCurrentSemester();
+  }
 
   private invalidateReadCaches(): void {
     this.dashboardCache.clear();
@@ -341,6 +358,7 @@ export class AdminService {
       dateTo: query.dateTo ?? "",
       sort: query.sort,
       order: query.order,
+      semester: query.semester,
     });
     if (!query.forceRefresh) {
       const cached = this.submissionsCache.get(cacheKey);
@@ -370,7 +388,7 @@ export class AdminService {
     return rows.map((row) => this.mapSearchSuggestionRow(row));
   }
 
-  async getStudentOverview(studentId: string): Promise<{
+  async getStudentOverview(studentId: string, semesterScope: AdminSemesterScope): Promise<{
     userId: string;
     studentId: string;
     studentName: string | null;
@@ -382,7 +400,8 @@ export class AdminService {
     rejectedSubmissions: number;
     totalApprovedScore: number;
   } | null> {
-    const row = await this.repository.findStudentOverviewByStudentId(studentId);
+    const semesterDb = await this.resolveAdminSemesterDb(semesterScope);
+    const row = await this.repository.findStudentOverviewByStudentId(studentId, semesterDb);
     if (!row) {
       return null;
     }
@@ -412,9 +431,10 @@ export class AdminService {
       hasNext: boolean;
     };
   }> {
+    const semesterDb = await this.resolveAdminSemesterDb(query.semester);
     const [total, rows] = await Promise.all([
       this.repository.countStudents(query),
-      this.repository.listStudents(query),
+      this.repository.listStudents(query, semesterDb),
     ]);
     const totalPages = Math.max(1, Math.ceil(total / query.pageSize));
     return {
@@ -430,7 +450,7 @@ export class AdminService {
     };
   }
 
-  async getStudentById(studentId: string): Promise<{
+  async getStudentById(studentId: string, semesterScope: AdminSemesterScope): Promise<{
     id: string;
     fullName: string;
     telegramUsername: string | null;
@@ -447,7 +467,8 @@ export class AdminService {
     totalSubmissions: number;
     totalApprovedScore: number;
   }> {
-    const row = await this.repository.findStudentById(studentId);
+    const semesterDb = await this.resolveAdminSemesterDb(semesterScope);
+    const row = await this.repository.findStudentById(studentId, semesterDb);
     if (!row) {
       throw new ServiceError(404, "Student not found");
     }
@@ -475,12 +496,12 @@ export class AdminService {
     totalSubmissions: number;
     totalApprovedScore: number;
   }> {
-    const before = await this.repository.findStudentById(studentId);
+    const before = await this.repository.findStudentById(studentId, null);
     if (!before) {
       throw new ServiceError(404, "Student not found");
     }
     await this.repository.updateStudentById(studentId, body);
-    const row = await this.repository.findStudentById(studentId);
+    const row = await this.repository.findStudentById(studentId, null);
     if (!row) {
       throw new ServiceError(404, "Student not found");
     }
@@ -526,12 +547,13 @@ export class AdminService {
     page: number;
     pageSize: number;
   }> {
+    const semesterDb = await this.resolveAdminSemesterDb(query.semester);
     const pendingQuery: AdminSubmissionsQuery | null =
       query.status && query.status !== "pending" ? null : { ...query, status: "pending" };
     const [total, rows, pendingCount] = await Promise.all([
-      this.repository.countSubmissions(query),
-      this.repository.listSubmissions(query),
-      pendingQuery ? this.repository.countSubmissions(pendingQuery) : Promise.resolve(0),
+      this.repository.countSubmissions(query, semesterDb),
+      this.repository.listSubmissions(query, semesterDb),
+      pendingQuery ? this.repository.countSubmissions(pendingQuery, semesterDb) : Promise.resolve(0),
     ]);
 
     return {
@@ -552,6 +574,7 @@ export class AdminService {
       categoryTitle: row.category_title,
       title: row.title,
       status: toModerationStatus(row.db_status),
+      semester: row.semester,
       createdAt: row.created_at,
       submittedAt: row.submitted_at,
       score: numOrNull(row.score),

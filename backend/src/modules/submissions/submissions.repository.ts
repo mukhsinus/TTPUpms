@@ -9,6 +9,7 @@ interface SubmissionRow {
   description: string | null;
   total_score: string;
   status: SubmissionStatus;
+  semester: string | null;
   submitted_at: string | null;
   reviewed_at: string | null;
   created_at: string;
@@ -25,6 +26,8 @@ export interface SubmissionEntity {
   description: string | null;
   totalPoints: number;
   status: SubmissionStatus;
+  /** Set when status is not draft; null while draft. */
+  semester: string | null;
   submittedAt: string | null;
   reviewedAt: string | null;
   createdAt: string;
@@ -42,6 +45,7 @@ const SUBMISSION_SELECT_WITH_OWNER = `
   s.description,
   s.total_score,
   s.status,
+  s.semester,
   s.submitted_at,
   s.reviewed_at,
   s.created_at,
@@ -64,6 +68,7 @@ function mapSubmission(row: SubmissionRow): SubmissionEntity {
     description: row.description,
     totalPoints: Number(row.total_score),
     status: row.status,
+    semester: row.semester ?? null,
     submittedAt: row.submitted_at,
     reviewedAt: row.reviewed_at,
     createdAt: row.created_at,
@@ -116,7 +121,7 @@ export class SubmissionsRepository {
       `
       INSERT INTO submissions (user_id, title, description, status)
       VALUES ($1, $2, $3, 'draft')
-      RETURNING id, user_id, title, description, total_score, status, submitted_at, reviewed_at, created_at, updated_at
+      RETURNING id, user_id, title, description, total_score, status, semester, submitted_at, reviewed_at, created_at, updated_at
       `,
       [input.userId, input.title, input.description ?? null],
     );
@@ -165,6 +170,25 @@ export class SubmissionsRepository {
       ORDER BY s.created_at DESC
       `,
       [userId],
+    );
+
+    return result.rows.map(mapSubmission);
+  }
+
+  /** Student view: active semester submissions plus drafts (semester not yet assigned). */
+  async findByUserIdForActiveSemester(userId: string, activeSemester: string): Promise<SubmissionEntity[]> {
+    const result = await this.app.db.query<SubmissionRow>(
+      `
+      SELECT ${SUBMISSION_SELECT_WITH_OWNER}
+      ${FROM_SUBMISSIONS_JOIN_OWNER}
+      WHERE s.user_id = $1
+        AND (
+          s.semester = $2
+          OR (s.status = 'draft' AND s.semester IS NULL)
+        )
+      ORDER BY s.created_at DESC
+      `,
+      [userId, activeSemester],
     );
 
     return result.rows.map(mapSubmission);
@@ -222,21 +246,28 @@ export class SubmissionsRepository {
       id: string;
       status: SubmissionStatus;
       submittedAt?: boolean;
+      /** Required when transitioning to submitted; stamps academic semester at submit time. */
+      semester?: "first" | "second";
     },
     client?: PoolClient,
   ): Promise<SubmissionEntity> {
     const db: DbExecutor = client ?? this.app.db;
+    const semesterParam = input.status === "submitted" ? input.semester ?? null : null;
     const result = await db.query<SubmissionRow>(
       `
       UPDATE submissions
       SET
         status = $2,
         submitted_at = CASE WHEN $3::boolean THEN NOW() ELSE submitted_at END,
+        semester = CASE
+          WHEN $2::text = 'submitted' AND $4::text IS NOT NULL THEN $4::text
+          ELSE semester
+        END,
         updated_at = NOW()
       WHERE id = $1
-      RETURNING id, user_id, title, description, total_score, status, submitted_at, reviewed_at, created_at, updated_at
+      RETURNING id, user_id, title, description, total_score, status, semester, submitted_at, reviewed_at, created_at, updated_at
       `,
-      [input.id, input.status, input.submittedAt ?? false],
+      [input.id, input.status, input.submittedAt ?? false, semesterParam],
     );
 
     return mapSubmission(result.rows[0] as SubmissionRow);

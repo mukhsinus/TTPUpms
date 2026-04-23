@@ -10,12 +10,16 @@ import type {
   AdminUpdateStudentBody,
 } from "./admin.schema";
 
+/** Resolved from admin UI scope: null = all semesters. */
+export type AdminSemesterDb = "first" | "second" | null;
+
 export interface AdminSubmissionListRow {
   id: string;
   user_id: string;
   student_id: string | null;
   title: string;
   db_status: string;
+  semester: string | null;
   created_at: string;
   submitted_at: string;
   score: string | null;
@@ -207,10 +211,29 @@ function moderationStatusFilterSql(status: AdminModerationStatus): { clause: str
 const SUBMISSION_ID_UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+function adminStudentSubmissionsSemesterWhereSql(semesterDb: AdminSemesterDb): string {
+  if (semesterDb === null) {
+    return "";
+  }
+  return semesterDb === "first" ? " AND s.semester = 'first' " : " AND s.semester = 'second' ";
+}
+
+function adminStudentOverviewJoinOnSql(semesterDb: AdminSemesterDb): string {
+  if (semesterDb === null) {
+    return "s.user_id = u.id";
+  }
+  return semesterDb === "first"
+    ? "s.user_id = u.id AND s.semester = 'first'"
+    : "s.user_id = u.id AND s.semester = 'second'";
+}
+
 /**
  * Shared WHERE builder for admin submission list + count (`u` join required for search).
  */
-function buildAdminSubmissionFilters(query: AdminSubmissionsQuery): { whereSql: string; params: unknown[] } {
+function buildAdminSubmissionFilters(
+  query: AdminSubmissionsQuery,
+  semesterDb: AdminSemesterDb,
+): { whereSql: string; params: unknown[] } {
   const conditions: string[] = ["s.status <> 'draft'"];
   const params: unknown[] = [];
   let p = 1;
@@ -305,6 +328,11 @@ function buildAdminSubmissionFilters(query: AdminSubmissionsQuery): { whereSql: 
       params.push(pattern);
       p += 1;
     }
+  }
+
+  if (semesterDb !== null) {
+    conditions.push(`s.semester = $${p}`);
+    params.push(semesterDb);
   }
 
   return { whereSql: `WHERE ${conditions.join(" AND ")}`, params };
@@ -844,8 +872,8 @@ export class AdminRepository {
     );
   }
 
-  async countSubmissions(query: AdminSubmissionsQuery): Promise<number> {
-    const { whereSql, params } = buildAdminSubmissionFilters(query);
+  async countSubmissions(query: AdminSubmissionsQuery, semesterDb: AdminSemesterDb): Promise<number> {
+    const { whereSql, params } = buildAdminSubmissionFilters(query, semesterDb);
 
     const result = await this.app.db.query<{ c: string }>(
       `
@@ -860,8 +888,8 @@ export class AdminRepository {
     return Number(result.rows[0]?.c ?? "0");
   }
 
-  async listSubmissions(query: AdminSubmissionsQuery): Promise<AdminSubmissionListRow[]> {
-    const { whereSql, params } = buildAdminSubmissionFilters(query);
+  async listSubmissions(query: AdminSubmissionsQuery, semesterDb: AdminSemesterDb): Promise<AdminSubmissionListRow[]> {
+    const { whereSql, params } = buildAdminSubmissionFilters(query, semesterDb);
     const offset = (query.page - 1) * query.pageSize;
 
     const categoryDisplayTerms: string[] = [];
@@ -913,6 +941,7 @@ export class AdminRepository {
         u.student_id,
         s.title,
         s.status::text AS db_status,
+        s.semester::text AS semester,
         s.created_at,
         COALESCE(s.submitted_at, s.created_at) AS submitted_at,
         CASE
@@ -1018,11 +1047,16 @@ export class AdminRepository {
     return result.rows;
   }
 
-  async findStudentOverviewByStudentId(studentIdInput: string): Promise<AdminStudentOverviewRow | null> {
+  async findStudentOverviewByStudentId(
+    studentIdInput: string,
+    semesterDb: AdminSemesterDb,
+  ): Promise<AdminStudentOverviewRow | null> {
     const normalized = normalizeStudentId(studentIdInput);
     if (!normalized) {
       return null;
     }
+
+    const joinOn = adminStudentOverviewJoinOnSql(semesterDb);
 
     const result = await this.app.db.query<AdminStudentOverviewRow>(
       `
@@ -1038,7 +1072,7 @@ export class AdminRepository {
         COUNT(*) FILTER (WHERE s.status = 'rejected')::text AS rejected_submissions,
         COALESCE(SUM(s.total_score) FILTER (WHERE s.status = 'approved'), 0)::text AS total_approved_score
       FROM public.users u
-      LEFT JOIN public.submissions s ON s.user_id = u.id
+      LEFT JOIN public.submissions s ON ${joinOn}
       WHERE upper(regexp_replace(COALESCE(u.student_id, ''), '\\s+', '', 'g')) = $1
       GROUP BY u.id, u.student_id, u.student_full_name, u.full_name, u.faculty, u.telegram_username
       LIMIT 1
@@ -1062,12 +1096,14 @@ export class AdminRepository {
     return Number(result.rows[0]?.c ?? "0");
   }
 
-  async listStudents(query: AdminStudentsQuery): Promise<AdminStudentListRow[]> {
+  async listStudents(query: AdminStudentsQuery, semesterDb: AdminSemesterDb): Promise<AdminStudentListRow[]> {
     const { whereSql, params } = buildAdminStudentsFilters(query);
     const offset = (query.page - 1) * query.pageSize;
     const limitParam = params.length + 1;
     const offsetParam = params.length + 2;
     params.push(query.pageSize, offset);
+
+    const semSql = adminStudentSubmissionsSemesterWhereSql(semesterDb);
 
     let orderBy = "u.created_at DESC, u.id ASC";
     if (query.sort === "oldest") {
@@ -1099,7 +1135,7 @@ export class AdminRepository {
           COALESCE(SUM(s.total_score) FILTER (WHERE s.status = 'approved'), 0) AS total_approved_score
         FROM public.submissions s
         LEFT JOIN public.submission_items si ON si.submission_id = s.id
-        WHERE s.user_id = u.id
+        WHERE s.user_id = u.id${semSql}
       ) activity ON true
       ${whereSql}
       ORDER BY ${orderBy}
@@ -1128,7 +1164,7 @@ export class AdminRepository {
           COALESCE(SUM(s.total_score) FILTER (WHERE s.status = 'approved'), 0) AS total_approved_score
         FROM public.submissions s
         LEFT JOIN public.submission_items si ON si.submission_id = s.id
-        WHERE s.user_id = u.id
+        WHERE s.user_id = u.id${semSql}
       ) activity ON true
       ${whereSql}
       ORDER BY ${orderBy}
@@ -1146,7 +1182,9 @@ export class AdminRepository {
     }
   }
 
-  async findStudentById(studentId: string): Promise<AdminStudentDetailRow | null> {
+  async findStudentById(studentId: string, semesterDb: AdminSemesterDb): Promise<AdminStudentDetailRow | null> {
+    const semSql = adminStudentSubmissionsSemesterWhereSql(semesterDb);
+
     const sqlWithPhone = `
       SELECT
         u.id::text AS id,
@@ -1175,7 +1213,7 @@ export class AdminRepository {
           COALESCE(SUM(s.total_score) FILTER (WHERE s.status = 'approved'), 0) AS total_approved_score
         FROM public.submissions s
         LEFT JOIN public.submission_items si ON si.submission_id = s.id
-        WHERE s.user_id = u.id
+        WHERE s.user_id = u.id${semSql}
       ) activity ON true
       WHERE u.id = $1::uuid
         AND u.role::text = 'student'
@@ -1210,7 +1248,7 @@ export class AdminRepository {
           COALESCE(SUM(s.total_score) FILTER (WHERE s.status = 'approved'), 0) AS total_approved_score
         FROM public.submissions s
         LEFT JOIN public.submission_items si ON si.submission_id = s.id
-        WHERE s.user_id = u.id
+        WHERE s.user_id = u.id${semSql}
       ) activity ON true
       WHERE u.id = $1::uuid
         AND u.role::text = 'student'

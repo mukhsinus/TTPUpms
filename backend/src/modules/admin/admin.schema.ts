@@ -4,6 +4,8 @@ import { normalizeStudentId } from "../../utils/student-id";
 /** Normalized moderation status exposed on admin APIs (maps from DB workflow states). */
 export const adminModerationStatusSchema = z.enum(["pending", "approved", "rejected"]);
 
+export const adminSemesterScopeSchema = z.enum(["active", "first", "second", "all"]);
+
 export const adminSubmissionIdParamsSchema = z.object({
   id: z.string().uuid(),
 });
@@ -25,6 +27,7 @@ export const adminSearchSuggestionsQuerySchema = z.object({
 
 export const adminStudentOverviewQuerySchema = z.object({
   studentId: z.string().trim().min(1).max(64),
+  semester: adminSemesterScopeSchema.default("active"),
 });
 
 export const adminStudentsQuerySchema = z.object({
@@ -34,10 +37,15 @@ export const adminStudentsQuerySchema = z.object({
   faculty: z.string().trim().min(1).max(200).optional(),
   degree: z.enum(["bachelor", "master"]).optional(),
   sort: z.enum(["newest", "oldest", "name"]).default("newest"),
+  semester: adminSemesterScopeSchema.default("active"),
 });
 
 export const adminStudentIdParamsSchema = z.object({
   id: z.string().uuid(),
+});
+
+export const adminStudentDetailQuerySchema = z.object({
+  semester: adminSemesterScopeSchema.default("active"),
 });
 
 export const adminUpdateStudentBodySchema = z.object({
@@ -62,6 +70,8 @@ export const adminSubmissionsQuerySchema = z.object({
   dateTo: z.string().trim().min(1).optional(),
   sort: z.enum(["created_at", "title", "status", "score"]).default("created_at"),
   order: z.enum(["asc", "desc"]).default("desc"),
+  /** Default active = current global academic semester (system settings). */
+  semester: adminSemesterScopeSchema.default("active"),
 });
 
 export const adminApproveBodySchema = z
@@ -76,6 +86,7 @@ export const adminRejectBodySchema = z
   })
   .strict();
 
+export type AdminSemesterScope = z.infer<typeof adminSemesterScopeSchema>;
 export type AdminModerationStatus = z.infer<typeof adminModerationStatusSchema>;
 export type AdminDashboardQuery = z.infer<typeof adminDashboardQuerySchema>;
 export type AdminSubmissionsQuery = z.infer<typeof adminSubmissionsQuerySchema>;

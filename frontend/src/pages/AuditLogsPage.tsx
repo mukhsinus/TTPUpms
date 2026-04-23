@@ -44,7 +44,7 @@ function deriveDateRange(
 }
 
 function pageLabel(action: string): "Dashboard" | "Submissions" | "Students" | "Security" {
-  if (action === "project_phase_changed") return "Dashboard";
+  if (action === "project_phase_changed" || action === "academic_semester_changed") return "Dashboard";
   if (action === "security_event_approved" || action === "security_event_rejected") return "Security";
   if (action === "student_profile_updated") return "Students";
   return "Submissions";
@@ -52,6 +52,7 @@ function pageLabel(action: string): "Dashboard" | "Submissions" | "Students" | "
 
 function actionLabel(action: string): string {
   if (action === "project_phase_changed") return "Project phase changed";
+  if (action === "academic_semester_changed") return "Academic semester changed";
   if (action === "student_profile_updated") return "Student profile updated";
   if (action === "security_event_approved") return "Security request approved";
   if (action === "security_event_rejected") return "Security request rejected";
@@ -96,6 +97,13 @@ function targetLabel(row: AuditRow): string {
     const toPhase = typeof newValues.phase === "string" ? newValues.phase : "—";
     return `${fromPhase} -> ${toPhase}`;
   }
+  if (row.action === "academic_semester_changed") {
+    const oldValues = toRecord(row.oldValues);
+    const newValues = toRecord(row.newValues);
+    const fromS = typeof oldValues.semester === "string" ? oldValues.semester : "—";
+    const toS = typeof newValues.semester === "string" ? newValues.semester : "—";
+    return `${fromS} -> ${toS}`;
+  }
   if (row.targetTable === "submissions" && row.targetId) {
     return `Submission ${row.targetId.slice(0, 8)}…`;
   }
@@ -129,6 +137,12 @@ function detailLines(row: AuditRow): string[] {
     const fromPhase = typeof oldValues.phase === "string" ? oldValues.phase : "—";
     const toPhase = typeof newValues.phase === "string" ? newValues.phase : "—";
     return [`Changed to: ${toPhase}`, `Transition: ${fromPhase} -> ${toPhase}`];
+  }
+
+  if (row.action === "academic_semester_changed") {
+    const fromS = typeof oldValues.semester === "string" ? oldValues.semester : "—";
+    const toS = typeof newValues.semester === "string" ? newValues.semester : "—";
+    return [`Changed to: ${toS}`, `Transition: ${fromS} -> ${toS}`];
   }
 
   if (row.action === "student_profile_updated") {
@@ -177,6 +191,7 @@ export function AuditLogsPage(): ReactElement {
   const fetchActionSuggestions = useCallback(async (query: string): Promise<SearchAutocompleteSuggestion[]> => {
     const values = [
       "project_phase_changed",
+      "academic_semester_changed",
       "moderation_submission_approved",
       "moderation_submission_rejected",
       "student_profile_updated",

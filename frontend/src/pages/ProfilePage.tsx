@@ -43,6 +43,9 @@ function actionLabel(action: AdminProfilePayload["recentActions"][number]["actio
   if (action === "moderation_submission_status_overridden") {
     return "Status overridden";
   }
+  if (action === "academic_semester_changed") {
+    return "Academic semester changed";
+  }
   if (action === "project_phase_changed") {
     return "Project phase changed";
   }

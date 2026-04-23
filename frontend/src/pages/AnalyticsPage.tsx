@@ -198,7 +198,10 @@ export function AnalyticsPage(): ReactElement {
         </div>
       </Card>
 
-      <Card title="Top students" subtitle="By total points on approved submissions">
+      <Card
+        title="Top students"
+        subtitle="By total points on approved submissions in the current academic semester"
+      >
         <div className="analytics-split">
           <div className="analytics-chart-wrap">
             {topStudentsChartData.length === 0 ? (

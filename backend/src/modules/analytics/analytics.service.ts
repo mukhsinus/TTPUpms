@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import type { SystemPhaseService } from "../system/system-phase.service";
 
 interface TopStudentRow {
   user_id: string;
@@ -41,9 +42,13 @@ export interface ActivityStat {
 }
 
 export class AnalyticsService {
-  constructor(private readonly app: FastifyInstance) {}
+  constructor(
+    private readonly app: FastifyInstance,
+    private readonly phase: SystemPhaseService,
+  ) {}
 
   async getTopStudents(limit: number): Promise<TopStudent[]> {
+    const semester = await this.phase.getCurrentSemester();
     const result = await this.app.db.query<TopStudentRow>(
       `
       SELECT
@@ -56,11 +61,12 @@ export class AnalyticsService {
       FROM submissions s
       INNER JOIN users u ON u.id = s.user_id
       WHERE s.status = 'approved'
+        AND s.semester = $2
       GROUP BY s.user_id, u.full_name, to_jsonb(u)->>'telegram_username', u.telegram_id
       ORDER BY COALESCE(SUM(s.total_score), 0) DESC
       LIMIT $1
       `,
-      [limit],
+      [limit, semester],
     );
 
     return result.rows.map((row) => ({

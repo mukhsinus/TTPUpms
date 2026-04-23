@@ -13,6 +13,7 @@ import { SubmissionItemsRepository } from "../submission-items/submission-items.
 import { SubmissionItemsService } from "../submission-items/submission-items.service";
 import { SubmissionsRepository } from "../submissions/submissions.repository";
 import { SubmissionsService } from "../submissions/submissions.service";
+import { SystemPhaseService } from "../system/system-phase.service";
 import { UsersRepository } from "../users/users.repository";
 import { AntiFraudError, AntiFraudService } from "../validation/anti-fraud.service";
 import { ServiceError } from "../../utils/service-error";
@@ -248,12 +249,14 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
   const notifications = new NotificationService(app);
   const antiFraud = new AntiFraudService(app);
   const usersRepository = new UsersRepository(app);
+  const phaseService = new SystemPhaseService(app);
   const submissionsService = new SubmissionsService(
     submissionsRepository,
     notifications,
     antiFraud,
     audit,
     usersRepository,
+    phaseService,
   );
   const submissionItemsRepository = new SubmissionItemsRepository(app);
   const submissionItemsService = new SubmissionItemsService(submissionItemsRepository, usersRepository);
@@ -267,6 +270,7 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
     submissionsRepository,
     submissionItemsRepository,
     notifications,
+    phaseService,
   );
 
   app.addHook("onSend", idempotencyOnSend(app));

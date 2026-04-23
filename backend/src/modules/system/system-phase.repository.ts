@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { PoolClient } from "pg";
-import type { ProjectPhase } from "./system-phase.types";
+import type { AcademicSemester, ProjectPhase } from "./system-phase.types";
 
 type DbExecutor = FastifyInstance["db"] | PoolClient;
 
@@ -48,7 +48,10 @@ export class SystemPhaseRepository {
         VALUES
           ('project_phase', 'submission', NOW()),
           ('submission_deadline', NULL, NOW()),
-          ('evaluation_deadline', NULL, NOW())
+          ('evaluation_deadline', NULL, NOW()),
+          ('academic_semester', 'first', NOW()),
+          ('academic_semester_changed_by', NULL, NOW()),
+          ('academic_semester_changed_at', NULL, NOW())
         ON CONFLICT (key) DO NOTHING
         `,
       );
@@ -91,6 +94,27 @@ export class SystemPhaseRepository {
       `,
       [key, value],
     );
+  }
+
+  async setSemesterWithAuditMeta(input: {
+    semester: AcademicSemester;
+    actorUserId: string;
+    changedAtIso: string;
+  }): Promise<void> {
+    await this.ensureSettingsTable();
+    const client = await this.app.db.connect();
+    try {
+      await client.query("BEGIN");
+      await this.upsertSetting(client, "academic_semester", input.semester);
+      await this.upsertSetting(client, "academic_semester_changed_at", input.changedAtIso);
+      await this.upsertSetting(client, "academic_semester_changed_by", input.actorUserId);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async setPhaseWithAuditMeta(input: {

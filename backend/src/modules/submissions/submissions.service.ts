@@ -6,6 +6,7 @@ import type { AntiFraudService } from "../validation/anti-fraud.service";
 import { assertStudentMaySubmitFromStatus } from "./submission-transitions";
 import { MAX_ACTIVE_SUBMISSIONS_PER_USER } from "./submission-quota";
 import type { UsersRepository } from "../users/users.repository";
+import type { SystemPhaseService } from "../system/system-phase.service";
 import type { SubmissionsRepository, SubmissionEntity } from "./submissions.repository";
 import type { CreateSubmissionBody } from "./submissions.schema";
 import { isAdminPanelOperator } from "../../utils/admin-roles";
@@ -17,6 +18,7 @@ export class SubmissionsService {
     private readonly antiFraud: AntiFraudService,
     private readonly audit: AuditLogRepository,
     private readonly users: UsersRepository,
+    private readonly phase: SystemPhaseService,
   ) {}
 
   async createSubmission(user: AuthUser, input: CreateSubmissionBody): Promise<SubmissionEntity> {
@@ -67,7 +69,8 @@ export class SubmissionsService {
       return this.repository.findAssignedToReviewer(user.id);
     }
 
-    return this.repository.findByUserId(user.id);
+    const activeSemester = await this.phase.getCurrentSemester();
+    return this.repository.findByUserIdForActiveSemester(user.id, activeSemester);
   }
 
   async getSubmissionById(user: AuthUser, submissionId: string): Promise<SubmissionEntity> {
@@ -96,10 +99,12 @@ export class SubmissionsService {
       );
     }
 
+    const semester = await this.phase.getCurrentSemester();
     const updated = await this.repository.updateStatus({
       id: submission.id,
       status: "submitted",
       submittedAt: true,
+      semester,
     });
 
     await this.audit.insert({
@@ -153,6 +158,12 @@ export class SubmissionsService {
     if (user.role === "student") {
       if (submission.userId !== user.id) {
         throw new ServiceError(403, "You can only access your own submissions");
+      }
+      if (submission.status !== "draft" && submission.semester) {
+        const active = await this.phase.getCurrentSemester();
+        if (submission.semester !== active) {
+          throw new ServiceError(403, "Submission is not available for the current semester");
+        }
       }
       return;
     }

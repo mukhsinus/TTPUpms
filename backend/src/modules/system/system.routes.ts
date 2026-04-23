@@ -5,11 +5,17 @@ import { requireAdmin } from "../../middleware/admin.middleware";
 import { failure, success } from "../../utils/http-response";
 import { ServiceError } from "../../utils/service-error";
 import { SystemPhaseService } from "./system-phase.service";
-import type { ProjectPhase } from "./system-phase.types";
+import type { AcademicSemester, ProjectPhase } from "./system-phase.types";
 
 const updatePhaseBodySchema = z
   .object({
     phase: z.enum(["submission", "evaluation"]),
+  })
+  .strict();
+
+const updateSemesterBodySchema = z
+  .object({
+    semester: z.enum(["first", "second"]),
   })
   .strict();
 
@@ -28,6 +34,7 @@ export async function systemRoutes(app: FastifyInstance): Promise<void> {
     reply.send(
       success({
         phase: state.phase,
+        semester: state.semester,
         submissionDeadline: state.submissionDeadline,
         evaluationDeadline: state.evaluationDeadline,
         lastChangedBy: state.lastChangedByUserId
@@ -38,6 +45,14 @@ export async function systemRoutes(app: FastifyInstance): Promise<void> {
             }
           : null,
         lastChangedAt: state.lastChangedAt,
+        lastSemesterChangedBy: state.lastSemesterChangedByUserId
+          ? {
+              userId: state.lastSemesterChangedByUserId,
+              name: state.lastSemesterChangedByName,
+              email: state.lastSemesterChangedByEmail,
+            }
+          : null,
+        lastSemesterChangedAt: state.lastSemesterChangedAt,
       }),
     );
   };
@@ -76,6 +91,7 @@ export async function systemRoutes(app: FastifyInstance): Promise<void> {
       reply.send(
         success({
           phase: state.phase,
+          semester: state.semester,
           submissionDeadline: state.submissionDeadline,
           evaluationDeadline: state.evaluationDeadline,
           lastChangedBy: state.lastChangedByUserId
@@ -86,6 +102,69 @@ export async function systemRoutes(app: FastifyInstance): Promise<void> {
               }
             : null,
           lastChangedAt: state.lastChangedAt,
+          lastSemesterChangedBy: state.lastSemesterChangedByUserId
+            ? {
+                userId: state.lastSemesterChangedByUserId,
+                name: state.lastSemesterChangedByName,
+                email: state.lastSemesterChangedByEmail,
+              }
+            : null,
+          lastSemesterChangedAt: state.lastSemesterChangedAt,
+        }),
+      );
+    },
+  );
+
+  app.patch(
+    "/admin/system/semester",
+    { preHandler: [authMiddleware, requireAdmin] },
+    async (request, reply) => {
+      if (!request.user) {
+        reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED", {}));
+        return;
+      }
+      const parsed = updateSemesterBodySchema.safeParse(request.body);
+      if (!parsed.success) {
+        reply.status(400).send(failure(parsed.error.issues[0]?.message ?? "Validation error", "VALIDATION_ERROR", {}));
+        return;
+      }
+      let state;
+      try {
+        state = await service.setSemester({
+          semester: parsed.data.semester as AcademicSemester,
+          actorUserId: request.user.id,
+          requestIp: request.ip,
+          userAgent: request.headers["user-agent"] ?? null,
+        });
+      } catch (error) {
+        if (error instanceof ServiceError) {
+          reply.status(error.statusCode).send(failure(error.message, error.clientCode ?? "VALIDATION_ERROR", {}));
+          return;
+        }
+        throw error;
+      }
+      reply.send(
+        success({
+          phase: state.phase,
+          semester: state.semester,
+          submissionDeadline: state.submissionDeadline,
+          evaluationDeadline: state.evaluationDeadline,
+          lastChangedBy: state.lastChangedByUserId
+            ? {
+                userId: state.lastChangedByUserId,
+                name: state.lastChangedByName,
+                email: state.lastChangedByEmail,
+              }
+            : null,
+          lastChangedAt: state.lastChangedAt,
+          lastSemesterChangedBy: state.lastSemesterChangedByUserId
+            ? {
+                userId: state.lastSemesterChangedByUserId,
+                name: state.lastSemesterChangedByName,
+                email: state.lastSemesterChangedByEmail,
+              }
+            : null,
+          lastSemesterChangedAt: state.lastSemesterChangedAt,
         }),
       );
     },
@@ -130,6 +209,7 @@ export async function systemRoutes(app: FastifyInstance): Promise<void> {
       reply.send(
         success({
           phase: state.phase,
+          semester: state.semester,
           submissionDeadline: state.submissionDeadline,
           evaluationDeadline: state.evaluationDeadline,
           lastChangedBy: state.lastChangedByUserId
@@ -140,6 +220,14 @@ export async function systemRoutes(app: FastifyInstance): Promise<void> {
               }
             : null,
           lastChangedAt: state.lastChangedAt,
+          lastSemesterChangedBy: state.lastSemesterChangedByUserId
+            ? {
+                userId: state.lastSemesterChangedByUserId,
+                name: state.lastSemesterChangedByName,
+                email: state.lastSemesterChangedByEmail,
+              }
+            : null,
+          lastSemesterChangedAt: state.lastSemesterChangedAt,
         }),
       );
     },

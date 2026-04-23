@@ -66,6 +66,9 @@ function formatActivityAction(action: AdminRecentActivityItem["action"], t: Dash
   if (action === "project_phase_changed") {
     return "Project phase changed";
   }
+  if (action === "academic_semester_changed") {
+    return "Academic semester changed";
+  }
   if (action === "project_deadlines_changed") {
     return "Project deadlines changed";
   }
@@ -403,6 +406,64 @@ export function DashboardPage(): ReactElement {
                 {t("switchToEvaluation")}
               </Button>
             </div>
+            <div className="academic-period-block">
+              <p className="muted">
+                <strong>{t("academicPeriodTitle")}</strong>
+              </p>
+              <p className="muted">
+                {t("academicPeriodCurrent")}: {systemPhase.semester === "second" ? t("semesterSecond") : t("semesterFirst")}
+              </p>
+              <p className="muted system-phase-last-change">
+                {t("academicPeriodLastChanged")}{" "}
+                {systemPhase.lastSemesterChangedBy?.name ??
+                  systemPhase.lastSemesterChangedBy?.email ??
+                  t("dateUnavailable")}{" "}
+                {t("academicPeriodAt")}{" "}
+                {systemPhase.lastSemesterChangedAt
+                  ? formatDateOnly(systemPhase.lastSemesterChangedAt, t)
+                  : t("dateUnavailable")}
+              </p>
+              <div className="system-phase-actions">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={phaseBusy || (systemPhase.semester ?? "first") === "first"}
+                  onClick={async () => {
+                    try {
+                      setPhaseBusy(true);
+                      const next = await api.setSystemSemester("first");
+                      setSystemPhase(next);
+                      toast.success(t("toastSemesterUpdated"));
+                    } catch (err) {
+                      toast.error(err instanceof Error ? err.message : t("toastRefreshFailed"));
+                    } finally {
+                      setPhaseBusy(false);
+                    }
+                  }}
+                >
+                  {t("semesterFirst")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={phaseBusy || (systemPhase.semester ?? "first") === "second"}
+                  onClick={async () => {
+                    try {
+                      setPhaseBusy(true);
+                      const next = await api.setSystemSemester("second");
+                      setSystemPhase(next);
+                      toast.success(t("toastSemesterUpdated"));
+                    } catch (err) {
+                      toast.error(err instanceof Error ? err.message : t("toastRefreshFailed"));
+                    } finally {
+                      setPhaseBusy(false);
+                    }
+                  }}
+                >
+                  {t("semesterSecond")}
+                </Button>
+              </div>
+            </div>
             <div className="system-phase-form-grid">
               <label className="muted system-phase-field">
                 {t("systemPhaseSubmissionDeadline")}
@@ -635,6 +696,64 @@ export function DashboardPage(): ReactElement {
                 >
                   {t("switchToEvaluation")}
                 </Button>
+              </div>
+              <div className="academic-period-block">
+                <p className="muted">
+                  <strong>{t("academicPeriodTitle")}</strong>
+                </p>
+                <p className="muted">
+                  {t("academicPeriodCurrent")}: {systemPhase.semester === "second" ? t("semesterSecond") : t("semesterFirst")}
+                </p>
+                <p className="muted system-phase-last-change">
+                  {t("academicPeriodLastChanged")}{" "}
+                  {systemPhase.lastSemesterChangedBy?.name ??
+                    systemPhase.lastSemesterChangedBy?.email ??
+                    t("dateUnavailable")}{" "}
+                  {t("academicPeriodAt")}{" "}
+                  {systemPhase.lastSemesterChangedAt
+                    ? formatDateOnly(systemPhase.lastSemesterChangedAt, t)
+                    : t("dateUnavailable")}
+                </p>
+                <div className="system-phase-actions">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={phaseBusy || (systemPhase.semester ?? "first") === "first"}
+                    onClick={async () => {
+                      try {
+                        setPhaseBusy(true);
+                        const next = await api.setSystemSemester("first");
+                        setSystemPhase(next);
+                        toast.success(t("toastSemesterUpdated"));
+                      } catch (err) {
+                        toast.error(err instanceof Error ? err.message : t("toastRefreshFailed"));
+                      } finally {
+                        setPhaseBusy(false);
+                      }
+                    }}
+                  >
+                    {t("semesterFirst")}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={phaseBusy || (systemPhase.semester ?? "first") === "second"}
+                    onClick={async () => {
+                      try {
+                        setPhaseBusy(true);
+                        const next = await api.setSystemSemester("second");
+                        setSystemPhase(next);
+                        toast.success(t("toastSemesterUpdated"));
+                      } catch (err) {
+                        toast.error(err instanceof Error ? err.message : t("toastRefreshFailed"));
+                      } finally {
+                        setPhaseBusy(false);
+                      }
+                    }}
+                  >
+                    {t("semesterSecond")}
+                  </Button>
+                </div>
               </div>
               <div className="system-phase-form-grid">
                 <label className="muted system-phase-field">
