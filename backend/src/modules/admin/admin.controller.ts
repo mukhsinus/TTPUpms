@@ -9,6 +9,9 @@ import {
   adminDashboardQuerySchema,
   adminRejectBodySchema,
   adminSearchSuggestionsQuerySchema,
+  adminSubmissionGroupItemsQuerySchema,
+  adminSubmissionGroupParamsSchema,
+  adminSubmissionGroupsQuerySchema,
   adminStudentIdParamsSchema,
   adminStudentDetailQuerySchema,
   adminSubmissionIdParamsSchema,
@@ -77,6 +80,37 @@ export class AdminController {
     try {
       const query = adminSubmissionsQuerySchema.parse(request.query);
       const data = await this.service.listSubmissions(query);
+      reply.header("Cache-Control", "private, max-age=5, stale-while-revalidate=20");
+      reply.send(success(data));
+    } catch (error) {
+      this.handleError(reply, error);
+    }
+  };
+
+  listSubmissionGroups = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!request.user) {
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
+      return;
+    }
+    try {
+      const query = adminSubmissionGroupsQuerySchema.parse(request.query);
+      const data = await this.service.listSubmissionGroups(query);
+      reply.header("Cache-Control", "private, max-age=5, stale-while-revalidate=20");
+      reply.send(success(data));
+    } catch (error) {
+      this.handleError(reply, error);
+    }
+  };
+
+  getSubmissionGroupDetail = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!request.user) {
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
+      return;
+    }
+    try {
+      const params = adminSubmissionGroupParamsSchema.parse(request.params);
+      const query = adminSubmissionGroupItemsQuerySchema.parse(request.query);
+      const data = await this.service.getSubmissionGroupDetail(params.groupKey, query);
       reply.header("Cache-Control", "private, max-age=5, stale-while-revalidate=20");
       reply.send(success(data));
     } catch (error) {

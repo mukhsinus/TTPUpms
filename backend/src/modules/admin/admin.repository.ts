@@ -30,6 +30,23 @@ export interface AdminSubmissionListRow {
   owner_name: string | null;
 }
 
+export interface AdminSubmissionGroupListRow {
+  group_key: string;
+  submissions_count: string;
+  latest_submission_id: string;
+  user_id: string;
+  student_id: string | null;
+  title: string;
+  db_status: string;
+  semester: string | null;
+  created_at: string;
+  submitted_at: string;
+  score: string | null;
+  category_code: string | null;
+  category_title: string | null;
+  owner_name: string | null;
+}
+
 export interface AdminSubmissionDetailRow {
   id: string;
   user_id: string;
@@ -375,6 +392,27 @@ function buildAdminStudentsFilters(query: AdminStudentsQuery): { whereSql: strin
   }
 
   return { whereSql: `WHERE ${conditions.join(" AND ")}`, params };
+}
+
+function buildStudentIdentityGroupRawSql(userAlias = "u"): string {
+  const phoneNormalized = `regexp_replace(COALESCE(to_jsonb(${userAlias})->>'phone', ''), '\\D+', '', 'g')`;
+  const nameNormalized = `lower(regexp_replace(COALESCE(NULLIF(BTRIM(${userAlias}.student_full_name), ''), NULLIF(BTRIM(${userAlias}.full_name), ''), ''), '\\s+', ' ', 'g'))`;
+  const facultyNormalized = `lower(regexp_replace(COALESCE(BTRIM(${userAlias}.faculty), ''), '\\s+', ' ', 'g'))`;
+  const studentIdNormalized = `upper(regexp_replace(COALESCE(${userAlias}.student_id, ''), '\\s+', '', 'g'))`;
+  return `
+    CASE
+      WHEN ${phoneNormalized} = ''
+        AND ${nameNormalized} = ''
+        AND ${facultyNormalized} = ''
+        AND ${studentIdNormalized} = ''
+      THEN 'uid:' || ${userAlias}.id::text
+      ELSE concat_ws('|', ${phoneNormalized}, ${nameNormalized}, ${facultyNormalized}, ${studentIdNormalized})
+    END
+  `;
+}
+
+function buildStudentIdentityGroupHashSql(userAlias = "u"): string {
+  return `md5(${buildStudentIdentityGroupRawSql(userAlias)})`;
 }
 
 export class AdminRepository {
@@ -987,6 +1025,245 @@ export class AdminRepository {
           ELSE NULL
         END DESC NULLS LAST,
         s.id ASC
+      LIMIT $${limitParam}::int OFFSET $${offsetParam}::int
+      `,
+      params,
+    );
+
+    return result.rows;
+  }
+
+  async countSubmissionGroups(query: AdminSubmissionsQuery, semesterDb: AdminSemesterDb): Promise<number> {
+    const { whereSql, params } = buildAdminSubmissionFilters(query, semesterDb);
+    const result = await this.app.db.query<{ c: string }>(
+      `
+      WITH filtered AS (
+        SELECT
+          s.id,
+          ${buildStudentIdentityGroupHashSql("u")} AS group_key
+        FROM public.submissions s
+        LEFT JOIN public.users u ON u.id = s.user_id
+        ${whereSql}
+      )
+      SELECT COUNT(DISTINCT group_key)::text AS c
+      FROM filtered
+      `,
+      params,
+    );
+    return Number(result.rows[0]?.c ?? "0");
+  }
+
+  async listSubmissionGroups(
+    query: AdminSubmissionsQuery,
+    semesterDb: AdminSemesterDb,
+  ): Promise<AdminSubmissionGroupListRow[]> {
+    const hasSemesterCol = await getSubmissionsSemesterColumnPresent(this.app);
+    const { whereSql, params } = buildAdminSubmissionFilters(query, semesterDb);
+    const offset = (query.page - 1) * query.pageSize;
+    const semesterSelect = hasSemesterCol ? `s.semester::text AS semester` : `NULL::text AS semester`;
+
+    const categoryDisplayTerms: string[] = [];
+    const pushDisplayTerm = (value: string | undefined): void => {
+      const term = value?.trim();
+      if (!term) {
+        return;
+      }
+      if (categoryDisplayTerms.some((entry) => entry.toLowerCase() === term.toLowerCase())) {
+        return;
+      }
+      categoryDisplayTerms.push(term);
+    };
+    pushDisplayTerm(query.category);
+    pushDisplayTerm(query.categoryKey);
+
+    let displayCategoryOrderSql = "si.created_at ASC";
+    if (categoryDisplayTerms.length > 0) {
+      const matchClauses: string[] = [];
+      for (const term of categoryDisplayTerms) {
+        const paramIdx = params.length + 1;
+        params.push(term);
+        matchClauses.push(`
+          c.code = $${paramIdx}
+          OR lower(c.name) = lower($${paramIdx})
+          OR lower(COALESCE(c.title, '')) = lower($${paramIdx})
+          OR lower(regexp_replace(c.name, '[_-]+', ' ', 'g')) = lower($${paramIdx})
+          OR lower(c.name) = lower(regexp_replace($${paramIdx}, '\\s+', '_', 'g'))
+        `);
+      }
+      displayCategoryOrderSql = `
+        CASE
+          WHEN ${matchClauses.map((clause) => `(${clause})`).join(" OR ")} THEN 0
+          ELSE 1
+        END ASC,
+        si.created_at ASC
+      `;
+    }
+
+    const limitParam = params.length + 1;
+    const offsetParam = params.length + 2;
+    params.push(query.pageSize, offset);
+
+    const result = await this.app.db.query<AdminSubmissionGroupListRow>(
+      `
+      WITH base AS (
+        SELECT
+          s.id,
+          s.user_id,
+          u.student_id,
+          s.title,
+          s.status::text AS db_status,
+          ${semesterSelect},
+          s.created_at,
+          COALESCE(s.submitted_at, s.created_at) AS submitted_at,
+          CASE
+            WHEN s.status IN ('approved', 'rejected') THEN s.total_score::text
+            ELSE NULL
+          END AS score,
+          first_item.category_code,
+          first_item.category_title,
+          COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), '')) AS owner_name,
+          ${buildStudentIdentityGroupHashSql("u")} AS group_key
+        FROM public.submissions s
+        LEFT JOIN public.users u ON u.id = s.user_id
+        LEFT JOIN LATERAL (
+          SELECT
+            c.code AS category_code,
+            COALESCE(
+              NULLIF(btrim(c.title::text), ''),
+              initcap(regexp_replace(c.name, '_', ' ', 'g'))
+            ) AS category_title
+          FROM public.submission_items si
+          LEFT JOIN public.categories c ON c.id = si.category_id
+          WHERE si.submission_id = s.id
+          ORDER BY ${displayCategoryOrderSql}
+          LIMIT 1
+        ) first_item ON true
+        ${whereSql}
+      ),
+      ranked AS (
+        SELECT
+          b.*,
+          COUNT(*) OVER (PARTITION BY b.group_key)::text AS submissions_count,
+          ROW_NUMBER() OVER (
+            PARTITION BY b.group_key
+            ORDER BY b.submitted_at DESC, b.created_at DESC, b.id DESC
+          ) AS rn
+        FROM base b
+      )
+      SELECT
+        r.group_key,
+        r.submissions_count,
+        r.id AS latest_submission_id,
+        r.user_id,
+        r.student_id,
+        r.title,
+        r.db_status,
+        r.semester,
+        r.created_at,
+        r.submitted_at,
+        r.score,
+        r.category_code,
+        r.category_title,
+        r.owner_name
+      FROM ranked r
+      WHERE r.rn = 1
+      ORDER BY
+        CASE
+          WHEN r.db_status IN ('submitted', 'review', 'needs_revision') THEN 0
+          WHEN r.db_status = 'approved' THEN 1
+          WHEN r.db_status = 'rejected' THEN 2
+          ELSE 3
+        END ASC,
+        r.submitted_at DESC,
+        r.created_at DESC,
+        latest_submission_id DESC
+      LIMIT $${limitParam}::int OFFSET $${offsetParam}::int
+      `,
+      params,
+    );
+
+    return result.rows;
+  }
+
+  async countSubmissionGroupItems(groupKey: string, semesterDb: AdminSemesterDb): Promise<number> {
+    const params: unknown[] = [groupKey];
+    let whereSql = `
+      WHERE s.status <> 'draft'
+        AND ${buildStudentIdentityGroupHashSql("u")} = $1
+    `;
+    if (semesterDb !== null) {
+      whereSql += ` AND s.semester = $2`;
+      params.push(semesterDb);
+    }
+    const result = await this.app.db.query<{ c: string }>(
+      `
+      SELECT COUNT(*)::text AS c
+      FROM public.submissions s
+      LEFT JOIN public.users u ON u.id = s.user_id
+      ${whereSql}
+      `,
+      params,
+    );
+    return Number(result.rows[0]?.c ?? "0");
+  }
+
+  async listSubmissionGroupItems(input: {
+    groupKey: string;
+    page: number;
+    pageSize: number;
+    semesterDb: AdminSemesterDb;
+  }): Promise<AdminSubmissionListRow[]> {
+    const hasSemesterCol = await getSubmissionsSemesterColumnPresent(this.app);
+    const semesterSelect = hasSemesterCol ? `s.semester::text AS semester` : `NULL::text AS semester`;
+    const offset = (input.page - 1) * input.pageSize;
+    const params: unknown[] = [input.groupKey];
+    let whereSql = `
+      WHERE s.status <> 'draft'
+        AND ${buildStudentIdentityGroupHashSql("u")} = $1
+    `;
+    if (input.semesterDb !== null) {
+      whereSql += ` AND s.semester = $2`;
+      params.push(input.semesterDb);
+    }
+    const limitParam = params.length + 1;
+    const offsetParam = params.length + 2;
+    params.push(input.pageSize, offset);
+
+    const result = await this.app.db.query<AdminSubmissionListRow>(
+      `
+      SELECT
+        s.id,
+        s.user_id,
+        u.student_id,
+        s.title,
+        s.status::text AS db_status,
+        ${semesterSelect},
+        s.created_at,
+        COALESCE(s.submitted_at, s.created_at) AS submitted_at,
+        CASE
+          WHEN s.status IN ('approved', 'rejected') THEN s.total_score::text
+          ELSE NULL
+        END AS score,
+        first_item.category_code,
+        first_item.category_title,
+        COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), '')) AS owner_name
+      FROM public.submissions s
+      LEFT JOIN public.users u ON u.id = s.user_id
+      LEFT JOIN LATERAL (
+        SELECT
+          c.code AS category_code,
+          COALESCE(
+            NULLIF(btrim(c.title::text), ''),
+            initcap(regexp_replace(c.name, '_', ' ', 'g'))
+          ) AS category_title
+        FROM public.submission_items si
+        LEFT JOIN public.categories c ON c.id = si.category_id
+        WHERE si.submission_id = s.id
+        ORDER BY si.created_at ASC
+        LIMIT 1
+      ) first_item ON true
+      ${whereSql}
+      ORDER BY COALESCE(s.submitted_at, s.created_at) DESC, s.created_at DESC, s.id DESC
       LIMIT $${limitParam}::int OFFSET $${offsetParam}::int
       `,
       params,

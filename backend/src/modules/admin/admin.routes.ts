@@ -98,6 +98,18 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     );
 
     r.get(
+      "/submissions/groups",
+      { config: { rateLimit: { max: 120, timeWindow: "1 minute" } } },
+      moderationController.listSubmissionGroups,
+    );
+
+    r.get(
+      "/submissions/groups/:groupKey",
+      { config: { rateLimit: { max: 120, timeWindow: "1 minute" } } },
+      moderationController.getSubmissionGroupDetail,
+    );
+
+    r.get(
       "/submissions/search-suggestions",
       { config: { rateLimit: { max: 120, timeWindow: "1 minute" } } },
       moderationController.listSearchSuggestions,

@@ -19,6 +19,7 @@ import type {
   AdminSearchSuggestionKind,
   AdminSearchSuggestionRow,
   AdminSubmissionDetailRow,
+  AdminSubmissionGroupListRow,
   AdminSubmissionListRow,
   AdminStudentOverviewRow,
   AdminStudentDetailRow,
@@ -31,6 +32,8 @@ import type {
   AdminDashboardQuery,
   AdminModerationStatus,
   AdminRejectBody,
+  AdminSubmissionGroupItemsQuery,
+  AdminSubmissionGroupsQuery,
   AdminSemesterScope,
   AdminSubmissionsQuery,
   AdminStudentsQuery,
@@ -380,6 +383,61 @@ export class AdminService {
     return data;
   }
 
+  async listSubmissionGroups(query: AdminSubmissionGroupsQuery): Promise<{
+    items: Array<ReturnType<AdminService["mapGroupListRow"]>>;
+    total: number;
+    pendingCount: number;
+    page: number;
+    pageSize: number;
+  }> {
+    const semesterDb = await this.resolveAdminSemesterDb(query.semester);
+    const pendingQuery: AdminSubmissionsQuery | null =
+      query.status && query.status !== "pending" ? null : { ...query, status: "pending" };
+    const [total, rows, pendingCount] = await Promise.all([
+      this.repository.countSubmissionGroups(query, semesterDb),
+      this.repository.listSubmissionGroups(query, semesterDb),
+      pendingQuery ? this.repository.countSubmissions(pendingQuery, semesterDb) : Promise.resolve(0),
+    ]);
+
+    return {
+      items: rows.map((r) => this.mapGroupListRow(r)),
+      total,
+      pendingCount,
+      page: query.page,
+      pageSize: query.pageSize,
+    };
+  }
+
+  async getSubmissionGroupDetail(
+    groupKey: string,
+    query: AdminSubmissionGroupItemsQuery,
+  ): Promise<{
+    groupKey: string;
+    items: ReturnType<AdminService["mapListRow"]>[];
+    total: number;
+    page: number;
+    pageSize: number;
+  }> {
+    const semesterDb = await this.resolveAdminSemesterDb(query.semester);
+    const [total, rows] = await Promise.all([
+      this.repository.countSubmissionGroupItems(groupKey, semesterDb),
+      this.repository.listSubmissionGroupItems({
+        groupKey,
+        page: query.page,
+        pageSize: query.pageSize,
+        semesterDb,
+      }),
+    ]);
+
+    return {
+      groupKey,
+      items: rows.map((row) => this.mapListRow(row)),
+      total,
+      page: query.page,
+      pageSize: query.pageSize,
+    };
+  }
+
   async listSearchSuggestions(query: { q: string; limit: number }): Promise<
     Array<{
       kind: AdminSearchSuggestionKind;
@@ -583,6 +641,28 @@ export class AdminService {
       submittedAt: row.submitted_at,
       score: numOrNull(row.score),
       ownerName: row.owner_name,
+    };
+  }
+
+  private mapGroupListRow(row: AdminSubmissionGroupListRow) {
+    return {
+      groupKey: row.group_key,
+      submissionsCount: Number(row.submissions_count ?? "0"),
+      latestSubmissionId: row.latest_submission_id,
+      ...this.mapListRow({
+        id: row.latest_submission_id,
+        user_id: row.user_id,
+        student_id: row.student_id,
+        title: row.title,
+        db_status: row.db_status,
+        semester: row.semester,
+        created_at: row.created_at,
+        submitted_at: row.submitted_at,
+        score: row.score,
+        category_code: row.category_code,
+        category_title: row.category_title,
+        owner_name: row.owner_name,
+      }),
     };
   }
 

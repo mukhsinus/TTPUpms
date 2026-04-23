@@ -77,6 +77,18 @@ export const adminSubmissionsQuerySchema = z.object({
   semester: adminSemesterScopeSchema.default("active"),
 });
 
+export const adminSubmissionGroupsQuerySchema = adminSubmissionsQuerySchema;
+
+export const adminSubmissionGroupParamsSchema = z.object({
+  groupKey: z.string().trim().regex(/^[a-f0-9]{32}$/i, "Invalid group key"),
+});
+
+export const adminSubmissionGroupItemsQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(10),
+  semester: adminSemesterScopeSchema.default("active"),
+});
+
 export const adminApproveBodySchema = z
   .object({
     score: z.number().min(0).optional(),
@@ -93,6 +105,9 @@ export type AdminSemesterScope = z.infer<typeof adminSemesterScopeSchema>;
 export type AdminModerationStatus = z.infer<typeof adminModerationStatusSchema>;
 export type AdminDashboardQuery = z.infer<typeof adminDashboardQuerySchema>;
 export type AdminSubmissionsQuery = z.infer<typeof adminSubmissionsQuerySchema>;
+export type AdminSubmissionGroupsQuery = z.infer<typeof adminSubmissionGroupsQuerySchema>;
+export type AdminSubmissionGroupParams = z.infer<typeof adminSubmissionGroupParamsSchema>;
+export type AdminSubmissionGroupItemsQuery = z.infer<typeof adminSubmissionGroupItemsQuerySchema>;
 export type AdminApproveBody = z.infer<typeof adminApproveBodySchema>;
 export type AdminRejectBody = z.infer<typeof adminRejectBodySchema>;
 export type AdminSearchSuggestionsQuery = z.infer<typeof adminSearchSuggestionsQuerySchema>;

@@ -8,8 +8,8 @@ import {
   type AdminModerationStatus,
   type AdminSearchSuggestion,
   type AdminSemesterScope,
+  type AdminSubmissionGroupListItem,
   type AdminStudentOverviewPayload,
-  type AdminSubmissionListItem,
 } from "../lib/api";
 import i18nInstance from "../i18n";
 import { EmptyState } from "../components/ui/EmptyState";
@@ -55,7 +55,7 @@ function humanizeCategoryLabel(raw: string | null | undefined): string {
   return normalized.replace(/\b\w/g, (ch) => ch.toUpperCase());
 }
 
-function categoryCellLabel(row: AdminSubmissionListItem, t: SubT): string {
+function categoryCellLabel(row: AdminSubmissionGroupListItem, t: SubT): string {
   const formatCategory = (value: string | null | undefined): string => {
     const source = value?.trim();
     if (!source) {
@@ -74,7 +74,7 @@ function categoryCellLabel(row: AdminSubmissionListItem, t: SubT): string {
   return fromCode || t("emDash");
 }
 
-function formatUser(row: AdminSubmissionListItem, t: SubT): string {
+function formatUser(row: AdminSubmissionGroupListItem, t: SubT): string {
   const name = row.ownerName?.trim();
   if (name) {
     return name;
@@ -120,7 +120,7 @@ export function AdminSubmissionsPage(): ReactElement {
     () => new URLSearchParams(location.search).get("search")?.trim() ?? "",
     [location.search],
   );
-  const [items, setItems] = useState<AdminSubmissionListItem[]>([]);
+  const [items, setItems] = useState<AdminSubmissionGroupListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [pendingCount, setPendingCount] = useState(0);
   const [page, setPage] = useState(1);
@@ -253,7 +253,7 @@ export function AdminSubmissionsPage(): ReactElement {
       }
       setError(null);
       const selectedCategory = categoryOptions.find((option) => option.value === category);
-      const data = await api.getAdminSubmissions({
+      const data = await api.getAdminSubmissionGroups({
         page,
         pageSize: PAGE_SIZE,
         status: status || undefined,
@@ -479,9 +479,9 @@ export function AdminSubmissionsPage(): ReactElement {
               <tbody>
                 {items.map((row) => (
                   <tr
-                    key={row.id}
+                    key={row.groupKey}
                     className="clickable-row"
-                    onClick={() => navigate(`/submissions/${row.id}`)}
+                    onClick={() => navigate(`/submissions/groups/${row.groupKey}`)}
                   >
                     <td>
                       <div className="admin-student-cell">
@@ -490,6 +490,7 @@ export function AdminSubmissionsPage(): ReactElement {
                         </div>
                         <div className="admin-student-info">
                           <strong>{formatUser(row, t)}</strong>
+                          <span className="muted">{row.submissionsCount} submissions</span>
                         </div>
                       </div>
                     </td>
@@ -513,7 +514,7 @@ export function AdminSubmissionsPage(): ReactElement {
                         className="admin-review-btn"
                         onClick={(event) => {
                           event.stopPropagation();
-                          navigate(`/submissions/${row.id}`);
+                          navigate(`/submissions/groups/${row.groupKey}`);
                         }}
                       >
                         {t("review")}

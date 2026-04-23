@@ -31,6 +31,10 @@ const AdminSubmissionDetailPage = lazy(async () => {
   const m = await import("./pages/AdminSubmissionDetailPage");
   return { default: m.AdminSubmissionDetailPage };
 });
+const AdminSubmissionGroupPage = lazy(async () => {
+  const m = await import("./pages/AdminSubmissionGroupPage");
+  return { default: m.AdminSubmissionGroupPage };
+});
 const SubmissionsPage = lazy(async () => {
   const m = await import("./pages/SubmissionsPage");
   return { default: m.SubmissionsPage };
@@ -221,6 +225,14 @@ export default function App(): ReactElement {
               }
             />
             <Route path="/submissions/:submissionId" element={<SubmissionDetailEntry />} />
+            <Route
+              path="/submissions/groups/:groupKey"
+              element={
+                <RoleGuard allow={["admin", "superadmin", "reviewer"]} redirectTo="/dashboard">
+                  <AdminSubmissionGroupPage />
+                </RoleGuard>
+              }
+            />
             <Route
               path="/profile"
               element={

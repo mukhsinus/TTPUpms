@@ -60,13 +60,34 @@ function prettifySnake(s: string): string {
   return s.replace(/_/g, " ").replace(/\s+/g, " ").trim();
 }
 
-function formatSubmissionSuccessSummary(item: {
-  title: string;
-  category: string;
-  description: string | null;
-  link: string | null;
-  hasFile: boolean;
-}): string {
+function formatSubmissionSuccessSummary(
+  items: Array<{
+    title: string;
+    category: string;
+    description: string | null;
+    link: string | null;
+    hasFile: boolean;
+  }>,
+): string {
+  if (items.length === 0) {
+    return "Your achievement has been submitted and is under review.";
+  }
+
+  if (items.length > 1) {
+    const lines = [
+      "Your achievements have been submitted and are under review.",
+      "",
+      "Summary:",
+      "",
+      ...items.map((item, index) => {
+        const catLine = item.category?.includes("_") ? prettifySnake(item.category) : item.category;
+        return `${index + 1}. ${item.title}\n   Category: ${catLine}`;
+      }),
+    ];
+    return lines.join("\n");
+  }
+
+  const item = items[0]!;
   const catLine = item.category?.includes("_") ? prettifySnake(item.category) : item.category;
   const lines = [
     "Your achievement has been submitted and is under review.",
@@ -723,11 +744,8 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
             })),
           }),
         );
-        const first = submitted.items[0];
         await ctx.reply(
-          first
-            ? formatSubmissionSuccessSummary(first)
-            : "Your achievement has been submitted and is under review.",
+          formatSubmissionSuccessSummary(submitted.items),
           mainMenuKeyboard(),
         );
       } catch (e) {

@@ -53,6 +53,22 @@ let adminSubmissionsCache = new Map<
   }
 >();
 let adminSubmissionsInFlight = new Map<string, Promise<AdminSubmissionsListPayload>>();
+let adminSubmissionGroupsCache = new Map<
+  string,
+  {
+    expiresAt: number;
+    data: AdminSubmissionGroupsListPayload;
+  }
+>();
+let adminSubmissionGroupsInFlight = new Map<string, Promise<AdminSubmissionGroupsListPayload>>();
+let adminSubmissionGroupDetailCache = new Map<
+  string,
+  {
+    expiresAt: number;
+    data: AdminSubmissionGroupDetailPayload;
+  }
+>();
+let adminSubmissionGroupDetailInFlight = new Map<string, Promise<AdminSubmissionGroupDetailPayload>>();
 let adminSubmissionDetailCache = new Map<
   string,
   {
@@ -193,6 +209,28 @@ export interface AdminSubmissionsListPayload {
   items: AdminSubmissionListItem[];
   total: number;
   pendingCount: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface AdminSubmissionGroupListItem extends AdminSubmissionListItem {
+  groupKey: string;
+  submissionsCount: number;
+  latestSubmissionId: string;
+}
+
+export interface AdminSubmissionGroupsListPayload {
+  items: AdminSubmissionGroupListItem[];
+  total: number;
+  pendingCount: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface AdminSubmissionGroupDetailPayload {
+  groupKey: string;
+  items: AdminSubmissionListItem[];
+  total: number;
   page: number;
   pageSize: number;
 }
@@ -775,6 +813,19 @@ function keyFromSubmissionsParams(params: {
   });
 }
 
+function clearAdminSubmissionViewsCache(): void {
+  adminSubmissionsCache.clear();
+  adminSubmissionsInFlight.clear();
+  adminSubmissionGroupsCache.clear();
+  adminSubmissionGroupsInFlight.clear();
+  adminSubmissionGroupDetailCache.clear();
+  adminSubmissionGroupDetailInFlight.clear();
+  adminSubmissionDetailCache.clear();
+  adminSubmissionDetailInFlight.clear();
+  adminDashboardCache = null;
+  adminDashboardInFlight = null;
+}
+
 function getStoredServerRole(): AppRole | null {
   try {
     const raw = localStorage.getItem(AUTH_ROLE_KEY);
@@ -944,10 +995,7 @@ export const api = {
     adminDashboardInFlight = null;
     adminProfileCache = null;
     adminProfileInFlight = null;
-    adminSubmissionsCache.clear();
-    adminSubmissionsInFlight.clear();
-    adminSubmissionDetailCache.clear();
-    adminSubmissionDetailInFlight.clear();
+    clearAdminSubmissionViewsCache();
     adminSearchSuggestionsCache.clear();
     adminStudentsCache.clear();
     adminStudentsInFlight.clear();
@@ -1041,10 +1089,7 @@ export const api = {
     adminDashboardInFlight = null;
     adminProfileCache = null;
     adminProfileInFlight = null;
-    adminSubmissionsCache.clear();
-    adminSubmissionsInFlight.clear();
-    adminSubmissionDetailCache.clear();
-    adminSubmissionDetailInFlight.clear();
+    clearAdminSubmissionViewsCache();
     adminSearchSuggestionsCache.clear();
     try {
       await this.syncSessionRoleFromServer({
@@ -1171,14 +1216,11 @@ export const api = {
     reviewer_comment?: string;
   }): Promise<ReviewSubmissionItemResponse> {
     return this.patchReviewItem(input).then((data) => {
-      adminSubmissionsCache.clear();
-      adminSubmissionsInFlight.clear();
+      clearAdminSubmissionViewsCache();
       if (data.submissionId) {
         adminSubmissionDetailCache.delete(data.submissionId);
         adminSubmissionDetailInFlight.delete(data.submissionId);
       }
-      adminDashboardCache = null;
-      adminDashboardInFlight = null;
       return data;
     });
   },
@@ -1192,12 +1234,9 @@ export const api = {
       },
       body: JSON.stringify({}),
     }).then((data) => {
+      clearAdminSubmissionViewsCache();
       adminSubmissionDetailCache.delete(submissionId);
       adminSubmissionDetailInFlight.delete(submissionId);
-      adminSubmissionsCache.clear();
-      adminSubmissionsInFlight.clear();
-      adminDashboardCache = null;
-      adminDashboardInFlight = null;
       return data;
     });
   },
@@ -1218,12 +1257,9 @@ export const api = {
         comment: input.comment,
       }),
     }).then((data) => {
+      clearAdminSubmissionViewsCache();
       adminSubmissionDetailCache.delete(input.submissionId);
       adminSubmissionDetailInFlight.delete(input.submissionId);
-      adminSubmissionsCache.clear();
-      adminSubmissionsInFlight.clear();
-      adminDashboardCache = null;
-      adminDashboardInFlight = null;
       return data;
     });
   },
@@ -1240,12 +1276,9 @@ export const api = {
         reason: input.reason,
       }),
     }).then((data) => {
+      clearAdminSubmissionViewsCache();
       adminSubmissionDetailCache.delete(input.submissionId);
       adminSubmissionDetailInFlight.delete(input.submissionId);
-      adminSubmissionsCache.clear();
-      adminSubmissionsInFlight.clear();
-      adminDashboardCache = null;
-      adminDashboardInFlight = null;
       return data;
     });
   },
@@ -1258,12 +1291,9 @@ export const api = {
         reason: input.reason,
       }),
     }).then((data) => {
+      clearAdminSubmissionViewsCache();
       adminSubmissionDetailCache.delete(input.submissionId);
       adminSubmissionDetailInFlight.delete(input.submissionId);
-      adminSubmissionsCache.clear();
-      adminSubmissionsInFlight.clear();
-      adminDashboardCache = null;
-      adminDashboardInFlight = null;
       return data;
     });
   },
@@ -1316,8 +1346,7 @@ export const api = {
     }).then((data) => {
       systemPhaseCache = null;
       systemPhaseInFlight = null;
-      adminSubmissionsCache.clear();
-      adminSubmissionsInFlight.clear();
+      clearAdminSubmissionViewsCache();
       adminStudentsCache.clear();
       adminStudentsInFlight.clear();
       return normalizeSystemPhasePayload(data);
@@ -1767,6 +1796,127 @@ export const api = {
     return promise;
   },
 
+  getAdminSubmissionGroups(params: {
+    page?: number;
+    pageSize?: number;
+    status?: AdminModerationStatus;
+    category?: string;
+    categoryKey?: string;
+    search?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    semester?: AdminSemesterScope;
+    forceRefresh?: boolean;
+  }): Promise<AdminSubmissionGroupsListPayload> {
+    const cacheKey = keyFromSubmissionsParams(params);
+    const now = Date.now();
+    const cached = adminSubmissionGroupsCache.get(cacheKey);
+    if (!params.forceRefresh && cached && cached.expiresAt > now) {
+      return Promise.resolve(cached.data);
+    }
+    if (!params.forceRefresh) {
+      const inflight = adminSubmissionGroupsInFlight.get(cacheKey);
+      if (inflight) {
+        return inflight;
+      }
+    }
+
+    const q = new URLSearchParams();
+    if (params.page !== undefined) {
+      q.set("page", String(params.page));
+    }
+    if (params.pageSize !== undefined) {
+      q.set("pageSize", String(params.pageSize));
+    }
+    if (params.status) {
+      q.set("status", params.status);
+    }
+    if (params.category) {
+      q.set("category", params.category);
+    }
+    if (params.categoryKey) {
+      q.set("categoryKey", params.categoryKey);
+    }
+    if (params.search?.trim()) {
+      q.set("search", params.search.trim());
+    }
+    if (params.dateFrom) {
+      q.set("dateFrom", params.dateFrom);
+    }
+    if (params.dateTo) {
+      q.set("dateTo", params.dateTo);
+    }
+    q.set("semester", params.semester ?? "active");
+    if (params.forceRefresh) {
+      q.set("forceRefresh", "true");
+    }
+    const suffix = q.toString() ? `?${q.toString()}` : "";
+    const promise = request<AdminSubmissionGroupsListPayload>(`/api/admin/submissions/groups${suffix}`)
+      .then((data) => {
+        adminSubmissionGroupsCache.set(cacheKey, {
+          expiresAt: Date.now() + ADMIN_LIST_CACHE_TTL_MS,
+          data,
+        });
+        return data;
+      })
+      .finally(() => {
+        adminSubmissionGroupsInFlight.delete(cacheKey);
+      });
+    if (!params.forceRefresh) {
+      adminSubmissionGroupsInFlight.set(cacheKey, promise);
+    }
+    return promise;
+  },
+
+  getAdminSubmissionGroupDetail(params: {
+    groupKey: string;
+    page?: number;
+    pageSize?: number;
+    semester?: AdminSemesterScope;
+    forceRefresh?: boolean;
+  }): Promise<AdminSubmissionGroupDetailPayload> {
+    const key = JSON.stringify({
+      groupKey: params.groupKey,
+      page: params.page ?? 1,
+      pageSize: params.pageSize ?? 10,
+      semester: params.semester ?? "active",
+    });
+    const now = Date.now();
+    const cached = adminSubmissionGroupDetailCache.get(key);
+    if (!params.forceRefresh && cached && cached.expiresAt > now) {
+      return Promise.resolve(cached.data);
+    }
+    if (!params.forceRefresh) {
+      const inflight = adminSubmissionGroupDetailInFlight.get(key);
+      if (inflight) {
+        return inflight;
+      }
+    }
+
+    const q = new URLSearchParams({
+      page: String(params.page ?? 1),
+      pageSize: String(params.pageSize ?? 10),
+      semester: params.semester ?? "active",
+    });
+    const promise = request<AdminSubmissionGroupDetailPayload>(
+      `/api/admin/submissions/groups/${params.groupKey}?${q.toString()}`,
+    )
+      .then((data) => {
+        adminSubmissionGroupDetailCache.set(key, {
+          expiresAt: Date.now() + ADMIN_DETAIL_CACHE_TTL_MS,
+          data,
+        });
+        return data;
+      })
+      .finally(() => {
+        adminSubmissionGroupDetailInFlight.delete(key);
+      });
+    if (!params.forceRefresh) {
+      adminSubmissionGroupDetailInFlight.set(key, promise);
+    }
+    return promise;
+  },
+
   getAdminSearchSuggestions(query: string, limit = 8): Promise<AdminSearchSuggestion[]> {
     const q = query.trim();
     if (!q) {
@@ -1890,12 +2040,7 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(body),
     }).then((data) => {
-      adminSubmissionsCache.clear();
-      adminSubmissionsInFlight.clear();
-      adminSubmissionDetailCache.clear();
-      adminSubmissionDetailInFlight.clear();
-      adminDashboardCache = null;
-      adminDashboardInFlight = null;
+      clearAdminSubmissionViewsCache();
       adminStudentsCache.clear();
       adminStudentsInFlight.clear();
       return data;
@@ -1937,12 +2082,9 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }).then((data) => {
+      clearAdminSubmissionViewsCache();
       adminSubmissionDetailCache.delete(submissionId);
       adminSubmissionDetailInFlight.delete(submissionId);
-      adminSubmissionsCache.clear();
-      adminSubmissionsInFlight.clear();
-      adminDashboardCache = null;
-      adminDashboardInFlight = null;
       adminProfileCache = null;
       adminProfileInFlight = null;
       return data;
@@ -1957,12 +2099,9 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }).then((data) => {
+      clearAdminSubmissionViewsCache();
       adminSubmissionDetailCache.delete(submissionId);
       adminSubmissionDetailInFlight.delete(submissionId);
-      adminSubmissionsCache.clear();
-      adminSubmissionsInFlight.clear();
-      adminDashboardCache = null;
-      adminDashboardInFlight = null;
       adminProfileCache = null;
       adminProfileInFlight = null;
       return data;
