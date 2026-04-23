@@ -280,7 +280,7 @@ async function handleMe(
 
   const role = toRole(roleText) ?? request.user.role;
 
-  if (adminPanelLogin && role === "admin") {
+  if (role === "admin") {
     await ensureAdminSecurityTables(app);
     const regDecision = await pool.query<{ status: "pending" | "approved" | "rejected" }>(
       `
