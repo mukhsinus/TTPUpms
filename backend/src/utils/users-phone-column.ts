@@ -5,6 +5,21 @@ let phoneColumnKnownPresent: boolean | null = null;
 let warnedMissing = false;
 
 /**
+ * Idempotent DDL so remote DBs work even when `supabase/migrations` was not applied.
+ * Matches `20260622120000_users_phone_nullable.sql`.
+ */
+export async function ensureUsersPhoneColumn(app: FastifyInstance): Promise<void> {
+  try {
+    await app.db.query(`ALTER TABLE public.users ADD COLUMN IF NOT EXISTS phone text`);
+    phoneColumnKnownPresent = true;
+    warnedMissing = false;
+    app.log.info("Ensured public.users.phone column exists");
+  } catch (err) {
+    app.log.warn({ err }, "Could not ensure users.phone column at startup; phone writes stay conditional");
+  }
+}
+
+/**
  * Whether `public.users.phone` exists (Telegram onboarding / profile).
  * When the column is confirmed present, result is cached for the process lifetime.
  */

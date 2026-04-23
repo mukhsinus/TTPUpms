@@ -2,6 +2,7 @@ import { buildApp } from "./app";
 import { env } from "./config/env";
 import { SubmissionItemsRepository } from "./modules/submission-items/submission-items.repository";
 import { SystemPhaseService } from "./modules/system/system-phase.service";
+import { ensureUsersPhoneColumn } from "./utils/users-phone-column";
 
 /**
  * Upload limits: `buildApp` sets Fastify `bodyLimit` from `BODY_LIMIT_BYTES` and registers
@@ -16,6 +17,8 @@ async function startServer(): Promise<void> {
       app.log.error({ err }, "Automatic project phase transition failed");
     });
   }, 60_000);
+
+  await ensureUsersPhoneColumn(app);
 
   try {
     const submissionItemsRepo = new SubmissionItemsRepository(app);
