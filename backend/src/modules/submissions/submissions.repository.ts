@@ -287,7 +287,7 @@ export class SubmissionsRepository {
         `
         UPDATE submissions
         SET
-          status = $2,
+          status = $2::public.submission_status,
           submitted_at = CASE WHEN $3::boolean THEN NOW() ELSE submitted_at END,
           updated_at = NOW()
         WHERE id = $1
@@ -305,10 +305,12 @@ export class SubmissionsRepository {
       `
       UPDATE submissions
       SET
-        status = $2,
+        status = $2::public.submission_status,
         submitted_at = CASE WHEN $3::boolean THEN NOW() ELSE submitted_at END,
         semester = CASE
-          WHEN $2::text = 'submitted' AND $4::text IS NOT NULL THEN $4::text
+          WHEN $2::public.submission_status = 'submitted'::public.submission_status
+            AND $4::text IS NOT NULL
+          THEN $4::text
           ELSE semester
         END,
         updated_at = NOW()
