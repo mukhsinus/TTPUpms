@@ -280,44 +280,42 @@ async function handleMe(
 
   const role = toRole(roleText) ?? request.user.role;
 
-  if (role === "admin") {
-    await ensureAdminSecurityTables(app);
-    const regDecision = await pool.query<{ status: "pending" | "approved" | "rejected" }>(
-      `
-      SELECT status::text AS status
-      FROM public.admin_security_events
-      WHERE admin_id = $1::uuid
-        AND type = 'admin_registration'
-      ORDER BY created_at DESC
-      LIMIT 1
-      `,
-      [id],
-    );
-    const latestRegistrationStatus = regDecision.rows[0]?.status;
-    if (latestRegistrationStatus === "pending") {
-      reply
-        .status(403)
-        .send(
-          failure(
-            "Your admin account is pending superadmin approval. You can sign in after confirmation.",
-            "ADMIN_APPROVAL_PENDING",
-            {},
-          ),
-        );
-      return;
-    }
-    if (latestRegistrationStatus === "rejected") {
-      reply
-        .status(403)
-        .send(
-          failure(
-            "Access denied. This admin account was rejected by superadmin.",
-            "ADMIN_APPROVAL_REJECTED",
-            {},
-          ),
-        );
-      return;
-    }
+  await ensureAdminSecurityTables(app);
+  const regDecision = await pool.query<{ status: "pending" | "approved" | "rejected" }>(
+    `
+    SELECT status::text AS status
+    FROM public.admin_security_events
+    WHERE admin_id = $1::uuid
+      AND type = 'admin_registration'
+    ORDER BY created_at DESC
+    LIMIT 1
+    `,
+    [id],
+  );
+  const latestRegistrationStatus = regDecision.rows[0]?.status;
+  if (latestRegistrationStatus === "pending") {
+    reply
+      .status(403)
+      .send(
+        failure(
+          "Your admin account is pending superadmin approval. You can sign in after confirmation.",
+          "ADMIN_APPROVAL_PENDING",
+          {},
+        ),
+      );
+    return;
+  }
+  if (latestRegistrationStatus === "rejected") {
+    reply
+      .status(403)
+      .send(
+        failure(
+          "Access denied. This admin account was rejected by superadmin.",
+          "ADMIN_APPROVAL_REJECTED",
+          {},
+        ),
+      );
+    return;
   }
 
   if (adminPanelLogin && (role === "admin" || role === "superadmin")) {
