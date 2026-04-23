@@ -32,7 +32,7 @@ export interface PendingSubmissionItem {
   categoryId: string;
   subcategorySlug: string | null;
   title: string;
-  description: string;
+  description: string | null;
   proofFileUrl: string;
   externalLink: string | null;
   metadata?: Record<string, string | number | boolean>;
@@ -55,7 +55,7 @@ export interface SubmitFlowState extends Scenes.WizardSessionData {
   /** e.g. olympiads: { place: 1 | 2 | 3 } */
   itemMetadata?: Record<string, string | number | boolean>;
   title?: string;
-  description?: string;
+  description?: string | null;
   proofFileUrl?: string;
   /** Human-readable lines for final preview (one block per item). */
   previewBlocks?: string[];

@@ -424,7 +424,7 @@ export function AdminSubmissionDetailPage(): ReactElement {
                       <p className="admin-achievement-info-label">Student description</p>
                     </div>
                     <p className="admin-achievement-info-value admin-achievement-description-value">
-                      {item.description?.trim() ? item.description : "—"}
+                      {item.description?.trim() ? item.description : ""}
                     </p>
                   </div>
                 </div>

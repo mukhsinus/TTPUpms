@@ -356,7 +356,7 @@ export class UpmsService {
     categoryId: string;
     subcategory: string | null;
     title: string;
-    description: string;
+    description: string | null;
     proofFileUrl: string;
     externalLink?: string | null;
     metadata?: Record<string, string | number | boolean>;
@@ -366,7 +366,7 @@ export class UpmsService {
       submission_id: input.submissionId,
       category_id: input.categoryId,
       title: input.title,
-      description: input.description,
+      description: input.description ?? null,
       proof_file_url: input.proofFileUrl,
       external_link: input.externalLink ?? null,
     };
@@ -396,7 +396,7 @@ export class UpmsService {
       categoryId: string;
       subcategorySlug: string | null;
       title: string;
-      description: string;
+      description: string | null;
       proofFileUrl: string;
       externalLink: string | null;
       metadata?: Record<string, string | number | boolean>;
@@ -410,7 +410,7 @@ export class UpmsService {
           category_id: it.categoryId,
           subcategory: it.subcategorySlug,
           title: it.title,
-          description: it.description,
+          description: it.description ?? null,
           proof_file_url: it.proofFileUrl,
           external_link: it.externalLink,
           metadata: it.metadata,

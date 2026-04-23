@@ -84,7 +84,7 @@ export interface BotCompleteSubmissionItemInput {
   categoryId: string;
   subcategory: string | null;
   title: string;
-  description: string;
+  description: string | null;
   proofFileUrl: string;
   externalLink?: string | null;
   metadata?: Record<string, string | number | boolean>;
@@ -691,7 +691,7 @@ export class BotApiService {
     categoryId: string;
     subcategory: string | null;
     title: string;
-    description: string;
+    description: string | null;
     proofFileUrl: string;
     externalLink?: string | null;
     metadata?: Record<string, string | number | boolean>;
@@ -710,7 +710,7 @@ export class BotApiService {
         category_id: input.categoryId,
         ...(slug ? { subcategory: slug } : {}),
         title: input.title,
-        description: input.description,
+        description: input.description ?? undefined,
         proof_file_url: input.proofFileUrl,
         external_link: ext ?? undefined,
         metadata: normalizeMetadata(input.metadata ?? {}) as Record<string, string | number | boolean>,
@@ -806,7 +806,7 @@ export class BotApiService {
       categoryId: string;
       subcategoryId: string | null;
       title: string;
-      description: string;
+      description: string | null;
       proofFileUrl: string;
       externalLink: string | null;
       metadata: Record<string, unknown>;
@@ -890,7 +890,7 @@ export class BotApiService {
         categoryId: it.categoryId,
         subcategoryId,
         title: it.title.trim(),
-        description: it.description.trim(),
+        description: it.description?.trim() ? it.description.trim() : null,
         proofFileUrl: proofPath,
         externalLink,
         metadata,
@@ -924,7 +924,7 @@ export class BotApiService {
             categoryId: row.categoryId,
             subcategoryId: row.subcategoryId,
             title: row.title,
-            description: row.description,
+            description: row.description ?? undefined,
             proofFileUrl: row.proofFileUrl,
             externalLink: row.externalLink,
             proposedScore: row.proposedScore,

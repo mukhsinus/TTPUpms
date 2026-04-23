@@ -68,6 +68,7 @@ const CATEGORY_CONFIG_REGISTRY: Record<string, BotCategoryConfig> = {
       "• Google Professional / Cisco CCNP — 9-10 points",
       "• Cisco Associate / Oracle Associate — 7-8 points",
       "• Entry-level certificates (MOS, ICDL) — 5-6 points",
+      "• Internationally recognized online courses — 1-3 points",
     ],
     titleExamples: [
       "Google Professional Data Analytics Certificate",

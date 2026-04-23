@@ -5,6 +5,7 @@ import {
   mainMenuKeyboard,
   olympiadPlacementKeyboard,
   previewSubmitKeyboard,
+  skipDescriptionKeyboard,
   skipOptionalLinkKeyboard,
   submitFlowNavKeyboard,
 } from "../keyboards";
@@ -28,7 +29,8 @@ const MSG_DESCRIPTION_STEP =
   "• What you did (role, project, result)\n" +
   "• When it happened (year or dates)\n" +
   "• Anything important (hours, level, organizer)\n\n" +
-  "A few sentences is fine.";
+  "A few sentences is fine.\n\n" +
+  "If needed, tap Skip.";
 
 const MSG_PROOF_STEP =
   "📎 Upload proof\n\n" +
@@ -61,7 +63,7 @@ function prettifySnake(s: string): string {
 function formatSubmissionSuccessSummary(item: {
   title: string;
   category: string;
-  description: string;
+  description: string | null;
   link: string | null;
   hasFile: boolean;
 }): string {
@@ -73,7 +75,7 @@ function formatSubmissionSuccessSummary(item: {
     "",
     `Title: ${item.title}`,
     `Category: ${catLine}`,
-    `Description: ${item.description}`,
+    `Description: ${item.description?.trim() ? item.description : "—"}`,
   ];
   if (item.link) {
     lines.push(`Link: ${item.link}`);
@@ -341,7 +343,7 @@ function persistItemAndRecordPreview(ctx: BotContext, externalLink: string | nul
     categoryId: s.categoryId!,
     subcategorySlug: subSlug ?? null,
     title: s.title!,
-    description: s.description!,
+    description: s.description ?? null,
     proofFileUrl: s.proofFileUrl!,
     externalLink,
     metadata:
@@ -479,7 +481,7 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
 
       st(ctx).title = ctx.message.text.trim();
       botFlowStep(ctx.from?.id, "title_entered", { titleLen: st(ctx).title!.length });
-      await ctx.reply(MSG_DESCRIPTION_STEP, submitFlowNavKeyboard());
+      await ctx.reply(MSG_DESCRIPTION_STEP, skipDescriptionKeyboard());
       return ctx.wizard.next();
     },
     // 4 — description
@@ -488,8 +490,16 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
         return;
       }
 
+      if (ctx.callbackQuery && "data" in ctx.callbackQuery && ctx.callbackQuery.data === "skip_description") {
+        await ctx.answerCbQuery();
+        st(ctx).description = null;
+        botFlowStep(ctx.from?.id, "description_skipped");
+        await ctx.reply(MSG_PROOF_STEP, submitFlowNavKeyboard());
+        return ctx.wizard.next();
+      }
+
       if (!ctx.message || !("text" in ctx.message) || !ctx.message.text.trim()) {
-        await ctx.reply("Please add a short description (what, when, details).");
+        await ctx.reply("Please add a short description (what, when, details), or tap Skip.");
         return;
       }
 

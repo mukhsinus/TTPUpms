@@ -88,7 +88,16 @@ const addBotSubmissionItemSchema = z.object({
       return t.length > 0 ? t : undefined;
     }),
   title: z.string().min(1).max(200),
-  description: z.string().min(1).max(5000),
+  description: z
+    .union([z.string().max(5000), z.literal(""), z.null()])
+    .optional()
+    .transform((value) => {
+      if (value === null || value === undefined) {
+        return null;
+      }
+      const trimmed = value.trim();
+      return trimmed.length > 0 ? trimmed : null;
+    }),
   proof_file_url: z.string().min(1).max(2048),
   external_link: z.union([z.string().max(2048), z.literal(""), z.null()]).optional().nullable(),
   metadata: metadataRecordSchema.optional(),
@@ -105,7 +114,16 @@ const botCompleteSubmissionItemSchema = z.object({
       return t.length > 0 ? t : null;
     }),
   title: z.string().trim().min(1).max(200),
-  description: z.string().trim().min(1).max(5000),
+  description: z
+    .union([z.string().max(5000), z.literal(""), z.null()])
+    .optional()
+    .transform((value) => {
+      if (value === null || value === undefined) {
+        return null;
+      }
+      const trimmed = value.trim();
+      return trimmed.length > 0 ? trimmed : null;
+    }),
   proof_file_url: z.string().min(1).max(2048),
   external_link: z.union([z.string().max(2048), z.literal(""), z.null()]).optional().nullable(),
   metadata: metadataRecordSchema.optional(),

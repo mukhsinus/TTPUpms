@@ -124,6 +124,12 @@ export const skipOptionalLinkKeyboard = () =>
     SUBMIT_FLOW_NAV_ROW,
   ]);
 
+export const skipDescriptionKeyboard = () =>
+  Markup.inlineKeyboard([
+    [Markup.button.callback("Skip", "skip_description")],
+    SUBMIT_FLOW_NAV_ROW,
+  ]);
+
 export const addAnotherItemKeyboard = () =>
   Markup.inlineKeyboard([
     [Markup.button.callback("Add one more achievement", "flow_add_more")],
