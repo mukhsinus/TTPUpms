@@ -546,14 +546,21 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
         return;
       }
 
-      const link = await ctx.telegram.getFileLink(fileId);
-      const downloadResponse = await fetch(link.toString());
-      if (!downloadResponse.ok) {
-        await ctx.reply("Could not download the file from Telegram. Try again.");
+      let bytes: Buffer;
+      try {
+        const link = await ctx.telegram.getFileLink(fileId);
+        const downloadResponse = await fetch(link.toString());
+        if (!downloadResponse.ok) {
+          await ctx.reply("Could not download the file from Telegram. Try again.");
+          return;
+        }
+        bytes = Buffer.from(await downloadResponse.arrayBuffer());
+      } catch (error) {
+        console.error("Submit flow: Telegram file download failed:", error);
+        await ctx.reply("Could not download the file from Telegram. Please try sending the file again.");
         return;
       }
 
-      const bytes = Buffer.from(await downloadResponse.arrayBuffer());
       let upload;
       try {
         upload = await withProcessingReply(ctx, () =>

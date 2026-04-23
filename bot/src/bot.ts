@@ -7,6 +7,7 @@ import { mainMenuKeyboard } from "./keyboards";
 import { UpmsService } from "./services/upms.service";
 import { HELP_TEXT } from "./text/help";
 import type { BotContext } from "./types/session";
+import { userFacingUpmsMessage } from "./utils/upms-user-facing";
 
 function displayStudentGreeting(user: { studentFullName: string | null }): string {
   const n = user.studentFullName?.trim();
@@ -180,58 +181,69 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
       return;
     }
 
-    const submissions = await upmsService.getUserSubmissions(ctx.session.authenticatedTelegramId);
-    if (submissions.length === 0) {
-      await ctx.reply("No submissions for current semester.", mainMenuKeyboard());
-      return;
-    }
+    try {
+      const submissions = await upmsService.getUserSubmissions(ctx.session.authenticatedTelegramId);
+      if (submissions.length === 0) {
+        await ctx.reply("No submissions for current semester.", mainMenuKeyboard());
+        return;
+      }
 
-    const noSnake = (s: string | null | undefined) =>
-      s ? s.replace(/_/g, " ").replace(/\s+/g, " ").trim() : "—";
-    const prettyStatus = (s: string) => s[0]?.toUpperCase() + s.slice(1);
+      const noSnake = (s: string | null | undefined) =>
+        s ? s.replace(/_/g, " ").replace(/\s+/g, " ").trim() : "—";
+      const prettyStatus = (s: string) => (s[0]?.toUpperCase() ?? "") + s.slice(1);
+      const formatDate = (isoLike: string): string => {
+        const d = new Date(isoLike);
+        if (Number.isNaN(d.getTime())) {
+          return "—";
+        }
+        const day = String(d.getDate()).padStart(2, "0");
+        const month = String(d.getMonth() + 1).padStart(2, "0");
+        const year = String(d.getFullYear());
+        return `${day}/${month}/${year}`;
+      };
 
-    const lines = submissions.map((item, index) => {
-      const statusLine =
-        item.status === "draft"
-          ? "Status: draft (not submitted)"
-          : `Status: ${item.status}`;
-      const title = item.title?.trim() ? item.title.trim() : `Submission #${item.id.slice(0, 8)}`;
-      const block = [`${index + 1}. ${title}`];
-      if (item.items.length === 0) {
-        block.push("   Items: —");
-      } else {
-        const isSingleItemSubmission = item.items.length === 1;
-        for (let i = 0; i < item.items.length; i += 1) {
-          const line = item.items[i]!;
-          const categoryLabel = noSnake(line.categoryTitle || line.category);
-          if (!isSingleItemSubmission) {
-            block.push(`   Achievement ${i + 1}: ${line.title}`);
-          }
-          block.push(`      Category: ${categoryLabel}`);
-          block.push(`      Status: ${prettyStatus(line.status)}`);
-          block.push(`      Score: ${line.approvedScore ?? 0}`);
-          block.push(`      Description: ${line.description ?? "—"}`);
-          if (line.link) {
-            block.push(`      Link: ${line.link}`);
-          }
-          if (line.hasFile) {
-            block.push("      File: attached");
+      const lines = submissions.map((item, index) => {
+        const statusRaw = (item.status ?? "pending").trim().toLowerCase();
+        const statusLine = statusRaw === "draft" ? "Status: draft (not submitted)" : `Status: ${statusRaw}`;
+        const submissionId = item.id && item.id.length >= 8 ? item.id.slice(0, 8) : "unknown";
+        const title = item.title?.trim() ? item.title.trim() : `Submission #${submissionId}`;
+        const block = [`${index + 1}. ${title}`];
+        const rows = Array.isArray(item.items) ? item.items : [];
+        if (rows.length === 0) {
+          block.push("   Items: —");
+        } else {
+          const isSingleItemSubmission = rows.length === 1;
+          for (let i = 0; i < rows.length; i += 1) {
+            const line = rows[i]!;
+            const categoryLabel = noSnake(line.categoryTitle || line.category);
+            if (!isSingleItemSubmission) {
+              block.push(`   Achievement ${i + 1}: ${line.title}`);
+            }
+            block.push(`      Category: ${categoryLabel}`);
+            block.push(`      Status: ${prettyStatus(line.status)}`);
+            block.push(`      Score: ${line.approvedScore ?? 0}`);
+            block.push(`      Description: ${line.description ?? "—"}`);
+            if (line.link) {
+              block.push(`      Link: ${line.link}`);
+            }
+            if (line.hasFile) {
+              block.push("      File: attached");
+            }
           }
         }
-      }
-      const createdAt = new Date(item.createdAt);
-      const day = String(createdAt.getDate()).padStart(2, "0");
-      const month = String(createdAt.getMonth() + 1).padStart(2, "0");
-      const year = String(createdAt.getFullYear());
-      block.push(
-        `   ${statusLine}`,
-        `   Total score added: ${item.totalPoints}`,
-        `   Created: ${day}/${month}/${year}`,
-      );
-      return block.join("\n");
-    });
+        const safePoints = Number(item.totalPoints);
+        block.push(
+          `   ${statusLine}`,
+          `   Total score added: ${Number.isFinite(safePoints) ? safePoints.toFixed(2) : "0.00"}`,
+          `   Created: ${formatDate(item.createdAt)}`,
+        );
+        return block.join("\n");
+      });
 
-    await ctx.reply(`My Submissions:\n\n${lines.join("\n\n")}`, mainMenuKeyboard());
+      await ctx.reply(`My Submissions:\n\n${lines.join("\n\n")}`, mainMenuKeyboard());
+    } catch (error) {
+      await ctx.reply(userFacingUpmsMessage(error, "Could not load your submissions."), mainMenuKeyboard());
+    }
   });
 
   bot.action("menu_points", async (ctx) => {
@@ -241,11 +253,15 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
       return;
     }
 
-    const totalPoints = await upmsService.getUserPoints(ctx.session.authenticatedTelegramId);
-    await ctx.reply(
-      `My Points (approved submissions, current semester): ${totalPoints.toFixed(2)}`,
-      Markup.inlineKeyboard([[Markup.button.callback("Back to menu", "menu_back")]]),
-    );
+    try {
+      const totalPoints = await upmsService.getUserPoints(ctx.session.authenticatedTelegramId);
+      await ctx.reply(
+        `My Points (approved submissions, current semester): ${totalPoints.toFixed(2)}`,
+        Markup.inlineKeyboard([[Markup.button.callback("Back to menu", "menu_back")]]),
+      );
+    } catch (error) {
+      await ctx.reply(userFacingUpmsMessage(error, "Could not load your points."), mainMenuKeyboard());
+    }
   });
 
   bot.action("menu_help", async (ctx) => {

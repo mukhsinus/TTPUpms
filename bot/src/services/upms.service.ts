@@ -6,6 +6,7 @@ import { UpmsApiError } from "./upms-api-error";
 
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const MAX_UPMS_PARSE_ATTEMPTS = 2;
 
 interface BotApiUserRow {
   id: string;
@@ -186,6 +187,99 @@ function parseEnvelopeFromText(rawText: string, httpStatus: number, pathForLog: 
   return parsed;
 }
 
+function shouldRetryUnreadableResponse(
+  error: unknown,
+  attempt: number,
+  maxAttempts: number,
+): boolean {
+  if (!(error instanceof UpmsApiError)) {
+    return false;
+  }
+  if (attempt >= maxAttempts - 1) {
+    return false;
+  }
+  return error.code === "EMPTY_RESPONSE" || error.code === "INVALID_JSON" || error.code === "INVALID_ENVELOPE";
+}
+
+function parseSubmissionItems(raw: unknown): SubmitDraftSuccessItem[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw
+    .map((item): SubmitDraftSuccessItem | null => {
+      if (typeof item !== "object" || item === null) {
+        return null;
+      }
+      const row = item as Record<string, unknown>;
+      const title = typeof row.title === "string" && row.title.trim() ? row.title.trim() : "Untitled";
+      const category = typeof row.category === "string" && row.category.trim() ? row.category.trim() : "—";
+      const categoryTitle =
+        typeof row.categoryTitle === "string" && row.categoryTitle.trim() ? row.categoryTitle.trim() : category;
+      const description =
+        typeof row.description === "string" && row.description.trim() ? row.description.trim() : "—";
+      const link = typeof row.link === "string" && row.link.trim() ? row.link.trim() : null;
+      const hasFile = Boolean(row.hasFile);
+      const statusRaw = typeof row.status === "string" ? row.status : "pending";
+      const status: "pending" | "approved" | "rejected" =
+        statusRaw === "approved" || statusRaw === "rejected" ? statusRaw : "pending";
+      const approvedScoreRaw =
+        typeof row.approvedScore === "number"
+          ? row.approvedScore
+          : typeof row.approvedScore === "string" && row.approvedScore.trim()
+            ? Number(row.approvedScore)
+            : null;
+      const approvedScore = Number.isFinite(approvedScoreRaw) ? approvedScoreRaw : null;
+      return {
+        title,
+        category,
+        categoryTitle,
+        description,
+        link,
+        hasFile,
+        status,
+        approvedScore,
+      };
+    })
+    .filter((item): item is SubmitDraftSuccessItem => item !== null);
+}
+
+function parseSubmissionRows(raw: unknown): BotApiSubmissionRow[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw
+    .map((row): BotApiSubmissionRow | null => {
+      if (typeof row !== "object" || row === null) {
+        return null;
+      }
+      const item = row as Record<string, unknown>;
+      const id = typeof item.id === "string" ? item.id : "";
+      const title = typeof item.title === "string" && item.title.trim() ? item.title.trim() : "Untitled";
+      const status = typeof item.status === "string" && item.status.trim() ? item.status.trim() : "pending";
+      const createdAt = typeof item.createdAt === "string" ? item.createdAt : new Date(0).toISOString();
+      const totalPoints =
+        typeof item.totalPoints === "string" && item.totalPoints.trim()
+          ? item.totalPoints.trim()
+          : typeof item.totalPoints === "number"
+            ? String(item.totalPoints)
+            : "0";
+      if (!id) {
+        return null;
+      }
+      return {
+        id,
+        title,
+        items: parseSubmissionItems(item.items),
+        status,
+        totalPoints,
+        createdAt,
+      };
+    })
+    .filter((item): item is BotApiSubmissionRow => item !== null);
+}
+
 export class UpmsService {
   /**
    * Builds fetch headers: auto `Idempotency-Key` only for mutating methods when missing.
@@ -229,40 +323,59 @@ export class UpmsService {
   }
 
   private async requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+    const method = (init?.method ?? "GET").toUpperCase();
     const headers = this.buildBotApiHeaders(init);
     const url = `${env.BACKEND_API_URL}${path}`;
-
-    const response = await fetch(url, {
-      ...init,
-      headers,
+    let lastError: unknown = new UpmsApiError("UPMS request failed", {
+      code: "REQUEST_FAILED",
+      httpStatus: 500,
     });
 
-    const rawText = await response.text();
-    let envelope: ApiEnvelope<T>;
-    try {
-      envelope = parseEnvelopeFromText(rawText, response.status, path) as ApiEnvelope<T>;
-    } catch (err) {
-      // Backend sometimes completes status before body is intact (e.g. reply lifecycle bug).
-      // Draft 409 without body is almost always active-submission quota from Postgres.
-      if (
-        err instanceof UpmsApiError &&
-        err.code === "EMPTY_RESPONSE" &&
-        response.status === 409 &&
-        path === "/api/bot/submissions/draft"
-      ) {
-        throw new UpmsApiError("Maximum of 3 active submissions per user.", {
-          code: "SUBMISSION_LIMIT_EXCEEDED",
-          httpStatus: 409,
+    for (let attempt = 0; attempt < MAX_UPMS_PARSE_ATTEMPTS; attempt += 1) {
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          ...init,
+          method,
+          headers,
         });
+      } catch (err) {
+        lastError = err;
+        continue;
       }
-      throw err;
+
+      const rawText = await response.text();
+      let envelope: ApiEnvelope<T>;
+      try {
+        envelope = parseEnvelopeFromText(rawText, response.status, path) as ApiEnvelope<T>;
+      } catch (err) {
+        // Draft 409 without body is almost always active-submission quota from Postgres.
+        if (
+          err instanceof UpmsApiError &&
+          err.code === "EMPTY_RESPONSE" &&
+          response.status === 409 &&
+          path === "/api/bot/submissions/draft"
+        ) {
+          throw new UpmsApiError("Maximum of 3 active submissions per user.", {
+            code: "SUBMISSION_LIMIT_EXCEEDED",
+            httpStatus: 409,
+          });
+        }
+        lastError = err;
+        if (shouldRetryUnreadableResponse(err, attempt, MAX_UPMS_PARSE_ATTEMPTS)) {
+          continue;
+        }
+        throw err;
+      }
+
+      if (!response.ok || envelope.error || envelope.data === null) {
+        throw this.readFailure(envelope as ApiEnvelope<unknown>, response.status);
+      }
+
+      return envelope.data;
     }
 
-    if (!response.ok || envelope.error || envelope.data === null) {
-      throw this.readFailure(envelope as ApiEnvelope<unknown>, response.status);
-    }
-
-    return envelope.data;
+    throw lastError;
   }
 
   /** Lookup only — does not create a user. */
@@ -434,12 +547,13 @@ export class UpmsService {
 
   async getUserSubmissions(telegramId: string): Promise<BotApiSubmissionRow[]> {
     await this.resolveUserByTelegramId({ telegramId });
-    return this.requestJson<BotApiSubmissionRow[]>("/api/bot/submissions/list", {
+    const raw = await this.requestJson<unknown>("/api/bot/submissions/list", {
       method: "POST",
       body: JSON.stringify({
         telegram_id: String(telegramId),
       }),
     });
+    return parseSubmissionRows(raw);
   }
 
   async getUserPoints(telegramId: string): Promise<number> {
@@ -450,7 +564,7 @@ export class UpmsService {
         telegram_id: String(telegramId),
       }),
     });
-    return result.totalPoints;
+    return Number.isFinite(result.totalPoints) ? result.totalPoints : 0;
   }
 
   async getSystemPhase(): Promise<BotSystemPhaseState> {
