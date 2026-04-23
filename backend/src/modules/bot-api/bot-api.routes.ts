@@ -56,14 +56,6 @@ const metadataRecordSchema = z.record(z.string(), z.union([z.string(), z.number(
 const createStudentSubmissionSchema = z.object({
   telegram_id: z.string().regex(/^\d+$/, "telegram_id must be numeric"),
   category_id: z.string().uuid(),
-  subcategory: z
-    .union([z.string().max(200), z.null()])
-    .optional()
-    .transform((s) => {
-      if (s === null || s === undefined) return undefined;
-      const t = s.trim();
-      return t.length > 0 ? t : undefined;
-    }),
   title: z.string().min(1).max(200),
   description: z.string().min(1).max(5000),
   proof_file_url: z.string().min(1).max(2048),
@@ -79,14 +71,6 @@ const addBotSubmissionItemSchema = z.object({
   telegram_id: z.string().regex(/^\d+$/, "telegram_id must be numeric"),
   submission_id: z.string().uuid(),
   category_id: z.string().uuid(),
-  subcategory: z
-    .union([z.string().max(200), z.null()])
-    .optional()
-    .transform((s) => {
-      if (s === null || s === undefined) return undefined;
-      const t = s.trim();
-      return t.length > 0 ? t : undefined;
-    }),
   title: z.string().min(1).max(200),
   description: z
     .union([z.string().max(5000), z.literal(""), z.null()])
@@ -105,14 +89,6 @@ const addBotSubmissionItemSchema = z.object({
 
 const botCompleteSubmissionItemSchema = z.object({
   category_id: z.string().uuid(),
-  subcategory: z
-    .union([z.string().max(200), z.null()])
-    .optional()
-    .transform((s) => {
-      if (s === null || s === undefined) return null;
-      const t = s.trim();
-      return t.length > 0 ? t : null;
-    }),
   title: z.string().trim().min(1).max(200),
   description: z
     .union([z.string().max(5000), z.literal(""), z.null()])
@@ -404,7 +380,6 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
           telegramId: body.telegram_id,
           submissionId: body.submission_id,
           categoryId: body.category_id,
-          subcategory: body.subcategory ?? null,
           title: body.title,
           description: body.description,
           proofFileUrl: body.proof_file_url,
@@ -428,7 +403,6 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
         const data = await service.completeSubmissionFromBot(body.telegram_id, {
           items: body.items.map((it) => ({
             categoryId: it.category_id,
-            subcategory: it.subcategory,
             title: it.title,
             description: it.description,
             proofFileUrl: it.proof_file_url,
@@ -467,7 +441,6 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
         const data = await service.createStudentSubmissionFromBot({
           telegramId: body.telegram_id,
           categoryId: body.category_id,
-          subcategory: body.subcategory,
           title: body.title,
           description: body.description,
           proofFileUrl: body.proof_file_url,

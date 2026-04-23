@@ -99,8 +99,6 @@ function resetFlowState(s: SubmitFlowState): void {
   delete s.categoryId;
   delete s.categoryName;
   delete s.categoryDisplayTitle;
-  delete s.subcategorySlug;
-  delete s.subcategoryLabel;
   delete s.itemMetadata;
   delete s.title;
   delete s.description;
@@ -112,8 +110,6 @@ function clearCurrentItem(s: SubmitFlowState): void {
   delete s.categoryId;
   delete s.categoryName;
   delete s.categoryDisplayTitle;
-  delete s.subcategorySlug;
-  delete s.subcategoryLabel;
   delete s.itemMetadata;
   delete s.title;
   delete s.description;
@@ -338,10 +334,8 @@ function formatItemBlock(s: SubmitFlowState, externalLink: string | null): strin
 /** Queue current line in session only (DB write happens on final atomic submit). */
 function persistItemAndRecordPreview(ctx: BotContext, externalLink: string | null): void {
   const s = st(ctx);
-  const subSlug = s.subcategorySlug;
   const row: PendingSubmissionItem = {
     categoryId: s.categoryId!,
-    subcategorySlug: subSlug ?? null,
     title: s.title!,
     description: s.description ?? null,
     proofFileUrl: s.proofFileUrl!,
@@ -714,7 +708,6 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
             telegramId: tgId,
             items: pending.map((it) => ({
               categoryId: it.categoryId,
-              subcategorySlug: it.subcategorySlug,
               title: it.title,
               description: it.description,
               proofFileUrl: it.proofFileUrl,

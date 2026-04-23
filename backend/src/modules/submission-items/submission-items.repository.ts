@@ -24,9 +24,6 @@ interface SubmissionItemRow {
   user_id: string;
   category_id: string | null;
   category: string;
-  subcategory: string | null;
-  subcategory_label: string | null;
-  subcategory_id: string | null;
   metadata: unknown;
   category_type: string | null;
   title: string;
@@ -47,10 +44,6 @@ export interface SubmissionItemEntity {
   userId: string;
   categoryId: string | null;
   category: string;
-  subcategory: string | null;
-  /** Human label from `category_subcategories` when joined; otherwise null. */
-  subcategoryLabel: string | null;
-  subcategoryId: string | null;
   metadata: Record<string, unknown>;
   categoryType: string;
   title: string;
@@ -78,9 +71,6 @@ function mapItem(row: SubmissionItemRow): SubmissionItemEntity {
     userId: row.user_id,
     categoryId: row.category_id,
     category: row.category,
-    subcategory: row.subcategory,
-    subcategoryLabel: row.subcategory_label ?? null,
-    subcategoryId: row.subcategory_id ?? null,
     metadata: normalizeMetadata(row.metadata),
     categoryType: row.category_type ?? "range",
     title: row.title,
@@ -105,9 +95,6 @@ const itemSelectColumns = `
   (SELECT s.user_id FROM submissions s WHERE s.id = si.submission_id LIMIT 1) AS user_id,
   si.category_id,
   c.name AS category,
-  cs.slug AS subcategory,
-  cs.label AS subcategory_label,
-  si.subcategory_id,
   si.metadata,
   si.title,
   si.description,
@@ -125,7 +112,6 @@ const itemSelectColumns = `
 const itemFromJoin = `
   FROM submission_items si
   LEFT JOIN categories c ON c.id = si.category_id
-  LEFT JOIN category_subcategories cs ON cs.id = si.subcategory_id
 `;
 
 type DbExecutor = FastifyInstance["db"] | PoolClient;
@@ -206,12 +192,12 @@ export class SubmissionItemsRepository {
 
     const categoryKey =
       normalizeCategoryKey(row.category_name) || normalizeCategoryKey(row.category_code);
-    const minScoreRaw = row.min_score !== null ? Number(row.min_score) : 0;
+    const minScoreRaw = row.min_score !== null ? Number(row.min_score) : 1;
     const maxScoreRaw = row.max_score !== null ? Number(row.max_score) : CATEGORY_SCORE_CAP_FALLBACKS[categoryKey];
     if (!Number.isFinite(minScoreRaw) || !Number.isFinite(maxScoreRaw)) {
       return null;
     }
-    const minScore = Math.max(0, minScoreRaw);
+    const minScore = Math.max(1, minScoreRaw);
     const maxScore = Math.max(minScore, maxScoreRaw);
 
     return {
@@ -461,8 +447,6 @@ export class SubmissionItemsRepository {
         (SELECT s.user_id FROM submissions s WHERE s.id = submission_items.submission_id LIMIT 1) AS user_id,
         submission_items.category_id,
         (SELECT c.name FROM categories c WHERE c.id = submission_items.category_id LIMIT 1) AS category,
-        (SELECT cs.slug FROM category_subcategories cs WHERE cs.id = submission_items.subcategory_id LIMIT 1) AS subcategory,
-        submission_items.subcategory_id,
         submission_items.metadata,
         submission_items.title,
         submission_items.description,

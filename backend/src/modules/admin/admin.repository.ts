@@ -21,7 +21,6 @@ export interface AdminSubmissionListRow {
   score: string | null;
   category_code: string | null;
   category_title: string | null;
-  subcategory_slug: string | null;
   owner_name: string | null;
 }
 
@@ -65,8 +64,6 @@ export interface AdminItemRow {
   category_code: string | null;
   category_name: string | null;
   category_title: string | null;
-  subcategory_slug: string | null;
-  subcategory_label: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -290,11 +287,9 @@ function buildAdminSubmissionFilters(query: AdminSubmissionsQuery): { whereSql: 
             SELECT 1
             FROM public.submission_items si3
             LEFT JOIN public.categories c3 ON c3.id = si3.category_id
-            LEFT JOIN public.category_subcategories cs3 ON cs3.id = si3.subcategory_id
             WHERE si3.submission_id = s.id
               AND (
                 COALESCE(c3.title::text, c3.name, '') ILIKE $${p} ESCAPE '\\'
-                OR COALESCE(cs3.label::text, cs3.slug, '') ILIKE $${p} ESCAPE '\\'
                 OR COALESCE(si3.metadata->>'teacher', si3.metadata->>'teacher_name', si3.metadata->>'supervisor', '') ILIKE $${p} ESCAPE '\\'
               )
           )
@@ -919,21 +914,18 @@ export class AdminRepository {
         END AS score,
         first_item.category_code,
         first_item.category_title,
-        first_item.subcategory_slug,
         COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), '')) AS owner_name
       FROM public.submissions s
       LEFT JOIN public.users u ON u.id = s.user_id
       LEFT JOIN LATERAL (
         SELECT
           c.code AS category_code,
-          cs.slug AS subcategory_slug,
           COALESCE(
             NULLIF(btrim(c.title::text), ''),
             initcap(regexp_replace(c.name, '_', ' ', 'g'))
           ) AS category_title
         FROM public.submission_items si
         LEFT JOIN public.categories c ON c.id = si.category_id
-        LEFT JOIN public.category_subcategories cs ON cs.id = si.subcategory_id
         WHERE si.submission_id = s.id
         ORDER BY ${displayCategoryOrderSql}
         LIMIT 1
@@ -1314,14 +1306,11 @@ export class AdminRepository {
           NULLIF(BTRIM(c.title::text), ''),
           initcap(regexp_replace(COALESCE(c.name, c.code, 'unknown_category'), '[_-]+', ' ', 'g'))
         ) AS category_title,
-        cs.slug AS subcategory_slug,
-        cs.label AS subcategory_label,
         si.created_at,
         si.updated_at
       FROM public.submission_items si
       LEFT JOIN public.submissions s ON s.id = si.submission_id
       LEFT JOIN public.categories c ON c.id = si.category_id
-      LEFT JOIN public.category_subcategories cs ON cs.id = si.subcategory_id
       WHERE si.submission_id = $1
       ORDER BY si.created_at ASC
       `,

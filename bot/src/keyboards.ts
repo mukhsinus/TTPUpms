@@ -80,28 +80,6 @@ export function submitFlowKeyboardWithCategories(
   return Markup.inlineKeyboard(rows);
 }
 
-/** Callback sub_<slug> — category is already chosen in session */
-export function subcategoryPickerKeyboard(subcategories: CategoryCatalogEntry["subcategories"]) {
-  const rows: ReturnType<typeof Markup.button.callback>[][] = [];
-  function subButtonLabel(s: (typeof subcategories)[number]): string {
-    return s.title.trim() || "Type";
-  }
-
-  for (let i = 0; i < subcategories.length; i += 2) {
-    const a = subcategories[i];
-    const labelA = subButtonLabel(a);
-    const row = [Markup.button.callback(labelA, `sub_${a.slug}`)];
-    if (subcategories[i + 1]) {
-      const b = subcategories[i + 1];
-      const labelB = subButtonLabel(b);
-      row.push(Markup.button.callback(labelB, `sub_${b.slug}`));
-    }
-    rows.push(row);
-  }
-  rows.push(SUBMIT_FLOW_NAV_ROW);
-  return Markup.inlineKeyboard(rows);
-}
-
 /** Callbacks place_1 | place_2 | place_3 */
 export function olympiadPlacementKeyboard() {
   return Markup.inlineKeyboard([

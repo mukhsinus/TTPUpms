@@ -22,7 +22,8 @@ export class SubmissionItemsService {
   ) {}
 
   async categoryHasSubcategories(categoryId: string): Promise<boolean> {
-    return this.repository.categoryHasSubcategories(categoryId);
+    void categoryId;
+    return false;
   }
 
   async addItem(
@@ -34,35 +35,13 @@ export class SubmissionItemsService {
 
     await this.users.assertStudentProfileCompleteForSubmission(submission.userId);
 
-    let subcategoryId = body.subcategory_id ?? null;
-    if (subcategoryId) {
-      const ok = await this.repository.isSubcategoryUnderCategory(subcategoryId, body.category_id);
-      if (!ok) {
-        throw new ServiceError(400, "subcategory_id does not belong to category_id", "VALIDATION_ERROR");
-      }
-    } else {
-      const slug = body.subcategory?.trim() ?? "";
-      if (slug !== "") {
-        subcategoryId = await this.repository.findSubcategoryIdBySlug(body.category_id, slug);
-        if (!subcategoryId) {
-          throw new ServiceError(400, "Unknown subcategory slug for this category", "VALIDATION_ERROR");
-        }
-      }
-    }
-
-    const hasSubcategories = await this.repository.categoryHasSubcategories(body.category_id);
-    if (subcategoryId === null && hasSubcategories) {
-      throw new ServiceError(400, "Subcategory is required for this category", "VALIDATION_ERROR");
-    }
-    if (subcategoryId === null && !hasSubcategories) {
-      await this.repository.ensureWholeCategoryPlaceholderForCategory(body.category_id);
-      subcategoryId = await this.repository.findSubcategoryIdBySlug(
-        body.category_id,
-        WHOLE_CATEGORY_PLACEHOLDER_SLUG,
-      );
-      if (!subcategoryId) {
-        throw new ServiceError(400, "Unknown category_id", "VALIDATION_ERROR");
-      }
+    await this.repository.ensureWholeCategoryPlaceholderForCategory(body.category_id);
+    const subcategoryId = await this.repository.findSubcategoryIdBySlug(
+      body.category_id,
+      WHOLE_CATEGORY_PLACEHOLDER_SLUG,
+    );
+    if (!subcategoryId) {
+      throw new ServiceError(400, "Unknown category_id", "VALIDATION_ERROR");
     }
 
     const metadata = normalizeMetadata(body.metadata);
@@ -72,24 +51,15 @@ export class SubmissionItemsService {
       throw new ServiceError(400, "Unknown category");
     }
 
-    if (categoryName === "olympiads" && subcategoryId) {
-      const subSlug = await this.repository.findSubcategorySlugById(subcategoryId);
-      if (subSlug === "olympiad_participation") {
-        const p = metadata.place;
-        const placeOk =
-          p === 1 ||
-          p === 2 ||
-          p === 3 ||
-          p === "1" ||
-          p === "2" ||
-          p === "3";
-        if (!placeOk) {
-          throw new ServiceError(
-            400,
-            "Olympiad items require metadata.place of 1, 2, or 3",
-            "VALIDATION_ERROR",
-          );
-        }
+    if (categoryName === "olympiads") {
+      const p = metadata.place;
+      const placeOk = p === 1 || p === 2 || p === 3 || p === "1" || p === "2" || p === "3";
+      if (!placeOk) {
+        throw new ServiceError(
+          400,
+          "Olympiad items require metadata.place of 1, 2, or 3",
+          "VALIDATION_ERROR",
+        );
       }
     }
 
@@ -123,7 +93,7 @@ export class SubmissionItemsService {
       if (isPgUniqueViolation(err)) {
         throw new ServiceError(
           409,
-          "A line with the same category, subcategory, and title already exists on this submission.",
+          "A line with the same category and title already exists on this submission.",
           "DUPLICATE_ITEM",
         );
       }

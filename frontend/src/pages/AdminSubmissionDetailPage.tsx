@@ -228,12 +228,12 @@ export function AdminSubmissionDetailPage(): ReactElement {
     const draft = itemDrafts[item.id];
     const score = Number(draft?.score ?? "");
     const cap = resolveCategoryCap(item, categoryCaps);
-    if (Number.isNaN(score) || score < 0) {
-      setActionError("Enter a valid non-negative score for this item.");
+    if (Number.isNaN(score) || score < 1) {
+      setActionError("Enter a valid score from 1 for this item.");
       return;
     }
     if (cap !== undefined && score > cap) {
-      setActionError(`Allowed range: 0-${cap}`);
+      setActionError(`Allowed range: 1-${cap}`);
       return;
     }
     const normalizedComment = draft?.comment?.trim() ?? "";
@@ -408,12 +408,6 @@ export function AdminSubmissionDetailPage(): ReactElement {
                     </div>
                     <p className="admin-achievement-info-value admin-achievement-category-value">
                       <span className="admin-achievement-category-main">{resolveCategoryDisplay(item)}</span>
-                      {item.subcategoryLabel || item.subcategorySlug ? (
-                        <>
-                          <span className="admin-achievement-category-sep">·</span>
-                          <span className="admin-achievement-category-sub">{item.subcategoryLabel ?? item.subcategorySlug}</span>
-                        </>
-                      ) : null}
                     </p>
                   </div>
                   <div className="admin-achievement-info-cell">
@@ -452,7 +446,7 @@ export function AdminSubmissionDetailPage(): ReactElement {
                         <span>Approved score</span>
                         <Input
                           type="number"
-                          min={0}
+                          min={1}
                           max={
                             resolveCategoryCap(item, categoryCaps)
                           }
@@ -471,7 +465,7 @@ export function AdminSubmissionDetailPage(): ReactElement {
                           }
                         />
                         <small className="muted">
-                          {`Allowed range: 0-${
+                          {`Allowed range: 1-${
                             resolveCategoryCap(item, categoryCaps) ?? "?"
                           }`}
                         </small>

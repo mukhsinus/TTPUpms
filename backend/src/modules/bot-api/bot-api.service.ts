@@ -67,7 +67,6 @@ export interface BotSubmitDraftItemSummary {
   title: string;
   category: string;
   categoryTitle: string;
-  subcategory: string;
   description: string;
   link: string | null;
   hasFile: boolean;
@@ -82,7 +81,6 @@ export interface BotSubmitDraftResult {
 
 export interface BotCompleteSubmissionItemInput {
   categoryId: string;
-  subcategory: string | null;
   title: string;
   description: string | null;
   proofFileUrl: string;
@@ -102,18 +100,6 @@ export interface BotUser {
   isProfileCompleted: boolean;
 }
 
-/** GET /api/bot/categories — stable contract for Telegram clients. */
-export interface BotCategoryCatalogSub {
-  slug: string;
-  label: string;
-  /** Human label for buttons (same as label; no slug in UI). */
-  title: string;
-  minScore: number;
-  maxScore: number;
-  scoringMode: string;
-  defaultPoints: number | null;
-}
-
 export interface BotCategoryCatalogEntry {
   id: string;
   code: string;
@@ -123,18 +109,11 @@ export interface BotCategoryCatalogEntry {
   type: string;
   minScore: number;
   maxScore: number;
-  hasSubcategories: boolean;
-  subcategories: BotCategoryCatalogSub[];
 }
 
 const TEN_MB = 10 * 1024 * 1024;
 const ALLOWED_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
 const ALLOWED_MIME_TYPES_ARRAY = [...ALLOWED_MIME_TYPES];
-const BOT_DEFAULT_SUBCATEGORY_BY_CATEGORY_NAME: Record<string, string> = {
-  internal_competitions: "faculty_level",
-  olympiads: "olympiad_participation",
-};
-
 function toSafeFilename(filename: string): string {
   return filename.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
@@ -415,21 +394,11 @@ export class BotApiService {
           c.name,
           c.description,
           c.type::text AS type,
-          c.min_score,
-          c.max_score,
-          cs.slug,
-          cs.label,
-          cs.sort_order,
-          cs.min_points::text AS sub_min,
-          cs.max_points::text AS sub_max,
-          cs.scoring_mode::text AS scoring_mode,
-          cs.default_points::text AS sub_default
+          '1'::text AS min_score,
+          COALESCE(c.max_points, c.max_score)::text AS max_score
         FROM categories c
-        LEFT JOIN category_subcategories cs ON cs.category_id = c.id
-          AND cs.slug IS DISTINCT FROM 'general'
-          AND cs.slug IS DISTINCT FROM '${WHOLE_CATEGORY_PLACEHOLDER_SLUG}'
         WHERE c.name IS DISTINCT FROM 'legacy_uncategorized'
-        ORDER BY c.name ASC, cs.sort_order ASC NULLS LAST, cs.slug ASC NULLS LAST
+        ORDER BY c.name ASC
         `;
 
     const sqlLegacy = `
@@ -440,21 +409,11 @@ export class BotApiService {
           c.name,
           c.description,
           c.type::text AS type,
-          c.min_score,
-          c.max_score,
-          cs.slug,
-          cs.label,
-          cs.sort_order,
-          cs.min_points::text AS sub_min,
-          cs.max_points::text AS sub_max,
-          cs.scoring_mode::text AS scoring_mode,
-          cs.default_points::text AS sub_default
+          '1'::text AS min_score,
+          c.max_score::text AS max_score
         FROM categories c
-        LEFT JOIN category_subcategories cs ON cs.category_id = c.id
-          AND cs.slug IS DISTINCT FROM 'general'
-          AND cs.slug IS DISTINCT FROM '${WHOLE_CATEGORY_PLACEHOLDER_SLUG}'
         WHERE c.name IS DISTINCT FROM 'legacy_uncategorized'
-        ORDER BY c.name ASC, cs.sort_order ASC NULLS LAST, cs.slug ASC NULLS LAST
+        ORDER BY c.name ASC
         `;
 
     type Row = {
@@ -466,13 +425,6 @@ export class BotApiService {
       type: string;
       min_score: string;
       max_score: string;
-      slug: string | null;
-      label: string | null;
-      sort_order: number | null;
-      sub_min: string | null;
-      sub_max: string | null;
-      scoring_mode: string | null;
-      sub_default: string | null;
     };
 
     let rows: Row[];
@@ -509,75 +461,17 @@ export class BotApiService {
       type: string;
       min_score: string;
       max_score: string;
-      slug: string | null;
-      label: string | null;
-      sort_order: number | null;
-      sub_min: string | null;
-      sub_max: string | null;
-      scoring_mode: string | null;
-      sub_default: string | null;
     }>,
   ): BotCategoryCatalogEntry[] {
-    const byId = new Map<
-      string,
-      {
-        id: string;
-        code: string;
-        title: string;
-        name: string;
-        description: string | null;
-        type: string;
-        minScore: number;
-        maxScore: number;
-        subcategories: BotCategoryCatalogSub[];
-      }
-    >();
-
-    for (const row of rows) {
-      let entry = byId.get(row.id);
-      if (!entry) {
-        entry = {
-          id: row.id,
-          code: row.code ?? row.name,
-          title: row.title ?? row.name,
-          name: row.name,
-          description: row.description,
-          type: row.type,
-          minScore: Number(row.min_score),
-          maxScore: Number(row.max_score),
-          subcategories: [],
-        };
-        byId.set(row.id, entry);
-      }
-      if (row.slug && row.label) {
-        const subMin = row.sub_min !== null && row.sub_min !== "" ? Number(row.sub_min) : entry.minScore;
-        const subMax = row.sub_max !== null && row.sub_max !== "" ? Number(row.sub_max) : entry.maxScore;
-        const subDefault =
-          row.sub_default !== null && row.sub_default !== "" ? Number(row.sub_default) : null;
-        const label = row.label;
-        entry.subcategories.push({
-          slug: row.slug,
-          label,
-          title: label,
-          minScore: subMin,
-          maxScore: subMax,
-          scoringMode: row.scoring_mode ?? row.type,
-          defaultPoints: Number.isFinite(subDefault) ? subDefault : null,
-        });
-      }
-    }
-
-    return [...byId.values()].map((e) => ({
-      id: e.id,
-      code: e.code,
-      title: e.title,
-      name: e.name,
-      description: e.description,
-      type: e.type,
-      minScore: e.minScore,
-      maxScore: e.maxScore,
-      hasSubcategories: e.subcategories.length > 0,
-      subcategories: e.subcategories,
+    return rows.map((row) => ({
+      id: row.id,
+      code: row.code ?? row.name,
+      title: row.title ?? row.name,
+      name: row.name,
+      description: row.description,
+      type: row.type,
+      minScore: Number(row.min_score),
+      maxScore: Number(row.max_score),
     }));
   }
 
@@ -602,17 +496,12 @@ export class BotApiService {
   private mapItemToBotSubmitSummary(item: SubmissionItemEntity): BotSubmitDraftItemSummary {
     const link =
       item.externalLink && item.externalLink.trim() !== "" ? item.externalLink.trim() : null;
-    const isPlaceholder = item.subcategory === WHOLE_CATEGORY_PLACEHOLDER_SLUG;
-    const sub = isPlaceholder
-      ? "—"
-      : (item.subcategoryLabel ?? item.subcategory ?? "").trim() || "—";
     const status: "pending" | "approved" | "rejected" =
       item.status === "approved" || item.status === "rejected" ? item.status : "pending";
     return {
       title: item.title,
       category: item.category,
       categoryTitle: item.category.replace(/[_-]+/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase()),
-      subcategory: sub,
       description: (item.description ?? "").trim() || "—",
       link,
       hasFile: Boolean(item.proofFileUrl && item.proofFileUrl.trim() !== ""),
@@ -689,7 +578,6 @@ export class BotApiService {
     telegramId: string;
     submissionId: string;
     categoryId: string;
-    subcategory: string | null;
     title: string;
     description: string | null;
     proofFileUrl: string;
@@ -697,7 +585,6 @@ export class BotApiService {
     metadata?: Record<string, string | number | boolean>;
   }): Promise<{ itemId: string }> {
     const user = await this.findOrCreateUserByTelegramId(input.telegramId);
-    const slug = await this.resolveBotSubcategorySlug(input.categoryId, input.subcategory);
     let ext: string | null;
     try {
       ext = normalizeExternalLinkForPersistence(input.externalLink);
@@ -708,7 +595,6 @@ export class BotApiService {
     try {
       const item = await this.submissionItems.addItem(toAuthUser(user), input.submissionId, {
         category_id: input.categoryId,
-        ...(slug ? { subcategory: slug } : {}),
         title: input.title,
         description: input.description ?? undefined,
         proof_file_url: input.proofFileUrl,
@@ -804,7 +690,7 @@ export class BotApiService {
 
     type PreparedRow = {
       categoryId: string;
-      subcategoryId: string | null;
+      subcategoryId: string;
       title: string;
       description: string | null;
       proofFileUrl: string;
@@ -827,30 +713,17 @@ export class BotApiService {
           "VALIDATION_ERROR",
         );
       }
-      const slug = await this.resolveBotSubcategorySlug(it.categoryId, it.subcategory);
-      let subcategoryId: string | null = null;
-      if (slug) {
-        subcategoryId = await this.submissionItemsRepository.findSubcategoryIdBySlug(it.categoryId, slug);
-        if (!subcategoryId) {
-          throw new BotApiHttpError(400, "Unknown subcategory slug for this category.", "VALIDATION_ERROR");
-        }
-      } else {
-        const hasSubs = await this.submissionItemsRepository.categoryHasSubcategories(it.categoryId);
-        if (hasSubs) {
-          throw new BotApiHttpError(400, "Subcategory is required for this category.", "VALIDATION_ERROR");
-        }
-        await this.submissionItemsRepository.ensureWholeCategoryPlaceholderForCategory(it.categoryId);
-        subcategoryId = await this.submissionItemsRepository.findSubcategoryIdBySlug(
-          it.categoryId,
-          WHOLE_CATEGORY_PLACEHOLDER_SLUG,
+      await this.submissionItemsRepository.ensureWholeCategoryPlaceholderForCategory(it.categoryId);
+      const subcategoryId = await this.submissionItemsRepository.findSubcategoryIdBySlug(
+        it.categoryId,
+        WHOLE_CATEGORY_PLACEHOLDER_SLUG,
+      );
+      if (!subcategoryId) {
+        throw new BotApiHttpError(
+          400,
+          "Unknown category_id — cannot attach a submission line to this category.",
+          "VALIDATION_ERROR",
         );
-        if (!subcategoryId) {
-          throw new BotApiHttpError(
-            400,
-            "Unknown category_id — cannot attach a submission line to this category.",
-            "VALIDATION_ERROR",
-          );
-        }
       }
 
       const metadata = normalizeMetadata(it.metadata ?? {}) as Record<string, unknown>;
@@ -858,24 +731,15 @@ export class BotApiService {
       if (!categoryName) {
         throw new BotApiHttpError(400, "Unknown category.", "VALIDATION_ERROR");
       }
-      if (categoryName === "olympiads" && subcategoryId) {
-        const subSlug = await this.submissionItemsRepository.findSubcategorySlugById(subcategoryId);
-        if (subSlug === "olympiad_participation") {
-          const p = metadata.place;
-          const placeOk =
-            p === 1 ||
-            p === 2 ||
-            p === 3 ||
-            p === "1" ||
-            p === "2" ||
-            p === "3";
-          if (!placeOk) {
-            throw new BotApiHttpError(
-              400,
-              "Olympiad items require metadata.place of 1, 2, or 3",
-              "VALIDATION_ERROR",
-            );
-          }
+      if (categoryName === "olympiads") {
+        const p = metadata.place;
+        const placeOk = p === 1 || p === 2 || p === 3 || p === "1" || p === "2" || p === "3";
+        if (!placeOk) {
+          throw new BotApiHttpError(
+            400,
+            "Olympiad items require metadata.place of 1, 2, or 3",
+            "VALIDATION_ERROR",
+          );
         }
       }
 
@@ -999,53 +863,9 @@ export class BotApiService {
     }
   }
 
-  private async resolveBotSubcategorySlug(
-    categoryId: string,
-    subcategory: string | null,
-  ): Promise<string | null> {
-    const hasSubs = await this.submissionItems.categoryHasSubcategories(categoryId);
-    if (!hasSubs) {
-      return null;
-    }
-
-    const slug = subcategory?.trim() ?? "";
-    if (slug) {
-      return slug;
-    }
-
-    const categoryName = await this.submissionItemsRepository.resolveCategoryName(categoryId);
-    const preferredSlug = categoryName ? BOT_DEFAULT_SUBCATEGORY_BY_CATEGORY_NAME[categoryName] : undefined;
-    if (preferredSlug) {
-      const preferredId = await this.submissionItemsRepository.findSubcategoryIdBySlug(categoryId, preferredSlug);
-      if (preferredId) {
-        this.app.log.info(
-          { category_id: categoryId, category_name: categoryName, selected_subcategory: preferredSlug },
-          "Bot omitted subcategory; defaulted to preferred subcategory",
-        );
-        return preferredSlug;
-      }
-    }
-
-    const firstSubcategoryId = await this.submissionItemsRepository.findFirstSubcategoryIdForCategory(categoryId);
-    if (!firstSubcategoryId) {
-      throw new BotApiHttpError(400, "Subcategory is required for this category", "VALIDATION_ERROR");
-    }
-
-    const firstSlug = await this.submissionItemsRepository.findSubcategorySlugById(firstSubcategoryId);
-    if (!firstSlug) {
-      throw new BotApiHttpError(400, "Subcategory is required for this category", "VALIDATION_ERROR");
-    }
-    this.app.log.info(
-      { category_id: categoryId, category_name: categoryName, selected_subcategory: firstSlug },
-      "Bot omitted subcategory; defaulted to first subcategory",
-    );
-    return firstSlug;
-  }
-
   async createStudentSubmissionFromBot(input: {
     telegramId: string;
     categoryId: string;
-    subcategory?: string | null;
     title: string;
     description: string;
     proofFileUrl: string;
@@ -1053,7 +873,6 @@ export class BotApiService {
   }): Promise<{ submissionId: string }> {
     const user = await this.findOrCreateUserByTelegramId(input.telegramId);
     const auth = toAuthUser(user);
-    const slug = await this.resolveBotSubcategorySlug(input.categoryId, input.subcategory ?? null);
 
     try {
       const created = await this.submissions.createSubmission(auth, {
@@ -1063,7 +882,6 @@ export class BotApiService {
 
       await this.submissionItems.addItem(auth, created.id, {
         category_id: input.categoryId,
-        ...(slug ? { subcategory: slug } : {}),
         title: input.title,
         description: input.description,
         proof_file_url: input.proofFileUrl,
@@ -1333,19 +1151,6 @@ export class BotApiService {
       throw new BotApiHttpError(400, "Unknown category for achievement", "VALIDATION_ERROR");
     }
 
-    const genSub = await this.app.db.query<{ id: string; slug: string }>(
-      `
-      SELECT id, slug
-      FROM category_subcategories
-      WHERE category_id = $1
-        AND slug IS DISTINCT FROM 'general'
-      ORDER BY sort_order ASC NULLS LAST, slug ASC
-      LIMIT 1
-      `,
-      [categoryRow.id],
-    );
-    const defaultSubSlug = genSub.rows[0]?.slug;
-
     try {
       const created = await this.submissions.createSubmission(auth, {
         title: `Achievement: ${input.category}`,
@@ -1354,7 +1159,6 @@ export class BotApiService {
 
       await this.submissionItems.addItem(auth, created.id, {
         category_id: categoryRow.id,
-        ...(defaultSubSlug ? { subcategory: defaultSubSlug } : {}),
         title: `Achievement: ${input.category}`,
         description: input.details,
         proof_file_url: input.proofFileUrl,
@@ -1410,7 +1214,6 @@ export class BotApiService {
                   NULLIF(BTRIM(c.title::text), ''),
                   initcap(regexp_replace(COALESCE(c.name, c.code, 'unknown_category'), '[_-]+', ' ', 'g'))
                 ),
-                'subcategory', COALESCE(NULLIF(BTRIM(cs.label), ''), NULLIF(BTRIM(cs.slug), ''), '—'),
                 'description', COALESCE(NULLIF(BTRIM(si.description), ''), '—'),
                 'link', CASE
                   WHEN si.external_link IS NOT NULL AND BTRIM(si.external_link) <> '' THEN BTRIM(si.external_link)
@@ -1424,7 +1227,6 @@ export class BotApiService {
             ) AS items_json
           FROM submission_items si
           LEFT JOIN categories c ON c.id = si.category_id
-          LEFT JOIN category_subcategories cs ON cs.id = si.subcategory_id
           WHERE si.submission_id = s.id
         ) items ON true
         WHERE s.user_id = $1
@@ -1478,8 +1280,6 @@ export class BotApiService {
           typeof row.categoryTitle === "string" && row.categoryTitle.trim()
             ? row.categoryTitle.trim()
             : category.replace(/[_-]+/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase());
-        const subcategory =
-          typeof row.subcategory === "string" && row.subcategory.trim() ? row.subcategory.trim() : "—";
         const description =
           typeof row.description === "string" && row.description.trim() ? row.description.trim() : "—";
         const link =
@@ -1498,7 +1298,6 @@ export class BotApiService {
           title,
           category,
           categoryTitle,
-          subcategory,
           description,
           link,
           hasFile,

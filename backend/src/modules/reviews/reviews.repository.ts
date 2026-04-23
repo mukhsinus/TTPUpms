@@ -28,7 +28,6 @@ interface SubmissionItemRow {
   submission_id: string;
   user_id: string;
   category: string;
-  subcategory: string | null;
   title: string;
   description: string | null;
   proposed_score: string | null;
@@ -39,7 +38,6 @@ interface SubmissionItemRow {
   reviewed_at: string | null;
   created_at: string;
   updated_at: string;
-  subcategory_id: string | null;
   metadata: unknown;
   category_type: string | null;
 }
@@ -86,9 +84,6 @@ export interface ReviewSubmissionItemEntity {
   submissionId: string;
   userId: string;
   category: string;
-  subcategory: string | null;
-  /** FK to category_subcategories (drives scoring_rules lookup for fixed categories). */
-  subcategoryId: string | null;
   metadata: Record<string, unknown>;
   /** categories.type — fixed | range | expert | manual (legacy). */
   categoryType: string;
@@ -164,8 +159,6 @@ function mapItem(row: SubmissionItemRow): ReviewSubmissionItemEntity {
     submissionId: row.submission_id,
     userId: row.user_id,
     category: row.category,
-    subcategory: row.subcategory,
-    subcategoryId: row.subcategory_id ?? null,
     metadata: normalizeMetadata(row.metadata),
     categoryType: row.category_type ?? "range",
     title: row.title,
@@ -191,7 +184,6 @@ const submissionItemJoinedSelectColumns = `
   si.submission_id,
   s.user_id AS user_id,
   c.name AS category,
-  cs.slug AS subcategory,
   si.title,
   si.description,
   si.proposed_score,
@@ -202,7 +194,6 @@ const submissionItemJoinedSelectColumns = `
   si.reviewed_at,
   si.created_at,
   si.updated_at,
-  si.subcategory_id,
   coalesce(si.metadata, '{}'::jsonb) AS metadata,
   c.type::text AS category_type
 `;
@@ -212,7 +203,6 @@ const submissionItemReturningColumns = `
   si.submission_id,
   s.user_id AS user_id,
   c.name AS category,
-  cs.slug AS subcategory,
   si.title,
   si.description,
   si.proposed_score,
@@ -223,7 +213,6 @@ const submissionItemReturningColumns = `
   si.reviewed_at,
   si.created_at,
   si.updated_at,
-  si.subcategory_id,
   coalesce(si.metadata, '{}'::jsonb) AS metadata,
   c.type::text AS category_type
 `;
@@ -320,7 +309,6 @@ export class ReviewsRepository {
       FROM submission_items si
       INNER JOIN submissions s ON s.id = si.submission_id
       LEFT JOIN categories c ON c.id = si.category_id
-      LEFT JOIN category_subcategories cs ON cs.id = si.subcategory_id
       WHERE si.submission_id = $1
       ORDER BY si.created_at ASC
       `,
@@ -354,13 +342,12 @@ export class ReviewsRepository {
       `
       SELECT
         si.category_id::text AS category_id,
-        cs.min_points::text AS min_score,
-        COALESCE(cs.max_points, c.max_points, c.max_score)::text AS max_score,
+        '1'::text AS min_score,
+        COALESCE(c.max_points, c.max_score)::text AS max_score,
         c.name::text AS category_name,
         c.code::text AS category_code
       FROM submission_items si
       LEFT JOIN categories c ON c.id = si.category_id
-      LEFT JOIN category_subcategories cs ON cs.id = si.subcategory_id
       WHERE si.id = $1
       `,
       [itemId],
@@ -393,11 +380,11 @@ export class ReviewsRepository {
       );
       maxScoreRaw = fallbackMax;
     }
-    const minScoreRaw = row.min_score !== null ? Number(row.min_score) : 0;
+    const minScoreRaw = row.min_score !== null ? Number(row.min_score) : 1;
     if (!Number.isFinite(minScoreRaw) || !Number.isFinite(maxScoreRaw)) {
       return null;
     }
-    const minScore = Math.max(0, minScoreRaw);
+    const minScore = Math.max(1, minScoreRaw);
     const maxScore = Math.max(minScore, maxScoreRaw);
 
     return {
@@ -413,7 +400,6 @@ export class ReviewsRepository {
       FROM submission_items si
       INNER JOIN submissions s ON s.id = si.submission_id
       LEFT JOIN categories c ON c.id = si.category_id
-      LEFT JOIN category_subcategories cs ON cs.id = si.subcategory_id
       WHERE si.id = $1
       `,
       [itemId],
@@ -489,7 +475,6 @@ export class ReviewsRepository {
           si.submission_id,
           (SELECT s.user_id FROM submissions s WHERE s.id = si.submission_id LIMIT 1) AS user_id,
           (SELECT c.name FROM categories c WHERE c.id = si.category_id LIMIT 1) AS category,
-          (SELECT cs.slug FROM category_subcategories cs WHERE cs.id = si.subcategory_id LIMIT 1) AS subcategory,
           si.title,
           si.description,
           si.proposed_score,
@@ -500,7 +485,6 @@ export class ReviewsRepository {
           si.reviewed_at,
           si.created_at,
           si.updated_at,
-          si.subcategory_id,
           coalesce(si.metadata, '{}'::jsonb) AS metadata,
           (SELECT c.type::text FROM categories c WHERE c.id = si.category_id LIMIT 1) AS category_type
         `,

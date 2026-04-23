@@ -178,7 +178,6 @@ export interface AdminSubmissionListItem {
   categoryCode: string | null;
   /** Human-readable label from DB (`categories.title`) or derived from `categories.name`. */
   categoryTitle: string | null;
-  subcategorySlug: string | null;
   title: string;
   status: AdminModerationStatus;
   createdAt: string;
@@ -507,8 +506,6 @@ export interface AdminSubmissionDetailPayload {
     categoryCode: string | null;
     categoryName: string | null;
     categoryTitle?: string | null;
-    subcategorySlug: string | null;
-    subcategoryLabel: string | null;
     createdAt: string;
     updatedAt: string;
   }>;
@@ -629,8 +626,6 @@ export interface ReviewSubmissionItemResponse {
   submissionId: string;
   userId: string;
   category: string;
-  subcategory: string | null;
-  subcategoryId?: string;
   metadata?: Record<string, unknown>;
   categoryType?: string;
   title: string;
@@ -1094,8 +1089,6 @@ export const api = {
   createSubmissionItem(input: {
     submission_id: string;
     category_id: string;
-    subcategory_id?: string;
-    subcategory?: string;
     metadata?: Record<string, string | number | boolean>;
     title: string;
     description?: string;

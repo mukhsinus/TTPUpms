@@ -550,7 +550,6 @@ export class AdminService {
       studentId: row.student_id,
       categoryCode: row.category_code,
       categoryTitle: row.category_title,
-      subcategorySlug: row.subcategory_slug,
       title: row.title,
       status: toModerationStatus(row.db_status),
       createdAt: row.created_at,
@@ -1228,8 +1227,6 @@ export class AdminService {
       categoryCode: row.category_code,
       categoryName: row.category_name,
       categoryTitle,
-      subcategorySlug: row.subcategory_slug,
-      subcategoryLabel: row.subcategory_label,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };

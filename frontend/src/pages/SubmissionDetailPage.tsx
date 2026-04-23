@@ -81,8 +81,6 @@ function mergeReviewIntoSubmissionItem(
     ...prev,
     title: r.title,
     category: r.category,
-    subcategory: r.subcategory,
-    subcategoryId: r.subcategoryId,
     metadata: r.metadata,
     categoryType: r.categoryType,
     description: r.description,
@@ -230,12 +228,12 @@ export function SubmissionDetailPage(): ReactElement {
     const draft = itemDrafts[item.id];
     const cap = resolveCategoryCap(item, categoryCaps);
     const score = Number(draft?.score ?? "");
-    if (Number.isNaN(score) || score < 0) {
+    if (Number.isNaN(score) || score < 1) {
       setActionError("Enter a valid score for this item.");
       return;
     }
     if (cap !== undefined && score > cap) {
-      setActionError(`Allowed range: 0-${cap}`);
+      setActionError(`Allowed range: 1-${cap}`);
       return;
     }
     const normalizedComment = draft?.comment?.trim() ?? "";
@@ -441,7 +439,7 @@ export function SubmissionDetailPage(): ReactElement {
                         <span>Score</span>
                         <Input
                           type="number"
-                          min={0}
+                          min={1}
                           max={
                             resolveCategoryCap(item, categoryCaps)
                           }
@@ -456,7 +454,7 @@ export function SubmissionDetailPage(): ReactElement {
                           }
                         />
                         <small className="muted">
-                          Allowed range: 0-
+                          Allowed range: 1-
                           {resolveCategoryCap(item, categoryCaps) ?? "?"}
                         </small>
                       </label>

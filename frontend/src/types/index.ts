@@ -44,8 +44,6 @@ export interface SubmissionItem {
   title: string;
   category: string;
   categoryId?: string | null;
-  subcategory: string | null;
-  subcategoryId?: string;
   metadata?: Record<string, unknown>;
   /** categories.type from API (fixed | range | expert | manual). */
   categoryType?: string;

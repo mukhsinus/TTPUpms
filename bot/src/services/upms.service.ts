@@ -45,7 +45,6 @@ export interface SubmitDraftSuccessItem {
   title: string;
   category: string;
   categoryTitle: string;
-  subcategory: string;
   description: string;
   link: string | null;
   hasFile: boolean;
@@ -109,7 +108,6 @@ function universalScoring(category: Pick<CategoryCatalogEntry, "minScore" | "max
 }
 
 type ApiCategoryCatalogRow = Omit<CategoryCatalogEntry, "whatCounts" | "scoring"> & {
-  hasSubcategories?: boolean;
   whatCounts?: string;
   scoring?: string;
 };
@@ -117,14 +115,6 @@ type ApiCategoryCatalogRow = Omit<CategoryCatalogEntry, "whatCounts" | "scoring"
 function normalizeCategoryCatalogEntry(c: ApiCategoryCatalogRow): CategoryCatalogEntry {
   const titleSource = (c.title ?? c.name ?? c.code ?? "").toString();
   const title = stripUnderscoresDisplay(titleSource);
-  const subcategories = (c.subcategories ?? []).map((s) => {
-    const subTitleSource = (s.title ?? s.label ?? s.slug ?? "").toString();
-    return {
-      ...s,
-      title: stripUnderscoresDisplay(subTitleSource),
-    };
-  });
-  const hasSubcategories = c.hasSubcategories ?? subcategories.length > 0;
   const whatCountsRaw = c.whatCounts?.trim();
   const scoringRaw = c.scoring?.trim();
   return {
@@ -136,10 +126,8 @@ function normalizeCategoryCatalogEntry(c: ApiCategoryCatalogRow): CategoryCatalo
     type: c.type,
     minScore: c.minScore,
     maxScore: c.maxScore,
-    hasSubcategories,
     whatCounts: whatCountsRaw ? stripUnderscoresDisplay(whatCountsRaw) : universalWhatCounts(),
     scoring: scoringRaw ? stripUnderscoresDisplay(scoringRaw) : universalScoring(c),
-    subcategories,
   };
 }
 
@@ -354,7 +342,6 @@ export class UpmsService {
     telegramId: string;
     submissionId: string;
     categoryId: string;
-    subcategory: string | null;
     title: string;
     description: string | null;
     proofFileUrl: string;
@@ -370,9 +357,6 @@ export class UpmsService {
       proof_file_url: input.proofFileUrl,
       external_link: input.externalLink ?? null,
     };
-    if (input.subcategory !== null && input.subcategory !== undefined && input.subcategory !== "") {
-      body.subcategory = input.subcategory;
-    }
     if (input.metadata !== undefined && Object.keys(input.metadata).length > 0) {
       body.metadata = input.metadata;
     }
@@ -394,7 +378,6 @@ export class UpmsService {
     telegramId: string;
     items: Array<{
       categoryId: string;
-      subcategorySlug: string | null;
       title: string;
       description: string | null;
       proofFileUrl: string;
@@ -408,7 +391,6 @@ export class UpmsService {
         telegram_id: input.telegramId,
         items: input.items.map((it) => ({
           category_id: it.categoryId,
-          subcategory: it.subcategorySlug,
           title: it.title,
           description: it.description ?? null,
           proof_file_url: it.proofFileUrl,
@@ -423,7 +405,6 @@ export class UpmsService {
   async createStudentSubmission(input: {
     telegramId: string;
     categoryId: string;
-    subcategory: string;
     title: string;
     description: string;
     proofFileUrl: string;
@@ -433,7 +414,6 @@ export class UpmsService {
       body: JSON.stringify({
         telegram_id: input.telegramId,
         category_id: input.categoryId,
-        subcategory: input.subcategory,
         title: input.title,
         description: input.description,
         proof_file_url: input.proofFileUrl,
