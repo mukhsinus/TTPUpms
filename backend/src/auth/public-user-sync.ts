@@ -25,7 +25,13 @@ export function isAdminEmail(email: string | null | undefined, admins: Set<strin
 
 export async function isAdminUsersListed(db: Pool, userId: string): Promise<boolean> {
   const r = await db.query<{ ok: boolean }>(
-    `SELECT true AS ok FROM public.admin_users WHERE id = $1::uuid LIMIT 1`,
+    `
+    SELECT true AS ok
+    FROM public.admin_users
+    WHERE id = $1::uuid
+      AND role::text IN ('admin', 'superadmin')
+    LIMIT 1
+    `,
     [userId],
   );
   return Boolean(r.rows[0]?.ok);

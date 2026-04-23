@@ -1025,16 +1025,16 @@ export const api = {
     adminSubmissionDetailCache.clear();
     adminSubmissionDetailInFlight.clear();
     adminSearchSuggestionsCache.clear();
-    if (options?.authSource === "admin_panel") {
-      try {
-        await this.syncSessionRoleFromServer({ authSource: options.authSource, token, strict: true });
-      } catch (error) {
-        this.logout();
-        throw error;
-      }
-      return;
+    try {
+      await this.syncSessionRoleFromServer({
+        authSource: options?.authSource,
+        token,
+        strict: true,
+      });
+    } catch (error) {
+      this.logout();
+      throw error;
     }
-    void this.syncSessionRoleFromServer({ authSource: options?.authSource, token }).catch(() => undefined);
   },
 
   async registerAdminAccount(input: {

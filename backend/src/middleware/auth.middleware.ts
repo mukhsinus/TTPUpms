@@ -17,6 +17,8 @@ type CachedAuthEntry = {
 const FALLBACK_AUTH_CACHE_TTL_MS = 30_000;
 const fallbackAuthCache = new Map<string, CachedAuthEntry>();
 
+type AdminRegistrationDecision = "pending" | "approved" | "rejected";
+
 function parseBearerToken(authorizationHeader?: string): string | null {
   if (!authorizationHeader) {
     return null;
@@ -87,6 +89,62 @@ function setCachedFallbackAuth(token: string, identity: JwtAuthIdentity, role: A
   });
 }
 
+async function enforceAdminRegistrationGate(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  user: { id: string; role: AppRole },
+): Promise<boolean> {
+  let latestStatus: AdminRegistrationDecision | undefined;
+  try {
+    const decision = await request.server.db.query<{ status: AdminRegistrationDecision }>(
+      `
+      SELECT status::text AS status
+      FROM public.admin_security_events
+      WHERE admin_id = $1::uuid
+        AND type = 'admin_registration'
+      ORDER BY created_at DESC
+      LIMIT 1
+      `,
+      [user.id],
+    );
+    latestStatus = decision.rows[0]?.status;
+  } catch (error) {
+    const pgErr = error as { code?: string };
+    if (pgErr.code === "42P01") {
+      // Legacy envs may not have the security table yet; do not block all auth.
+      request.log.warn("admin_security_events table missing; skipping registration gate");
+      return true;
+    }
+    throw error;
+  }
+
+  if (latestStatus === "pending") {
+    reply
+      .status(403)
+      .send(
+        failure(
+          "Your admin account is pending superadmin approval. You can sign in after confirmation.",
+          "ADMIN_APPROVAL_PENDING",
+          {},
+        ),
+      );
+    return false;
+  }
+  if (latestStatus === "rejected") {
+    reply
+      .status(403)
+      .send(
+        failure(
+          "Access denied. This admin account was rejected by superadmin.",
+          "ADMIN_APPROVAL_REJECTED",
+          {},
+        ),
+      );
+    return false;
+  }
+  return true;
+}
+
 /**
  * Validates JWT and attaches `request.user` from token claims.
  * When `SUPABASE_JWT_SECRET` is set, verifies locally (no GoTrue HTTP call per request).
@@ -103,12 +161,16 @@ export async function authMiddleware(request: FastifyRequest, reply: FastifyRepl
   if (env.SUPABASE_JWT_SECRET) {
     const verified = await verifySupabaseAccessToken(token, env.SUPABASE_JWT_SECRET);
     if (verified) {
-      request.authIdentity = verified.identity;
-      request.user = {
+      const resolvedUser = {
         id: verified.identity.id,
         email: verified.identity.email ?? null,
         role: verified.role,
       };
+      request.authIdentity = verified.identity;
+      if (!(await enforceAdminRegistrationGate(request, reply, resolvedUser))) {
+        return;
+      }
+      request.user = resolvedUser;
       return;
     }
     request.log.debug("Local JWT verification failed; falling back to Supabase auth.getUser");
@@ -116,12 +178,16 @@ export async function authMiddleware(request: FastifyRequest, reply: FastifyRepl
 
   const cached = getCachedFallbackAuth(token);
   if (cached) {
-    request.authIdentity = cached.identity;
-    request.user = {
+    const resolvedUser = {
       id: cached.identity.id,
       email: cached.identity.email ?? null,
       role: cached.role,
     };
+    request.authIdentity = cached.identity;
+    if (!(await enforceAdminRegistrationGate(request, reply, resolvedUser))) {
+      return;
+    }
+    request.user = resolvedUser;
     return;
   }
 
@@ -154,10 +220,14 @@ export async function authMiddleware(request: FastifyRequest, reply: FastifyRepl
 
   const role: AppRole = jwtRoleParsed ?? "student";
 
-  request.user = {
+  const resolvedUser = {
     id: u.id,
     email: u.email ?? null,
     role,
   };
+  if (!(await enforceAdminRegistrationGate(request, reply, resolvedUser))) {
+    return;
+  }
+  request.user = resolvedUser;
   setCachedFallbackAuth(token, request.authIdentity, role);
 }

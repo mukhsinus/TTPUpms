@@ -4,7 +4,7 @@ import { failure } from "../utils/http-response";
 import { isAdminPanelOperator } from "../utils/admin-roles";
 
 function toRole(value: string): AppRole | null {
-  if (value === "admin" || value === "reviewer" || value === "student" || value === "superadmin") {
+  if (value === "admin" || value === "superadmin") {
     return value;
   }
   return null;
