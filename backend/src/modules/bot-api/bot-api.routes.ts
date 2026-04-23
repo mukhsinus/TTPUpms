@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { env } from "../../config/env";
-import { botWriteIdempotency } from "../../middleware/bot-idempotency.middleware";
+import { botWriteIdempotency, botWriteIdempotencyEnsureUser } from "../../middleware/bot-idempotency.middleware";
 import { idempotencyOnSend } from "../../middleware/idempotency.middleware";
 import { botStudentSubmissionPhaseGuard } from "../../middleware/project-phase.middleware";
 import { userWriteRateLimitPreHandler } from "../../middleware/user-write-rate-limit.middleware";
@@ -344,7 +344,7 @@ export async function botApiRoutes(app: FastifyInstance): Promise<void> {
 
   app.post(
     "/users/profile/complete",
-    { preHandler: botWriteIdempotency(app, "bot_users_profile_complete") },
+    { preHandler: botWriteIdempotencyEnsureUser(app, service, "bot_users_profile_complete") },
     async (request, reply) => {
       try {
         const body = botStudentProfileCompleteSchema.parse(request.body);
