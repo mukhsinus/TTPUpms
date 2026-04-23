@@ -178,6 +178,24 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       overrideController.overrideStatus,
     );
 
+    r.patch(
+      "/submission-items/:itemId/override-status",
+      {
+        preHandler: [requireActiveAdminForSensitiveAction, requireSuperadmin],
+        config: { rateLimit: { max: 50, timeWindow: "1 minute" } },
+      },
+      overrideController.overrideItemStatus,
+    );
+
+    r.patch(
+      "/submission-items/:itemId/override-score",
+      {
+        preHandler: [requireActiveAdminForSensitiveAction, requireSuperadmin],
+        config: { rateLimit: { max: 50, timeWindow: "1 minute" } },
+      },
+      overrideController.overrideItemScore,
+    );
+
     r.get(
       "/super/dashboard",
       {

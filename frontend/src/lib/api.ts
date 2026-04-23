@@ -704,6 +704,15 @@ export interface ReviewSubmissionItemResponse {
   updatedAt: string;
 }
 
+export interface AdminOverrideSubmissionItemResponse {
+  id: string;
+  submissionId: string;
+  submissionUserId: string;
+  status: "pending" | "approved" | "rejected";
+  approvedScore: number | null;
+  proposedScore: number | null;
+}
+
 interface TopStudent {
   userId: string;
   fullName: string | null;
@@ -1294,6 +1303,50 @@ export const api = {
       clearAdminSubmissionViewsCache();
       adminSubmissionDetailCache.delete(input.submissionId);
       adminSubmissionDetailInFlight.delete(input.submissionId);
+      return data;
+    });
+  },
+
+  setSubmissionItemStatus(input: {
+    itemId: string;
+    status: "approved" | "rejected";
+    approvedScore?: number;
+    reason?: string;
+  }): Promise<AdminOverrideSubmissionItemResponse> {
+    return request<AdminOverrideSubmissionItemResponse>(`/api/admin/submission-items/${input.itemId}/override-status`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        status: input.status,
+        approvedScore: input.approvedScore,
+        reason: input.reason,
+      }),
+    }).then((data) => {
+      clearAdminSubmissionViewsCache();
+      if (data.submissionId) {
+        adminSubmissionDetailCache.delete(data.submissionId);
+        adminSubmissionDetailInFlight.delete(data.submissionId);
+      }
+      return data;
+    });
+  },
+
+  setSubmissionItemScore(input: {
+    itemId: string;
+    approvedScore: number;
+    reason?: string;
+  }): Promise<AdminOverrideSubmissionItemResponse> {
+    return request<AdminOverrideSubmissionItemResponse>(`/api/admin/submission-items/${input.itemId}/override-score`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        approvedScore: input.approvedScore,
+        reason: input.reason,
+      }),
+    }).then((data) => {
+      clearAdminSubmissionViewsCache();
+      if (data.submissionId) {
+        adminSubmissionDetailCache.delete(data.submissionId);
+        adminSubmissionDetailInFlight.delete(data.submissionId);
+      }
       return data;
     });
   },

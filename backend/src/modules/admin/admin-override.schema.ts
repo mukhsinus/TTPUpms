@@ -5,6 +5,10 @@ export const adminSubmissionParamsSchema = z.object({
   submissionId: z.string().uuid(),
 });
 
+export const adminSubmissionItemParamsSchema = z.object({
+  itemId: z.string().uuid(),
+});
+
 export const overrideScoreBodySchema = z.object({
   totalScore: z.number().min(0),
   reason: z.string().trim().min(1).max(1000).optional(),
@@ -15,5 +19,18 @@ export const overrideStatusBodySchema = z.object({
   reason: z.string().trim().min(1).max(1000).optional(),
 });
 
+export const overrideItemStatusBodySchema = z.object({
+  status: z.enum(["approved", "rejected"]),
+  approvedScore: z.number().min(0).optional(),
+  reason: z.string().trim().min(1).max(1000).optional(),
+});
+
+export const overrideItemScoreBodySchema = z.object({
+  approvedScore: z.number().min(0),
+  reason: z.string().trim().min(1).max(1000).optional(),
+});
+
 export type OverrideScoreBody = z.infer<typeof overrideScoreBodySchema>;
 export type OverrideStatusBody = z.infer<typeof overrideStatusBodySchema>;
+export type OverrideItemStatusBody = z.infer<typeof overrideItemStatusBodySchema>;
+export type OverrideItemScoreBody = z.infer<typeof overrideItemScoreBodySchema>;

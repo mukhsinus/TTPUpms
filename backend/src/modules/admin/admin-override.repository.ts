@@ -8,11 +8,29 @@ interface SubmissionRow {
   status: SubmissionStatus;
 }
 
+interface SubmissionItemRow {
+  id: string;
+  submission_id: string;
+  submission_user_id: string;
+  status: "pending" | "approved" | "rejected";
+  approved_score: string | null;
+  proposed_score: string | null;
+}
+
 export interface AdminSubmissionEntity {
   id: string;
   userId: string;
   totalPoints: number;
   status: SubmissionStatus;
+}
+
+export interface AdminSubmissionItemEntity {
+  id: string;
+  submissionId: string;
+  submissionUserId: string;
+  status: "pending" | "approved" | "rejected";
+  approvedScore: number | null;
+  proposedScore: number | null;
 }
 
 function mapSubmission(row: SubmissionRow): AdminSubmissionEntity {
@@ -21,6 +39,17 @@ function mapSubmission(row: SubmissionRow): AdminSubmissionEntity {
     userId: row.user_id,
     totalPoints: Number(row.total_score),
     status: row.status,
+  };
+}
+
+function mapSubmissionItem(row: SubmissionItemRow): AdminSubmissionItemEntity {
+  return {
+    id: row.id,
+    submissionId: row.submission_id,
+    submissionUserId: row.submission_user_id,
+    status: row.status,
+    approvedScore: row.approved_score === null ? null : Number(row.approved_score),
+    proposedScore: row.proposed_score === null ? null : Number(row.proposed_score),
   };
 }
 
@@ -44,6 +73,29 @@ export class AdminOverrideRepository {
     return mapSubmission(result.rows[0]);
   }
 
+  async findSubmissionItemById(itemId: string): Promise<AdminSubmissionItemEntity | null> {
+    const result = await this.app.db.query<SubmissionItemRow>(
+      `
+      SELECT
+        si.id,
+        si.submission_id,
+        s.user_id::text AS submission_user_id,
+        si.status::text AS status,
+        si.approved_score::text AS approved_score,
+        si.proposed_score::text AS proposed_score
+      FROM submission_items si
+      INNER JOIN submissions s ON s.id = si.submission_id
+      WHERE si.id = $1
+      LIMIT 1
+      `,
+      [itemId],
+    );
+    if (!result.rows[0]) {
+      return null;
+    }
+    return mapSubmissionItem(result.rows[0]);
+  }
+
   async updateSubmissionScore(submissionId: string, totalScore: number): Promise<AdminSubmissionEntity> {
     const result = await this.app.db.query<SubmissionRow>(
       `
@@ -56,6 +108,180 @@ export class AdminOverrideRepository {
     );
 
     return mapSubmission(result.rows[0] as SubmissionRow);
+  }
+
+  async overrideSubmissionItemStatus(
+    itemId: string,
+    input: {
+      status: "approved" | "rejected";
+      approvedScore?: number;
+      reviewedByUserId: string;
+    },
+  ): Promise<AdminSubmissionItemEntity> {
+    const statusSql = input.status === "approved" ? "'approved'" : "'rejected'";
+    if (input.status === "approved") {
+      try {
+        const result = await this.app.db.query<SubmissionItemRow>(
+          `
+          UPDATE submission_items si
+          SET
+            status = ${statusSql}::public.submission_item_status,
+            approved_score = COALESCE($2, si.approved_score, si.proposed_score, 1),
+            reviewed_at = NOW(),
+            reviewed_by = $3::uuid,
+            updated_at = NOW()
+          FROM submissions s
+          WHERE si.id = $1
+            AND s.id = si.submission_id
+          RETURNING
+            si.id,
+            si.submission_id,
+            s.user_id::text AS submission_user_id,
+            si.status::text AS status,
+            si.approved_score::text AS approved_score,
+            si.proposed_score::text AS proposed_score
+          `,
+          [itemId, input.approvedScore ?? null, input.reviewedByUserId],
+        );
+        return mapSubmissionItem(result.rows[0] as SubmissionItemRow);
+      } catch (error) {
+        const pg = (error as { code?: string } | null)?.code;
+        if (pg !== "42703") {
+          throw error;
+        }
+        const legacy = await this.app.db.query<SubmissionItemRow>(
+          `
+          UPDATE submission_items si
+          SET
+            status = ${statusSql}::public.submission_item_status,
+            approved_score = COALESCE($2, si.approved_score, si.proposed_score, 1),
+            updated_at = NOW()
+          FROM submissions s
+          WHERE si.id = $1
+            AND s.id = si.submission_id
+          RETURNING
+            si.id,
+            si.submission_id,
+            s.user_id::text AS submission_user_id,
+            si.status::text AS status,
+            si.approved_score::text AS approved_score,
+            si.proposed_score::text AS proposed_score
+          `,
+          [itemId, input.approvedScore ?? null],
+        );
+        return mapSubmissionItem(legacy.rows[0] as SubmissionItemRow);
+      }
+    }
+
+    try {
+      const result = await this.app.db.query<SubmissionItemRow>(
+        `
+        UPDATE submission_items si
+        SET
+          status = ${statusSql}::public.submission_item_status,
+          approved_score = NULL,
+          reviewed_at = NOW(),
+          reviewed_by = $2::uuid,
+          updated_at = NOW()
+        FROM submissions s
+        WHERE si.id = $1
+          AND s.id = si.submission_id
+        RETURNING
+          si.id,
+          si.submission_id,
+          s.user_id::text AS submission_user_id,
+          si.status::text AS status,
+          si.approved_score::text AS approved_score,
+          si.proposed_score::text AS proposed_score
+        `,
+        [itemId, input.reviewedByUserId],
+      );
+      return mapSubmissionItem(result.rows[0] as SubmissionItemRow);
+    } catch (error) {
+      const pg = (error as { code?: string } | null)?.code;
+      if (pg !== "42703") {
+        throw error;
+      }
+      const legacy = await this.app.db.query<SubmissionItemRow>(
+        `
+        UPDATE submission_items si
+        SET
+          status = ${statusSql}::public.submission_item_status,
+          approved_score = NULL,
+          updated_at = NOW()
+        FROM submissions s
+        WHERE si.id = $1
+          AND s.id = si.submission_id
+        RETURNING
+          si.id,
+          si.submission_id,
+          s.user_id::text AS submission_user_id,
+          si.status::text AS status,
+          si.approved_score::text AS approved_score,
+          si.proposed_score::text AS proposed_score
+        `,
+        [itemId],
+      );
+      return mapSubmissionItem(legacy.rows[0] as SubmissionItemRow);
+    }
+  }
+
+  async overrideSubmissionItemScore(
+    itemId: string,
+    approvedScore: number,
+    reviewedByUserId: string,
+  ): Promise<AdminSubmissionItemEntity> {
+    try {
+      const result = await this.app.db.query<SubmissionItemRow>(
+        `
+        UPDATE submission_items si
+        SET
+          approved_score = $2,
+          status = 'approved'::public.submission_item_status,
+          reviewed_at = NOW(),
+          reviewed_by = $3::uuid,
+          updated_at = NOW()
+        FROM submissions s
+        WHERE si.id = $1
+          AND s.id = si.submission_id
+        RETURNING
+          si.id,
+          si.submission_id,
+          s.user_id::text AS submission_user_id,
+          si.status::text AS status,
+          si.approved_score::text AS approved_score,
+          si.proposed_score::text AS proposed_score
+        `,
+        [itemId, approvedScore, reviewedByUserId],
+      );
+      return mapSubmissionItem(result.rows[0] as SubmissionItemRow);
+    } catch (error) {
+      const pg = (error as { code?: string } | null)?.code;
+      if (pg !== "42703") {
+        throw error;
+      }
+      const legacy = await this.app.db.query<SubmissionItemRow>(
+        `
+        UPDATE submission_items si
+        SET
+          approved_score = $2,
+          status = 'approved'::public.submission_item_status,
+          updated_at = NOW()
+        FROM submissions s
+        WHERE si.id = $1
+          AND s.id = si.submission_id
+        RETURNING
+          si.id,
+          si.submission_id,
+          s.user_id::text AS submission_user_id,
+          si.status::text AS status,
+          si.approved_score::text AS approved_score,
+          si.proposed_score::text AS proposed_score
+        `,
+        [itemId, approvedScore],
+      );
+      return mapSubmissionItem(legacy.rows[0] as SubmissionItemRow);
+    }
   }
 
   async updateSubmissionStatus(
@@ -79,6 +305,112 @@ export class AdminOverrideRepository {
     );
 
     return mapSubmission(result.rows[0] as SubmissionRow);
+  }
+
+  async overrideSubmissionItemsStatus(
+    submissionId: string,
+    status: SubmissionStatus,
+    reviewedByUserId: string,
+  ): Promise<void> {
+    if (status === "approved") {
+      try {
+        await this.app.db.query(
+          `
+          UPDATE submission_items
+          SET
+            status = 'approved',
+            reviewed_at = NOW(),
+            reviewed_by = $2::uuid,
+            updated_at = NOW()
+          WHERE submission_id = $1
+          `,
+          [submissionId, reviewedByUserId],
+        );
+      } catch (error) {
+        const pg = (error as { code?: string } | null)?.code;
+        if (pg !== "42703") {
+          throw error;
+        }
+        await this.app.db.query(
+          `
+          UPDATE submission_items
+          SET
+            status = 'approved',
+            updated_at = NOW()
+          WHERE submission_id = $1
+          `,
+          [submissionId],
+        );
+      }
+      return;
+    }
+
+    if (status === "rejected") {
+      try {
+        await this.app.db.query(
+          `
+          UPDATE submission_items
+          SET
+            approved_score = NULL,
+            status = 'rejected',
+            reviewed_at = NOW(),
+            reviewed_by = $2::uuid,
+            updated_at = NOW()
+          WHERE submission_id = $1
+          `,
+          [submissionId, reviewedByUserId],
+        );
+      } catch (error) {
+        const pg = (error as { code?: string } | null)?.code;
+        if (pg !== "42703") {
+          throw error;
+        }
+        await this.app.db.query(
+          `
+          UPDATE submission_items
+          SET
+            approved_score = NULL,
+            status = 'rejected',
+            updated_at = NOW()
+          WHERE submission_id = $1
+          `,
+          [submissionId],
+        );
+      }
+      return;
+    }
+
+    if (status === "review" || status === "submitted" || status === "needs_revision") {
+      try {
+        await this.app.db.query(
+          `
+          UPDATE submission_items
+          SET
+            status = 'pending',
+            reviewed_at = NULL,
+            reviewed_by = NULL,
+            updated_at = NOW()
+          WHERE submission_id = $1
+          `,
+          [submissionId],
+        );
+      } catch (error) {
+        const pg = (error as { code?: string } | null)?.code;
+        if (pg !== "42703") {
+          throw error;
+        }
+        await this.app.db.query(
+          `
+          UPDATE submission_items
+          SET
+            status = 'pending',
+            updated_at = NOW()
+          WHERE submission_id = $1
+          `,
+          [submissionId],
+        );
+      }
+    }
   }
 
   async insertAuditLog(input: {

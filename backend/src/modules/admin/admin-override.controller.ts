@@ -2,7 +2,10 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import { ZodError } from "zod";
 import { errorCodeFromStatus, failure, success } from "../../utils/http-response";
 import {
+  adminSubmissionItemParamsSchema,
   adminSubmissionParamsSchema,
+  overrideItemScoreBodySchema,
+  overrideItemStatusBodySchema,
   overrideScoreBodySchema,
   overrideStatusBodySchema,
 } from "./admin-override.schema";
@@ -44,6 +47,50 @@ export class AdminOverrideController {
       const body = overrideStatusBodySchema.parse(request.body);
 
       const data = await this.service.overrideSubmissionStatus(params.submissionId, body, {
+        actorUserId: request.user.id,
+        requestIp: request.ip,
+        userAgent: request.headers["user-agent"],
+      });
+
+      reply.status(200).send(success(data));
+    } catch (error) {
+      this.handleError(reply, error);
+    }
+  };
+
+  overrideItemStatus = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!request.user) {
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
+      return;
+    }
+
+    try {
+      const params = adminSubmissionItemParamsSchema.parse(request.params);
+      const body = overrideItemStatusBodySchema.parse(request.body);
+
+      const data = await this.service.overrideSubmissionItemStatus(params.itemId, body, {
+        actorUserId: request.user.id,
+        requestIp: request.ip,
+        userAgent: request.headers["user-agent"],
+      });
+
+      reply.status(200).send(success(data));
+    } catch (error) {
+      this.handleError(reply, error);
+    }
+  };
+
+  overrideItemScore = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!request.user) {
+      reply.status(401).send(failure("Unauthorized", "UNAUTHORIZED"));
+      return;
+    }
+
+    try {
+      const params = adminSubmissionItemParamsSchema.parse(request.params);
+      const body = overrideItemScoreBodySchema.parse(request.body);
+
+      const data = await this.service.overrideSubmissionItemScore(params.itemId, body, {
         actorUserId: request.user.id,
         requestIp: request.ip,
         userAgent: request.headers["user-agent"],
