@@ -202,6 +202,8 @@ export class AdminOverrideService {
       userAgent: actor.userAgent,
     });
 
+    await this.repository.syncSubmissionStatusFromItems(updated.submissionId, actor.actorUserId);
+
     return updated;
   }
 
@@ -260,6 +262,8 @@ export class AdminOverrideService {
       requestIp: actor.requestIp,
       userAgent: actor.userAgent,
     });
+
+    await this.repository.syncSubmissionStatusFromItems(updated.submissionId, actor.actorUserId);
 
     return updated;
   }

@@ -284,6 +284,82 @@ export class AdminOverrideRepository {
     }
   }
 
+  async syncSubmissionStatusFromItems(
+    submissionId: string,
+    reviewedByUserId: string,
+  ): Promise<AdminSubmissionEntity | null> {
+    const statusFromItemsCte = `
+      WITH item_totals AS (
+        SELECT
+          COUNT(*)::int AS total_count,
+          COUNT(*) FILTER (WHERE status = 'pending')::int AS pending_count,
+          COUNT(*) FILTER (WHERE status = 'approved')::int AS approved_count,
+          COUNT(*) FILTER (WHERE status = 'rejected')::int AS rejected_count
+        FROM submission_items
+        WHERE submission_id = $1
+      ),
+      target_status AS (
+        SELECT
+          CASE
+            WHEN total_count = 0 THEN NULL
+            WHEN pending_count > 0 THEN NULL
+            WHEN approved_count > 0 THEN 'approved'::public.submission_status
+            WHEN rejected_count = total_count THEN 'rejected'::public.submission_status
+            ELSE NULL
+          END AS next_status
+        FROM item_totals
+      )
+    `;
+
+    try {
+      const result = await this.app.db.query<SubmissionRow>(
+        `
+        ${statusFromItemsCte}
+        UPDATE submissions s
+        SET
+          status = ts.next_status,
+          reviewed_at = NOW(),
+          reviewed_by = $2::uuid,
+          updated_at = NOW()
+        FROM target_status ts
+        WHERE s.id = $1
+          AND ts.next_status IS NOT NULL
+          AND s.status IS DISTINCT FROM ts.next_status
+        RETURNING id, user_id, total_score, status
+        `,
+        [submissionId, reviewedByUserId],
+      );
+      if (!result.rows[0]) {
+        return null;
+      }
+      return mapSubmission(result.rows[0]);
+    } catch (error) {
+      const pg = (error as { code?: string } | null)?.code;
+      if (pg !== "42703") {
+        throw error;
+      }
+      const legacy = await this.app.db.query<SubmissionRow>(
+        `
+        ${statusFromItemsCte}
+        UPDATE submissions s
+        SET
+          status = ts.next_status,
+          updated_at = NOW()
+        FROM target_status ts
+        WHERE s.id = $1
+          AND ts.next_status IS NOT NULL
+          AND s.status IS DISTINCT FROM ts.next_status
+        RETURNING id, user_id, total_score, status
+        `,
+        [submissionId],
+      );
+      if (!legacy.rows[0]) {
+        return null;
+      }
+      return mapSubmission(legacy.rows[0]);
+    }
+  }
+
   async updateSubmissionStatus(
     submissionId: string,
     status: SubmissionStatus,
