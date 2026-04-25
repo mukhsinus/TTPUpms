@@ -825,8 +825,7 @@ export class SuperadminRepository {
       where.push(`aal.admin_id = $${paramIndex++}::uuid`);
       params.push(input.adminId);
     }
-    const result = await this.app.db.query<ActivityReportRow>(
-      `
+    const buildReportQuery = (sourceSql: string): string => `
       SELECT
         to_char(aal.created_at, 'YYYY-MM-DD HH24:MI:SS') AS time,
         COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), '')) AS admin_name,
@@ -992,13 +991,43 @@ export class SuperadminRepository {
             '-'
           )
         END AS details
-      FROM public.admin_activity_logs aal
+      FROM ${sourceSql}
       LEFT JOIN public.users u ON u.id = aal.admin_id
       WHERE ${where.join(" AND ")}
       ORDER BY aal.created_at DESC, aal.id DESC
-      `,
-      params,
-    );
-    return result.rows;
+      `;
+
+    try {
+      const result = await this.app.db.query<ActivityReportRow>(buildReportQuery("public.admin_activity_logs aal"), params);
+      return result.rows;
+    } catch (error) {
+      const code = typeof error === "object" && error !== null && "code" in error ? (error as { code?: unknown }).code : null;
+      if (code !== "42P01") {
+        throw error;
+      }
+      const fallbackSource = `
+        (
+          SELECT
+            al.id,
+            al.user_id AS admin_id,
+            u2.email::text AS admin_email,
+            al.action AS action_type,
+            al.entity_table AS entity_type,
+            al.entity_id::text AS entity_id,
+            COALESCE(
+              NULLIF(al.metadata ->> 'entityLabel', ''),
+              CONCAT(al.entity_table, ':', al.entity_id::text)
+            ) AS entity_label,
+            COALESCE(al.old_values, '{}'::jsonb) AS old_value,
+            COALESCE(al.new_values, '{}'::jsonb) AS new_value,
+            COALESCE(al.metadata, '{}'::jsonb) AS metadata,
+            al.created_at
+          FROM public.audit_logs al
+          LEFT JOIN public.users u2 ON u2.id = al.user_id
+        ) aal
+      `;
+      const fallbackResult = await this.app.db.query<ActivityReportRow>(buildReportQuery(fallbackSource), params);
+      return fallbackResult.rows;
+    }
   }
 }
