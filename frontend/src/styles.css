@@ -1496,6 +1496,49 @@ body {
   cursor: not-allowed;
 }
 
+/* Superadmin item actions: last-used override (beats shell gradient on ghost buttons) */
+.dashboard-shell .admin-item-moderation-actions .ui-button.superadmin-action-btn--force-approve.is-active,
+.dashboard-shell .admin-item-moderation-actions .ui-button.superadmin-action-btn--force-approve.is-active:disabled {
+  background: #d1fae5 !important;
+  background-image: none !important;
+  border: 1px solid #059669 !important;
+  color: #065f46 !important;
+  box-shadow: none;
+  filter: none;
+}
+
+.dashboard-shell .admin-item-moderation-actions .ui-button.superadmin-action-btn--force-approve.is-active:hover:not(:disabled) {
+  background: #a7f3d0 !important;
+}
+
+.dashboard-shell .admin-item-moderation-actions .ui-button.superadmin-action-btn--force-reject.is-active,
+.dashboard-shell .admin-item-moderation-actions .ui-button.superadmin-action-btn--force-reject.is-active:disabled {
+  background: #ffe4e6 !important;
+  background-image: none !important;
+  border: 1px solid #e11d48 !important;
+  color: #9f1239 !important;
+  box-shadow: none;
+  filter: none;
+}
+
+.dashboard-shell .admin-item-moderation-actions .ui-button.superadmin-action-btn--force-reject.is-active:hover:not(:disabled) {
+  background: #fecdd3 !important;
+}
+
+.dashboard-shell .admin-item-moderation-actions .ui-button.superadmin-action-btn--edit-score.is-active,
+.dashboard-shell .admin-item-moderation-actions .ui-button.superadmin-action-btn--edit-score.is-active:disabled {
+  background: #e0e7ff !important;
+  background-image: none !important;
+  border: 1px solid #4f46e5 !important;
+  color: #312e81 !important;
+  box-shadow: none;
+  filter: none;
+}
+
+.dashboard-shell .admin-item-moderation-actions .ui-button.superadmin-action-btn--edit-score.is-active:hover:not(:disabled) {
+  background: #c7d2fe !important;
+}
+
 /* Reports page: date-range toggles — selected state reads as neutral gray (overrides shell gradient). */
 .dashboard-shell .reports-range-filters .ui-button.reports-range-toggle.is-selected {
   background: #e2e8f0 !important;

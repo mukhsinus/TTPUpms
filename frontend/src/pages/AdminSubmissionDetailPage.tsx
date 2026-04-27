@@ -138,9 +138,24 @@ export function AdminSubmissionDetailPage(): ReactElement {
   const [actionError, setActionError] = useState<string | null>(null);
   const [savingItemId, setSavingItemId] = useState<string | null>(null);
   const [itemDrafts, setItemDrafts] = useState<Record<string, { score: string; comment: string }>>({});
+  /** Which superadmin-only control was last used (per item), for visible feedback. */
+  const [superadminActionHighlight, setSuperadminActionHighlight] = useState<
+    Record<string, "force_approve" | "force_reject" | "edit_score">
+  >({});
   const role = normalizeRole(api.getSessionUser()?.role ?? "student");
   const isSuperadmin = role === "superadmin";
   const [categoryCaps, setCategoryCaps] = useState<Record<string, number>>({});
+
+  const clearSuperadminHighlight = (itemId: string): void => {
+    setSuperadminActionHighlight((prev) => {
+      if (!(itemId in prev)) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[itemId];
+      return next;
+    });
+  };
 
   const reload = useCallback(async (options?: { forceRefresh?: boolean }): Promise<void> => {
     if (!submissionId) {
@@ -225,16 +240,31 @@ export function AdminSubmissionDetailPage(): ReactElement {
       return;
     }
     const forceMode = Boolean(options?.force && isSuperadmin);
+    if (!forceMode && isSuperadmin) {
+      clearSuperadminHighlight(item.id);
+    }
+    if (forceMode) {
+      setSuperadminActionHighlight((prev) => ({
+        ...prev,
+        [item.id]: decision === "approved" ? "force_approve" : "force_reject",
+      }));
+    }
     const draft = itemDrafts[item.id];
     const score = Number(draft?.score ?? "");
     const requiresScore = forceMode ? decision === "approved" : true;
     if (requiresScore) {
       const cap = resolveCategoryCap(item, categoryCaps);
       if (Number.isNaN(score) || score < 1) {
+        if (forceMode) {
+          clearSuperadminHighlight(item.id);
+        }
         setActionError("Enter a valid score from 1 for this item.");
         return;
       }
       if (cap !== undefined && score > cap) {
+        if (forceMode) {
+          clearSuperadminHighlight(item.id);
+        }
         setActionError(`Allowed range: 1-${cap}`);
         return;
       }
@@ -292,6 +322,9 @@ export function AdminSubmissionDetailPage(): ReactElement {
         toast.success(decision === "approved" ? "Item approved" : "Item rejected");
       }
     } catch (err) {
+      if (forceMode) {
+        clearSuperadminHighlight(item.id);
+      }
       const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : "Review failed";
       setActionError(message);
     } finally {
@@ -316,6 +349,7 @@ export function AdminSubmissionDetailPage(): ReactElement {
       setActionError(`Allowed range: 1-${cap}`);
       return;
     }
+    setSuperadminActionHighlight((prev) => ({ ...prev, [item.id]: "edit_score" }));
     try {
       setSavingItemId(item.id);
       setActionError(null);
@@ -338,6 +372,7 @@ export function AdminSubmissionDetailPage(): ReactElement {
       await reload({ forceRefresh: true });
       toast.success("Item approved score updated");
     } catch (err) {
+      clearSuperadminHighlight(item.id);
       const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : "Score update failed";
       setActionError(message);
     } finally {
@@ -578,29 +613,36 @@ export function AdminSubmissionDetailPage(): ReactElement {
                 </div>
                 {canShowItemModeration ? (
                   <div className="actions-wrap admin-item-moderation-actions admin-achievement-actions-row">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      className="approve-btn"
-                      disabled={savingItemId === item.id}
-                      onClick={() => void submitItemReview(item, "approved", { force: false })}
-                    >
-                      {savingItemId === item.id ? "Saving…" : "Approve item"}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="danger"
-                      className="reject-btn"
-                      disabled={savingItemId === item.id}
-                      onClick={() => void submitItemReview(item, "rejected", { force: false })}
-                    >
-                      {savingItemId === item.id ? "Saving…" : "Reject item"}
-                    </Button>
+                    {item.status === "pending" ? (
+                      <>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="approve-btn"
+                          disabled={savingItemId === item.id}
+                          onClick={() => void submitItemReview(item, "approved", { force: false })}
+                        >
+                          {savingItemId === item.id ? "Saving…" : "Approve item"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="danger"
+                          className="reject-btn"
+                          disabled={savingItemId === item.id}
+                          onClick={() => void submitItemReview(item, "rejected", { force: false })}
+                        >
+                          {savingItemId === item.id ? "Saving…" : "Reject item"}
+                        </Button>
+                      </>
+                    ) : null}
                     {isSuperadmin ? (
                       <>
                         <Button
                           type="button"
                           variant="ghost"
+                          className={`superadmin-action-btn superadmin-action-btn--force-approve${
+                            superadminActionHighlight[item.id] === "force_approve" ? " is-active" : ""
+                          }`}
                           disabled={savingItemId === item.id}
                           onClick={() => void submitItemReview(item, "approved", { force: true })}
                         >
@@ -609,6 +651,9 @@ export function AdminSubmissionDetailPage(): ReactElement {
                         <Button
                           type="button"
                           variant="ghost"
+                          className={`superadmin-action-btn superadmin-action-btn--force-reject${
+                            superadminActionHighlight[item.id] === "force_reject" ? " is-active" : ""
+                          }`}
                           disabled={savingItemId === item.id}
                           onClick={() => void submitItemReview(item, "rejected", { force: true })}
                         >
@@ -617,6 +662,9 @@ export function AdminSubmissionDetailPage(): ReactElement {
                         <Button
                           type="button"
                           variant="ghost"
+                          className={`superadmin-action-btn superadmin-action-btn--edit-score${
+                            superadminActionHighlight[item.id] === "edit_score" ? " is-active" : ""
+                          }`}
                           disabled={savingItemId === item.id}
                           onClick={() => void editItemApprovedScore(item)}
                         >
