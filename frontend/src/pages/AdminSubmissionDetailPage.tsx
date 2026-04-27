@@ -219,13 +219,15 @@ export function AdminSubmissionDetailPage(): ReactElement {
   const submitItemReview = async (
     item: AdminSubmissionDetailPayload["items"][number],
     decision: "approved" | "rejected",
+    options?: { force?: boolean },
   ): Promise<void> => {
     if (!submissionId || !canShowItemModeration) {
       return;
     }
+    const forceMode = Boolean(options?.force && isSuperadmin);
     const draft = itemDrafts[item.id];
     const score = Number(draft?.score ?? "");
-    const requiresScore = decision === "approved" || !isSuperadmin;
+    const requiresScore = forceMode ? decision === "approved" : true;
     if (requiresScore) {
       const cap = resolveCategoryCap(item, categoryCaps);
       if (Number.isNaN(score) || score < 1) {
@@ -240,7 +242,7 @@ export function AdminSubmissionDetailPage(): ReactElement {
     try {
       setSavingItemId(item.id);
       setActionError(null);
-      if (isSuperadmin) {
+      if (forceMode) {
         const updated = await api.setSubmissionItemStatus({
           itemId: item.id,
           status: decision,
@@ -284,7 +286,7 @@ export function AdminSubmissionDetailPage(): ReactElement {
         });
       }
       await reload({ forceRefresh: true });
-      if (isSuperadmin) {
+      if (forceMode) {
         toast.success(decision === "approved" ? "Item force-approved" : "Item force-rejected");
       } else {
         toast.success(decision === "approved" ? "Item approved" : "Item rejected");
@@ -551,30 +553,26 @@ export function AdminSubmissionDetailPage(): ReactElement {
                           }`}
                         </small>
                       </label>
-                      {!isSuperadmin ? (
-                        <>
-                          <label className="item-review-field">
-                            <span>Comment {item.status === "pending" ? "(required for reject)" : ""}</span>
-                            <textarea
-                              className="ui-input item-review-comment"
-                              rows={5}
-                              value={itemDrafts[item.id]?.comment ?? ""}
-                              disabled={savingItemId === item.id}
-                              onChange={(event) =>
-                                setItemDrafts((drafts) => ({
-                                  ...drafts,
-                                  [item.id]: {
-                                    ...drafts[item.id],
-                                    comment: event.target.value,
-                                    score: drafts[item.id]?.score ?? "",
-                                  },
-                                }))
-                              }
-                            />
-                          </label>
-                          <p className="admin-item-comment-counter">{(itemDrafts[item.id]?.comment ?? "").length} / 500</p>
-                        </>
-                      ) : null}
+                      <label className="item-review-field">
+                        <span>Comment {item.status === "pending" ? "(required for reject)" : ""}</span>
+                        <textarea
+                          className="ui-input item-review-comment"
+                          rows={5}
+                          value={itemDrafts[item.id]?.comment ?? ""}
+                          disabled={savingItemId === item.id}
+                          onChange={(event) =>
+                            setItemDrafts((drafts) => ({
+                              ...drafts,
+                              [item.id]: {
+                                ...drafts[item.id],
+                                comment: event.target.value,
+                                score: drafts[item.id]?.score ?? "",
+                              },
+                            }))
+                          }
+                        />
+                      </label>
+                      <p className="admin-item-comment-counter">{(itemDrafts[item.id]?.comment ?? "").length} / 500</p>
                     </div>
                   ) : null}
                 </div>
@@ -585,28 +583,46 @@ export function AdminSubmissionDetailPage(): ReactElement {
                       variant="secondary"
                       className="approve-btn"
                       disabled={savingItemId === item.id}
-                      onClick={() => void submitItemReview(item, "approved")}
+                      onClick={() => void submitItemReview(item, "approved", { force: false })}
                     >
-                      {savingItemId === item.id ? "Saving…" : isSuperadmin ? "Force Approve" : "Approve item"}
+                      {savingItemId === item.id ? "Saving…" : "Approve item"}
                     </Button>
                     <Button
                       type="button"
                       variant="danger"
                       className="reject-btn"
                       disabled={savingItemId === item.id}
-                      onClick={() => void submitItemReview(item, "rejected")}
+                      onClick={() => void submitItemReview(item, "rejected", { force: false })}
                     >
-                      {savingItemId === item.id ? "Saving…" : isSuperadmin ? "Force Reject" : "Reject item"}
+                      {savingItemId === item.id ? "Saving…" : "Reject item"}
                     </Button>
                     {isSuperadmin ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        disabled={savingItemId === item.id}
-                        onClick={() => void editItemApprovedScore(item)}
-                      >
-                        {savingItemId === item.id ? "Saving…" : "Edit Score"}
-                      </Button>
+                      <>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          disabled={savingItemId === item.id}
+                          onClick={() => void submitItemReview(item, "approved", { force: true })}
+                        >
+                          {savingItemId === item.id ? "Saving…" : "Force Approve"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          disabled={savingItemId === item.id}
+                          onClick={() => void submitItemReview(item, "rejected", { force: true })}
+                        >
+                          {savingItemId === item.id ? "Saving…" : "Force Reject"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          disabled={savingItemId === item.id}
+                          onClick={() => void editItemApprovedScore(item)}
+                        >
+                          {savingItemId === item.id ? "Saving…" : "Edit Score"}
+                        </Button>
+                      </>
                     ) : null}
                   </div>
                 ) : null}
