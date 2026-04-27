@@ -53,6 +53,46 @@ function mapSubmissionItem(row: SubmissionItemRow): AdminSubmissionItemEntity {
   };
 }
 
+function nextStatusFromItemTotals(totals: {
+  totalCount: number;
+  pendingCount: number;
+  approvedCount: number;
+  rejectedCount: number;
+}): "approved" | "rejected" | null {
+  if (totals.totalCount === 0) {
+    return null;
+  }
+  if (totals.pendingCount > 0) {
+    return null;
+  }
+  if (totals.approvedCount > 0) {
+    return "approved";
+  }
+  if (totals.rejectedCount === totals.totalCount) {
+    return "rejected";
+  }
+  return null;
+}
+
+function buildFinalizePath(
+  currentStatus: SubmissionStatus,
+  nextStatus: "approved" | "rejected",
+): SubmissionStatus[] {
+  if (currentStatus === nextStatus) {
+    return [];
+  }
+  if (currentStatus === "review") {
+    return [nextStatus];
+  }
+  if (currentStatus === "submitted") {
+    return ["review", nextStatus];
+  }
+  if (currentStatus === "needs_revision") {
+    return ["submitted", "review", nextStatus];
+  }
+  return [];
+}
+
 export class AdminOverrideRepository {
   constructor(private readonly app: FastifyInstance) {}
 
@@ -288,75 +328,146 @@ export class AdminOverrideRepository {
     submissionId: string,
     reviewedByUserId: string,
   ): Promise<AdminSubmissionEntity | null> {
-    const statusFromItemsCte = `
-      WITH item_totals AS (
-        SELECT
-          COUNT(*)::int AS total_count,
-          COUNT(*) FILTER (WHERE status = 'pending')::int AS pending_count,
-          COUNT(*) FILTER (WHERE status = 'approved')::int AS approved_count,
-          COUNT(*) FILTER (WHERE status = 'rejected')::int AS rejected_count
-        FROM submission_items
-        WHERE submission_id = $1
-      ),
-      target_status AS (
-        SELECT
-          CASE
-            WHEN total_count = 0 THEN NULL
-            WHEN pending_count > 0 THEN NULL
-            WHEN approved_count > 0 THEN 'approved'::public.submission_status
-            WHEN rejected_count = total_count THEN 'rejected'::public.submission_status
-            ELSE NULL
-          END AS next_status
-        FROM item_totals
-      )
-    `;
-
+    const client = await this.app.db.connect();
     try {
-      const result = await this.app.db.query<SubmissionRow>(
+      await client.query("BEGIN");
+      const stateRes = await client.query<
+        SubmissionRow & {
+          total_count: string;
+          pending_count: string;
+          approved_count: string;
+          rejected_count: string;
+        }
+      >(
         `
-        ${statusFromItemsCte}
-        UPDATE submissions s
-        SET
-          status = ts.next_status,
-          reviewed_at = NOW(),
-          reviewed_by = $2::uuid,
-          updated_at = NOW()
-        FROM target_status ts
+        SELECT
+          s.id,
+          s.user_id,
+          s.total_score,
+          s.status,
+          totals.total_count::text,
+          totals.pending_count::text,
+          totals.approved_count::text,
+          totals.rejected_count::text
+        FROM submissions s
+        CROSS JOIN LATERAL (
+          SELECT
+            COUNT(*)::int AS total_count,
+            COUNT(*) FILTER (WHERE si.status = 'pending')::int AS pending_count,
+            COUNT(*) FILTER (WHERE si.status = 'approved')::int AS approved_count,
+            COUNT(*) FILTER (WHERE si.status = 'rejected')::int AS rejected_count
+          FROM submission_items si
+          WHERE si.submission_id = s.id
+        ) totals
         WHERE s.id = $1
-          AND ts.next_status IS NOT NULL
-          AND s.status IS DISTINCT FROM ts.next_status
-        RETURNING id, user_id, total_score, status
-        `,
-        [submissionId, reviewedByUserId],
-      );
-      if (!result.rows[0]) {
-        return null;
-      }
-      return mapSubmission(result.rows[0]);
-    } catch (error) {
-      const pg = (error as { code?: string } | null)?.code;
-      if (pg !== "42703") {
-        throw error;
-      }
-      const legacy = await this.app.db.query<SubmissionRow>(
-        `
-        ${statusFromItemsCte}
-        UPDATE submissions s
-        SET
-          status = ts.next_status,
-          updated_at = NOW()
-        FROM target_status ts
-        WHERE s.id = $1
-          AND ts.next_status IS NOT NULL
-          AND s.status IS DISTINCT FROM ts.next_status
-        RETURNING id, user_id, total_score, status
+        FOR UPDATE
         `,
         [submissionId],
       );
-      if (!legacy.rows[0]) {
+      const state = stateRes.rows[0];
+      if (!state) {
+        await client.query("COMMIT");
         return null;
       }
-      return mapSubmission(legacy.rows[0]);
+
+      const nextStatus = nextStatusFromItemTotals({
+        totalCount: Number(state.total_count ?? "0"),
+        pendingCount: Number(state.pending_count ?? "0"),
+        approvedCount: Number(state.approved_count ?? "0"),
+        rejectedCount: Number(state.rejected_count ?? "0"),
+      });
+      if (!nextStatus) {
+        await client.query("COMMIT");
+        return null;
+      }
+
+      const path = buildFinalizePath(state.status, nextStatus);
+      if (path.length === 0) {
+        await client.query("COMMIT");
+        return null;
+      }
+
+      let expectedStatus: SubmissionStatus = state.status;
+      let finalSubmission: SubmissionRow | null = null;
+      for (const targetStatus of path) {
+        const isFinal =
+          targetStatus === "approved" || targetStatus === "rejected";
+        if (isFinal) {
+          try {
+            const result = await client.query<SubmissionRow>(
+              `
+              UPDATE submissions
+              SET
+                status = $3::public.submission_status,
+                reviewed_at = NOW(),
+                reviewed_by = $4::uuid,
+                updated_at = NOW()
+              WHERE id = $1
+                AND status = $2::public.submission_status
+              RETURNING id, user_id, total_score, status
+              `,
+              [submissionId, expectedStatus, targetStatus, reviewedByUserId],
+            );
+            if (!result.rows[0]) {
+              await client.query("COMMIT");
+              return null;
+            }
+            finalSubmission = result.rows[0];
+          } catch (error) {
+            const pg = (error as { code?: string } | null)?.code;
+            if (pg !== "42703") {
+              throw error;
+            }
+            const legacy = await client.query<SubmissionRow>(
+              `
+              UPDATE submissions
+              SET
+                status = $3::public.submission_status,
+                updated_at = NOW()
+              WHERE id = $1
+                AND status = $2::public.submission_status
+              RETURNING id, user_id, total_score, status
+              `,
+              [submissionId, expectedStatus, targetStatus],
+            );
+            if (!legacy.rows[0]) {
+              await client.query("COMMIT");
+              return null;
+            }
+            finalSubmission = legacy.rows[0];
+          }
+        } else {
+          const result = await client.query<SubmissionRow>(
+            `
+            UPDATE submissions
+            SET
+              status = $3::public.submission_status,
+              updated_at = NOW()
+            WHERE id = $1
+              AND status = $2::public.submission_status
+            RETURNING id, user_id, total_score, status
+            `,
+            [submissionId, expectedStatus, targetStatus],
+          );
+          if (!result.rows[0]) {
+            await client.query("COMMIT");
+            return null;
+          }
+        }
+        expectedStatus = targetStatus;
+      }
+
+      await client.query("COMMIT");
+      return finalSubmission ? mapSubmission(finalSubmission) : null;
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // ignore rollback failures
+      }
+      throw error;
+    } finally {
+      client.release();
     }
   }
 

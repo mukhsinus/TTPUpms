@@ -1144,6 +1144,12 @@ export class AdminRepository {
         SELECT
           b.*,
           COUNT(*) OVER (PARTITION BY b.group_key)::text AS submissions_count,
+          COUNT(*) FILTER (
+            WHERE b.db_status IN ('submitted', 'review', 'needs_revision')
+          ) OVER (PARTITION BY b.group_key)::int AS pending_count,
+          COUNT(*) FILTER (
+            WHERE b.db_status = 'approved'
+          ) OVER (PARTITION BY b.group_key)::int AS approved_count,
           ROW_NUMBER() OVER (
             PARTITION BY b.group_key
             ORDER BY b.submitted_at DESC, b.created_at DESC, b.id DESC
@@ -1157,7 +1163,11 @@ export class AdminRepository {
         r.user_id,
         r.student_id,
         r.title,
-        r.db_status,
+        CASE
+          WHEN r.pending_count > 0 THEN 'submitted'
+          WHEN r.approved_count > 0 THEN 'approved'
+          ELSE 'rejected'
+        END::text AS db_status,
         r.semester,
         r.created_at,
         r.submitted_at,

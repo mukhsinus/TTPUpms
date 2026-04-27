@@ -9,6 +9,19 @@ function normalizeOrigin(input: string): string {
   return input.trim().replace(/\/+$/, "");
 }
 
+function isLocalDevOrigin(origin: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "http:") {
+    return false;
+  }
+  return parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "::1";
+}
+
 export async function registerSecurityPlugins(app: FastifyInstance): Promise<void> {
   const baselineAllowedOrigins = [
     "https://ttp-upms-frontend.vercel.app",
@@ -52,6 +65,10 @@ export async function registerSecurityPlugins(app: FastifyInstance): Promise<voi
         return;
       }
       const normalizedOrigin = normalizeOrigin(origin);
+      if (isLocalDevOrigin(normalizedOrigin)) {
+        callback(null, true);
+        return;
+      }
       if (allowedOrigins.has(normalizedOrigin)) {
         callback(null, true);
         return;

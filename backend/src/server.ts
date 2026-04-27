@@ -3,6 +3,7 @@ import { env } from "./config/env";
 import { SubmissionItemsRepository } from "./modules/submission-items/submission-items.repository";
 import { SystemPhaseService } from "./modules/system/system-phase.service";
 import { ensureSubmissionsSemesterColumn } from "./utils/submissions-semester-schema";
+import { healSubmissionStatusesFromItems } from "./utils/submissions-status-heal";
 import { ensureUsersPhoneColumn } from "./utils/users-phone-column";
 
 /**
@@ -21,6 +22,8 @@ async function startServer(): Promise<void> {
 
   await ensureUsersPhoneColumn(app);
   await ensureSubmissionsSemesterColumn(app);
+  const healedSubmissionStatuses = await healSubmissionStatusesFromItems(app);
+  app.log.info({ healedSubmissionStatuses }, "Submission statuses synchronized from item moderation state");
 
   try {
     const submissionItemsRepo = new SubmissionItemsRepository(app);
