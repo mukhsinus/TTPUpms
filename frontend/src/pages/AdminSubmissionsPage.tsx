@@ -23,10 +23,11 @@ import { SearchAutocomplete, type SearchAutocompleteSuggestion } from "../compon
 import { isLikelyStudentId, normalizeStudentId } from "../lib/student-id";
 import { onRealtimeUpdate } from "../lib/realtime-events";
 
-const PAGE_SIZE = 7;
+const PAGE_SIZE = 10;
 const SEARCH_DEBOUNCE_MS = 320;
 
 type DatePreset = "today" | "last7" | "last30" | "custom";
+type PaginationItem = number | "ellipsis-left" | "ellipsis-right";
 
 type SubT = TFunction<"submissions">;
 
@@ -109,6 +110,31 @@ function deriveDateRange(
   const to = new Date(now);
   to.setHours(23, 59, 59, 999);
   return { dateFrom: from.toISOString(), dateTo: to.toISOString() };
+}
+
+function buildPaginationItems(currentPage: number, totalPages: number): PaginationItem[] {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1);
+  }
+
+  const result: PaginationItem[] = [1];
+  const left = Math.max(2, currentPage - 1);
+  const right = Math.min(totalPages - 1, currentPage + 1);
+
+  if (left > 2) {
+    result.push("ellipsis-left");
+  }
+
+  for (let page = left; page <= right; page += 1) {
+    result.push(page);
+  }
+
+  if (right < totalPages - 1) {
+    result.push("ellipsis-right");
+  }
+
+  result.push(totalPages);
+  return result;
 }
 
 export function AdminSubmissionsPage(): ReactElement {
@@ -295,6 +321,7 @@ export function AdminSubmissionsPage(): ReactElement {
   }, [load]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const paginationItems = useMemo(() => buildPaginationItems(page, totalPages), [page, totalPages]);
   const showing = items.length;
   const isFilteredEmpty = !loading && !error && total === 0;
 
@@ -530,6 +557,24 @@ export function AdminSubmissionsPage(): ReactElement {
                 <Button type="button" variant="ghost" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
                   {t("previous")}
                 </Button>
+                {paginationItems.map((item) =>
+                  typeof item === "number" ? (
+                    <Button
+                      key={item}
+                      type="button"
+                      variant="ghost"
+                      className={`admin-page-number-btn${item === page ? " is-active" : ""}`}
+                      aria-current={item === page ? "page" : undefined}
+                      onClick={() => setPage(item)}
+                    >
+                      {item}
+                    </Button>
+                  ) : (
+                    <span key={item} className="admin-pagination-ellipsis" aria-hidden>
+                      ...
+                    </span>
+                  ),
+                )}
                 <Button
                   type="button"
                   variant="ghost"

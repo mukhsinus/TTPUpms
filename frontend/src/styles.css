@@ -2405,6 +2405,31 @@ body {
   transform: none;
 }
 
+.admin-pagination-actions .admin-page-number-btn {
+  min-width: 40px;
+  padding: 0 12px;
+}
+
+.admin-pagination-actions .admin-page-number-btn.is-active {
+  background: #ffffff;
+  color: #5b21b6;
+  border-color: #c4b5fd;
+  box-shadow: none;
+}
+
+.admin-pagination-actions .admin-page-number-btn.is-active:hover {
+  filter: none;
+}
+
+.admin-pagination-ellipsis {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  color: #64748b;
+  font-weight: 600;
+}
+
 .students-actions-head {
   text-align: right;
 }
