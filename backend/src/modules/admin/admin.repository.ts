@@ -317,11 +317,16 @@ function buildAdminSubmissionFilters(
     } else {
       const escaped = raw.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
       const pattern = `%${escaped}%`;
+      const normalizedDigits = raw.replace(/\D+/g, "");
       conditions.push(
         `(
           s.title ILIKE $${p} ESCAPE '\\'
           OR COALESCE(s.description, '') ILIKE $${p} ESCAPE '\\'
           OR COALESCE(u.student_full_name::text, u.full_name::text, '') ILIKE $${p} ESCAPE '\\'
+          OR (
+            $${p + 1}::text <> ''
+            AND regexp_replace(COALESCE(to_jsonb(u)->>'phone', ''), '\\D+', '', 'g') LIKE ('%' || $${p + 1}::text || '%')
+          )
           OR COALESCE(u.faculty::text, '') ILIKE $${p} ESCAPE '\\'
           OR COALESCE(u.telegram_username::text, '') ILIKE $${p} ESCAPE '\\'
           OR EXISTS (
@@ -336,8 +341,8 @@ function buildAdminSubmissionFilters(
           )
         )`,
       );
-      params.push(pattern);
-      p += 1;
+      params.push(pattern, normalizedDigits);
+      p += 2;
     }
   }
 
@@ -1281,13 +1286,15 @@ export class AdminRepository {
     }
     const safeLimit = Math.max(1, Math.min(limit, 20));
     const pattern = `%${raw.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_")}%`;
+    const normalizedDigits = raw.replace(/\D+/g, "");
 
     const result = await this.app.db.query<AdminSearchSuggestionRow>(
       `
       WITH input AS (
         SELECT
           $1::text AS pattern,
-          $2::int AS lim
+          $2::text AS normalized_digits,
+          $3::int AS lim
       ),
       student_hits AS (
         SELECT DISTINCT
@@ -1297,7 +1304,13 @@ export class AdminRepository {
           u.student_id::text AS meta
         FROM public.users u, input i
         WHERE COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), ''), '') <> ''
-          AND COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), '')) ILIKE i.pattern ESCAPE '\\'
+          AND (
+            COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), '')) ILIKE i.pattern ESCAPE '\\'
+            OR (
+              i.normalized_digits <> ''
+              AND regexp_replace(COALESCE(to_jsonb(u)->>'phone', ''), '\\D+', '', 'g') LIKE ('%' || i.normalized_digits || '%')
+            )
+          )
         LIMIT (SELECT lim FROM input)
       ),
       title_hits AS (
@@ -1320,9 +1333,9 @@ export class AdminRepository {
         SELECT * FROM title_hits
       ) all_hits
       WHERE value IS NOT NULL AND BTRIM(value) <> ''
-      LIMIT $2::int
+      LIMIT $3::int
       `,
-      [pattern, safeLimit],
+      [pattern, normalizedDigits, safeLimit],
     );
     return result.rows;
   }

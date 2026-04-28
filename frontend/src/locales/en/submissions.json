@@ -1,7 +1,7 @@
 {
   "title": "Submissions",
   "subtitleAdmin": "Moderation queue for fast review and clear prioritization.",
-  "searchPlaceholderAdmin": "Search student or title…",
+  "searchPlaceholderAdmin": "Search student, phone or title…",
   "adminFilterAllStatuses": "All",
   "filterSemesterActive": "Semester: current (active)",
   "filterSemesterFirst": "Semester: first",
