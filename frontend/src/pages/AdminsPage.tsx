@@ -72,9 +72,9 @@ export function AdminsPage(): ReactElement {
 
   return (
     <section className="dashboard-stack">
-      <Card>
-        <div className="row-between" style={{ gap: 12, marginBottom: 12 }}>
-          <div style={{ maxWidth: 340, width: "100%" }}>
+      <Card className="admins-page-card">
+        <div className="row-between admins-toolbar-row" style={{ gap: 12, marginBottom: 12 }}>
+          <div className="admins-search-wrap" style={{ maxWidth: 340, width: "100%" }}>
             <SearchAutocomplete
               value={search}
               onChange={(next) => {
@@ -91,7 +91,7 @@ export function AdminsPage(): ReactElement {
             />
           </div>
         </div>
-        <Table>
+        <Table className="admins-table">
           <thead>
             <tr>
               <th>Name</th>
@@ -144,11 +144,11 @@ export function AdminsPage(): ReactElement {
             ))}
           </tbody>
         </Table>
-        <div className="row-between" style={{ marginTop: 12 }}>
+        <div className="row-between admins-pagination-row" style={{ marginTop: 12 }}>
           <span className="muted">
             {pagination ? `Page ${pagination.page} of ${pagination.totalPages} (${pagination.total} admins)` : "—"}
           </span>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div className="admins-pagination-actions" style={{ display: "flex", gap: 8 }}>
             <Button type="button" variant="ghost" disabled={!pagination?.hasPrev} onClick={() => setPage((v) => Math.max(1, v - 1))}>
               Prev
             </Button>

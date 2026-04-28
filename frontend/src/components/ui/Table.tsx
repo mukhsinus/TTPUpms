@@ -1,9 +1,13 @@
-import type { PropsWithChildren, ReactElement } from "react";
+import type { HTMLAttributes, PropsWithChildren, ReactElement } from "react";
 
-export function Table({ children }: PropsWithChildren): ReactElement {
+type TableProps = PropsWithChildren<{
+  className?: HTMLAttributes<HTMLTableElement>["className"];
+}>;
+
+export function Table({ children, className }: TableProps): ReactElement {
   return (
     <div className="ui-table-wrap">
-      <table className="ui-table">{children}</table>
+      <table className={className ? `ui-table ${className}` : "ui-table"}>{children}</table>
     </div>
   );
 }

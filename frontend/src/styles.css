@@ -2422,6 +2422,10 @@ body {
   flex-wrap: wrap;
 }
 
+.admins-table td:nth-child(2) {
+  overflow-wrap: anywhere;
+}
+
 .admin-pagination {
   padding: 14px 18px 18px;
   margin-top: 0;
@@ -2496,9 +2500,333 @@ body {
   justify-content: flex-end;
 }
 
+.students-degree-control {
+  position: relative;
+}
+
+.students-degree-select-mobile {
+  display: none;
+}
+
+.students-degree-trigger {
+  justify-content: flex-start;
+}
+
+.students-degree-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 35;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.14);
+  overflow: hidden;
+}
+
+.students-degree-option {
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 10px 12px;
+  text-align: left;
+  font-size: 0.95rem;
+  color: #0f172a;
+  cursor: pointer;
+}
+
+.students-degree-option:hover {
+  background: #f8fafc;
+}
+
+.students-degree-option.is-active {
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
 @media (max-width: 1100px) {
   .admin-submissions-controls .moderation-queue-toolbar {
     grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .admin-submissions-page {
+    gap: var(--space-3);
+  }
+
+  .admin-submissions-controls {
+    padding: 14px;
+  }
+
+  .admin-submissions-controls .moderation-queue-toolbar {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .admin-submissions-controls .moderation-queue-toolbar .ui-button {
+    width: 100%;
+  }
+
+  .admin-submissions-table-card .ui-table-wrap {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .admin-submissions-table-card .ui-table {
+    min-width: 0;
+    table-layout: auto;
+  }
+
+  .admin-submissions-table-card .ui-table th:nth-child(2),
+  .admin-submissions-table-card .ui-table td:nth-child(2) {
+    padding-left: 12px;
+  }
+
+  .admin-submissions-table-card .ui-table th:nth-child(4) {
+    transform: none;
+  }
+
+  .admin-submissions-table-card .ui-table th,
+  .admin-submissions-table-card .ui-table td {
+    padding: 10px 12px;
+    vertical-align: top;
+  }
+
+  .admin-submissions-table-card .ui-table th {
+    font-size: 0.8rem;
+    line-height: 1.2;
+  }
+
+  .admin-submissions-table-card .ui-table td {
+    font-size: 0.86rem;
+  }
+
+  .admin-submissions-table-card .ui-table th:nth-child(3),
+  .admin-submissions-table-card .ui-table td:nth-child(3),
+  .admin-submissions-table-card .ui-table th:nth-child(4),
+  .admin-submissions-table-card .ui-table td:nth-child(4),
+  .admin-submissions-table-card .ui-table th:nth-child(5),
+  .admin-submissions-table-card .ui-table td:nth-child(5),
+  .admin-submissions-table-card .ui-table th:nth-child(6),
+  .admin-submissions-table-card .ui-table td:nth-child(6),
+  .admin-submissions-table-card .ui-table th:nth-child(7),
+  .admin-submissions-table-card .ui-table td:nth-child(7),
+  .admin-submissions-table-card .ui-table th:nth-child(8),
+  .admin-submissions-table-card .ui-table td:nth-child(8) {
+    display: none;
+  }
+
+  .admin-submissions-table-card .ui-table th:nth-child(1),
+  .admin-submissions-table-card .ui-table td:nth-child(1) {
+    width: 46%;
+  }
+
+  .admin-submissions-table-card .ui-table th:nth-child(2),
+  .admin-submissions-table-card .ui-table td:nth-child(2) {
+    width: 30%;
+    font-size: 0.82rem;
+  }
+
+  .admin-submissions-table-card .ui-table th:nth-child(9),
+  .admin-submissions-table-card .ui-table td:nth-child(9) {
+    width: 24%;
+    text-align: right;
+  }
+
+  .admin-student-avatar {
+    width: 28px;
+    height: 28px;
+    font-size: 0.72rem;
+  }
+
+  .admin-student-cell {
+    gap: 8px;
+  }
+
+  .admin-student-info strong {
+    max-width: 100%;
+    font-size: 0.9rem;
+  }
+
+  .admin-student-info .muted {
+    font-size: 0.78rem;
+  }
+
+  .admin-pagination {
+    padding: 12px 14px 14px;
+  }
+
+  .admin-pagination .pagination-bar,
+  .admin-pagination {
+    gap: 10px;
+  }
+
+  .admin-pagination-actions {
+    width: 100%;
+    justify-content: flex-start;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .students-table th:nth-child(3),
+  .students-table td:nth-child(3),
+  .students-table th:nth-child(4),
+  .students-table td:nth-child(4),
+  .students-table th:nth-child(5),
+  .students-table td:nth-child(5),
+  .students-table th:nth-child(6),
+  .students-table td:nth-child(6),
+  .students-table th:nth-child(7),
+  .students-table td:nth-child(7),
+  .students-table th:nth-child(8),
+  .students-table td:nth-child(8) {
+    display: none;
+  }
+
+  .students-table th:nth-child(1),
+  .students-table td:nth-child(1) {
+    width: 48%;
+  }
+
+  .students-table th:nth-child(2),
+  .students-table td:nth-child(2) {
+    width: 32%;
+  }
+
+  .students-table th:nth-child(9),
+  .students-table td:nth-child(9) {
+    width: 20%;
+    text-align: right;
+  }
+
+  .students-details-card .row-between {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .students-details-card .ui-input,
+  .students-details-card select.ui-input {
+    min-width: 0;
+    max-width: 100%;
+    font-size: 16px;
+  }
+
+  .students-details-card .actions-wrap .ui-button {
+    min-width: 0;
+  }
+
+  .students-degree-select-desktop {
+    display: none;
+  }
+
+  .students-degree-select-mobile {
+    display: block;
+  }
+
+  .admins-toolbar-row {
+    align-items: stretch;
+  }
+
+  .admins-search-wrap {
+    max-width: 100% !important;
+  }
+
+  .admins-table th:nth-child(1),
+  .admins-table td:nth-child(1) {
+    display: none;
+  }
+
+  .admins-table th:nth-child(2),
+  .admins-table td:nth-child(2) {
+    width: 44%;
+  }
+
+  .admins-table th:nth-child(3),
+  .admins-table td:nth-child(3) {
+    width: 22%;
+  }
+
+  .admins-table th:nth-child(4),
+  .admins-table td:nth-child(4) {
+    width: 34%;
+    text-align: right;
+  }
+
+  .admins-actions {
+    justify-content: flex-end;
+    gap: 6px;
+  }
+
+  .admins-actions .ui-button {
+    min-width: 72px;
+    height: 32px;
+    padding: 0 10px;
+    font-size: 0.76rem;
+  }
+
+  .admins-pagination-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .admins-pagination-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .admin-submission-group-table th:nth-child(3),
+  .admin-submission-group-table td:nth-child(3),
+  .admin-submission-group-table th:nth-child(4),
+  .admin-submission-group-table td:nth-child(4),
+  .admin-submission-group-table th:nth-child(5),
+  .admin-submission-group-table td:nth-child(5),
+  .admin-submission-group-table th:nth-child(7),
+  .admin-submission-group-table td:nth-child(7),
+  .admin-submission-group-table th:nth-child(8),
+  .admin-submission-group-table td:nth-child(8) {
+    display: none;
+  }
+
+  .admin-submission-group-table th:nth-child(1),
+  .admin-submission-group-table td:nth-child(1) {
+    width: 46%;
+  }
+
+  .admin-submission-group-table th:nth-child(2),
+  .admin-submission-group-table td:nth-child(2) {
+    width: 26%;
+  }
+
+  .admin-submission-group-table th:nth-child(6),
+  .admin-submission-group-table td:nth-child(6) {
+    width: 28%;
+    text-align: right;
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 560px) {
+  .students-table .admin-review-btn {
+    min-width: 64px;
+    height: 32px;
+    padding: 0 10px;
+    font-size: 0.76rem;
+  }
+
+  .admin-submissions-controls {
+    padding: 12px;
+  }
+
+  .admin-review-btn {
+    min-width: 72px;
+    height: 32px;
+    padding: 0 10px;
+    font-size: 0.76rem;
   }
 }
 
@@ -3709,6 +4037,10 @@ body {
 }
 
 @media (max-width: 900px) {
+  .dashboard-shell .dashboard-content {
+    margin-left: 0;
+  }
+
   .dashboard-shell--dashboard .dashboard-content {
     margin-left: 0;
   }

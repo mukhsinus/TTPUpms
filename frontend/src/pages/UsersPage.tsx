@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { Users } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
@@ -121,6 +121,8 @@ export function UsersPage(): ReactElement {
     phone: "",
   });
   const [error, setError] = useState<string | null>(null);
+  const [degreeMenuOpen, setDegreeMenuOpen] = useState(false);
+  const degreeMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -130,6 +132,27 @@ export function UsersPage(): ReactElement {
     }, SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
   }, [searchInput]);
+
+  useEffect(() => {
+    if (!degreeMenuOpen) {
+      return;
+    }
+    const handleOutsideClick = (event: MouseEvent | TouchEvent) => {
+      if (!degreeMenuRef.current) {
+        return;
+      }
+      const target = event.target;
+      if (target instanceof Node && !degreeMenuRef.current.contains(target)) {
+        setDegreeMenuOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", handleOutsideClick);
+    window.addEventListener("touchstart", handleOutsideClick);
+    return () => {
+      window.removeEventListener("mousedown", handleOutsideClick);
+      window.removeEventListener("touchstart", handleOutsideClick);
+    };
+  }, [degreeMenuOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -330,7 +353,7 @@ export function UsersPage(): ReactElement {
           />
         ) : (
           <>
-            <Table>
+            <Table className="students-table">
               <thead>
                 <tr>
                   <th>Full Name</th>
@@ -419,7 +442,7 @@ export function UsersPage(): ReactElement {
       </Card>
 
       {selected ? (
-        <Card title="Student details">
+        <Card title="Student details" className="students-details-card">
           <div className="items-stack">
             <div className="row-between">
               <p className="muted">
@@ -438,14 +461,51 @@ export function UsersPage(): ReactElement {
             </label>
             <label className="item-review-field">
               <span>Degree</span>
-              <select
-                className="ui-input"
-                value={form.degree}
-                onChange={(event) => setForm((prev) => ({ ...prev, degree: event.target.value as AdminStudentDegree }))}
-              >
-                <option value="bachelor">Bachelor</option>
-                <option value="master">Master</option>
-              </select>
+              <div className="students-degree-control" ref={degreeMenuRef}>
+                <select
+                  className="ui-input students-degree-select-desktop"
+                  value={form.degree}
+                  onChange={(event) => setForm((prev) => ({ ...prev, degree: event.target.value as AdminStudentDegree }))}
+                >
+                  <option value="bachelor">Bachelor</option>
+                  <option value="master">Master</option>
+                </select>
+                <div className="students-degree-select-mobile">
+                  <button
+                    type="button"
+                    className="ui-input students-degree-trigger"
+                    aria-haspopup="listbox"
+                    aria-expanded={degreeMenuOpen}
+                    onClick={() => setDegreeMenuOpen((prev) => !prev)}
+                  >
+                    {form.degree === "master" ? "Master" : "Bachelor"}
+                  </button>
+                  {degreeMenuOpen ? (
+                    <div className="students-degree-menu" role="listbox" aria-label="Degree options">
+                      <button
+                        type="button"
+                        className={`students-degree-option${form.degree === "bachelor" ? " is-active" : ""}`}
+                        onClick={() => {
+                          setForm((prev) => ({ ...prev, degree: "bachelor" }));
+                          setDegreeMenuOpen(false);
+                        }}
+                      >
+                        Bachelor
+                      </button>
+                      <button
+                        type="button"
+                        className={`students-degree-option${form.degree === "master" ? " is-active" : ""}`}
+                        onClick={() => {
+                          setForm((prev) => ({ ...prev, degree: "master" }));
+                          setDegreeMenuOpen(false);
+                        }}
+                      >
+                        Master
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
             </label>
             <label className="item-review-field">
               <span>Faculty</span>

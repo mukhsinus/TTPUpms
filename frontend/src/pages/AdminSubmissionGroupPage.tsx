@@ -109,7 +109,7 @@ export function AdminSubmissionGroupPage(): ReactElement {
           />
         ) : (
           <>
-            <Table>
+            <Table className="admin-submission-group-table">
               <thead>
                 <tr>
                   <th>{t("student")}</th>
