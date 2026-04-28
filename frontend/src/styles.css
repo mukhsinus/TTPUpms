@@ -2273,6 +2273,11 @@ body {
   overflow-x: auto;
 }
 
+.admin-submissions-table-card .ui-table {
+  table-layout: fixed;
+  min-width: 1180px;
+}
+
 .admin-submissions-table-card .ui-table th {
   background: #ffffff;
   border-bottom: 1px solid #e2e8f0;
@@ -2287,6 +2292,49 @@ body {
 }
 
 .admin-submissions-table-card .ui-table tbody tr:last-child td { border-bottom: 0; }
+
+.admin-submissions-table-card .submission-title-cell {
+  width: 32%;
+  max-width: 0;
+}
+
+.admin-submissions-table-card .ui-table th:nth-child(4),
+.admin-submissions-table-card .ui-table td:nth-child(4) {
+  width: 64px;
+}
+
+.admin-submissions-table-card .ui-table th:nth-child(2),
+.admin-submissions-table-card .ui-table td:nth-child(2) {
+  padding-left: 48px;
+}
+
+.admin-submissions-table-card .ui-table td:nth-child(2) {
+  font-size: 0.875rem;
+}
+
+.admin-submissions-table-card .ui-table th:nth-child(4) {
+  padding-left: 0;
+  transform: translateX(-4px);
+}
+
+.admin-submissions-table-card .ui-table th:nth-child(8),
+.admin-submissions-table-card .ui-table td:nth-child(8) {
+  width: 76px;
+}
+
+.admin-submissions-table-card .ui-table th:nth-child(5) {
+  padding-left: 30px;
+}
+
+.admin-submissions-table-card .submission-title-text {
+  display: block;
+  max-width: 32ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: clamp(0.78rem, 0.74rem + 0.18vw, 0.88rem);
+  line-height: 1.25;
+}
 
 .admin-student-cell {
   display: flex;
@@ -2311,13 +2359,17 @@ body {
 }
 
 .admin-student-info strong {
-  font-size: 0.92rem;
+  font-size: calc(0.92rem - 2px);
   color: #0f172a;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   display: block;
   max-width: 220px;
+}
+
+.admin-student-info .muted {
+  font-size: calc(1rem - 2px);
 }
 
 .admin-review-btn {

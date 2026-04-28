@@ -25,6 +25,7 @@ import { onRealtimeUpdate } from "../lib/realtime-events";
 
 const PAGE_SIZE = 10;
 const SEARCH_DEBOUNCE_MS = 320;
+const STUDENT_NAME_MAX_VISIBLE_CHARS = 14;
 
 type DatePreset = "today" | "last7" | "last30" | "custom";
 type PaginationItem = number | "ellipsis-left" | "ellipsis-right";
@@ -81,6 +82,13 @@ function formatUser(row: AdminSubmissionGroupListItem, t: SubT): string {
     return name;
   }
   return t("student");
+}
+
+function truncateWithEllipsis(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return `${value.slice(0, maxLength)}...`;
 }
 
 function deriveDateRange(
@@ -249,7 +257,7 @@ export function AdminSubmissionsPage(): ReactElement {
 
   const mapSuggestion = useCallback((item: AdminSearchSuggestion, index: number): SearchAutocompleteSuggestion => {
     const typeLabelMap: Record<AdminSearchSuggestion["kind"], string> = {
-      student_id: "Student ID",
+      student: "Student",
       title: "Title",
     };
     const typeLabel = typeLabelMap[item.kind] ?? "Result";
@@ -504,20 +512,23 @@ export function AdminSubmissionsPage(): ReactElement {
                 </tr>
               </thead>
               <tbody>
-                {items.map((row) => (
-                  <tr
-                    key={row.groupKey}
-                    className="clickable-row"
-                    onClick={() => navigate(`/submissions/groups/${row.groupKey}`)}
-                  >
+                {items.map((row) => {
+                  const fullUserName = formatUser(row, t);
+                  const displayUserName = truncateWithEllipsis(fullUserName, STUDENT_NAME_MAX_VISIBLE_CHARS);
+                  return (
+                    <tr
+                      key={row.groupKey}
+                      className="clickable-row"
+                      onClick={() => navigate(`/submissions/groups/${row.groupKey}`)}
+                    >
                     <td>
                       <div className="admin-student-cell">
                         <div className="admin-student-avatar" aria-hidden>
-                          {initials(formatUser(row, t))}
+                          {initials(fullUserName)}
                         </div>
                         <div className="admin-student-info">
-                          <strong>{formatUser(row, t)}</strong>
-                          <span className="muted">{row.submissionsCount} submissions</span>
+                          <strong title={fullUserName}>{displayUserName}</strong>
+                          <span className="muted">{row.submissionsCount} submission</span>
                         </div>
                       </div>
                     </td>
@@ -526,7 +537,11 @@ export function AdminSubmissionsPage(): ReactElement {
                     <td>
                       {row.semester === "second" ? "2" : row.semester === "first" ? "1" : t("emDash")}
                     </td>
-                    <td className="submission-title-cell">{row.title}</td>
+                    <td className="submission-title-cell">
+                      <span className="submission-title-text" title={row.title}>
+                        {row.title}
+                      </span>
+                    </td>
                     <td>
                       <ModerationStatusBadge status={row.status} />
                     </td>
@@ -547,8 +562,9 @@ export function AdminSubmissionsPage(): ReactElement {
                         {t("review")}
                       </Button>
                     </td>
-                  </tr>
-                ))}
+                    </tr>
+                  );
+                })}
               </tbody>
             </Table>
             <div className="pagination-bar admin-pagination">

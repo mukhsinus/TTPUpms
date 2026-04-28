@@ -3,7 +3,7 @@ import type { PoolClient } from "pg";
 import { getPostgresDriverErrorFields } from "../../utils/pg-http-map";
 import { getSubmissionsSemesterColumnPresent } from "../../utils/submissions-semester-schema";
 import { getUsersPhoneColumnPresent } from "../../utils/users-phone-column";
-import { isLikelyStudentId, normalizeStudentId } from "../../utils/student-id";
+import { normalizeStudentId } from "../../utils/student-id";
 import { ServiceError } from "../../utils/service-error";
 import type {
   AdminModerationStatus,
@@ -148,9 +148,7 @@ export interface AdminActivitySummaryRow {
   rejects: string;
 }
 
-export type AdminSearchSuggestionKind =
-  | "student_id"
-  | "title";
+export type AdminSearchSuggestionKind = "student" | "title";
 
 export interface AdminSearchSuggestionRow {
   kind: AdminSearchSuggestionKind;
@@ -312,14 +310,9 @@ function buildAdminSubmissionFilters(
   }
   if (query.search?.trim()) {
     const raw = query.search.trim().slice(0, 200);
-    const normalizedStudentId = normalizeStudentId(raw);
     if (SUBMISSION_ID_UUID.test(raw)) {
       conditions.push(`s.id = $${p}::uuid`);
       params.push(raw);
-      p += 1;
-    } else if (isLikelyStudentId(raw)) {
-      conditions.push(`upper(regexp_replace(COALESCE(u.student_id::text, ''), '\\s+', '', 'g')) = $${p}`);
-      params.push(normalizedStudentId);
       p += 1;
     } else {
       const escaped = raw.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
@@ -329,7 +322,6 @@ function buildAdminSubmissionFilters(
           s.title ILIKE $${p} ESCAPE '\\'
           OR COALESCE(s.description, '') ILIKE $${p} ESCAPE '\\'
           OR COALESCE(u.student_full_name::text, u.full_name::text, '') ILIKE $${p} ESCAPE '\\'
-          OR COALESCE(u.student_id::text, '') ILIKE $${p} ESCAPE '\\'
           OR COALESCE(u.faculty::text, '') ILIKE $${p} ESCAPE '\\'
           OR COALESCE(u.telegram_username::text, '') ILIKE $${p} ESCAPE '\\'
           OR EXISTS (
@@ -1289,26 +1281,23 @@ export class AdminRepository {
     }
     const safeLimit = Math.max(1, Math.min(limit, 20));
     const pattern = `%${raw.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_")}%`;
-    const normalized = normalizeStudentId(raw);
-    const normalizedPrefix = `${normalized.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_")}%`;
 
     const result = await this.app.db.query<AdminSearchSuggestionRow>(
       `
       WITH input AS (
         SELECT
           $1::text AS pattern,
-          $2::text AS normalized_prefix,
-          $3::int AS lim
+          $2::int AS lim
       ),
-      student_id_hits AS (
+      student_hits AS (
         SELECT DISTINCT
-          'student_id'::text AS kind,
-          u.student_id::text AS value,
-          u.student_id::text AS label,
-          COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), '')) AS meta
+          'student'::text AS kind,
+          COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), ''))::text AS value,
+          COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), ''))::text AS label,
+          u.student_id::text AS meta
         FROM public.users u, input i
-        WHERE COALESCE(u.student_id, '') <> ''
-          AND upper(regexp_replace(u.student_id::text, '\\s+', '', 'g')) LIKE i.normalized_prefix ESCAPE '\\'
+        WHERE COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), ''), '') <> ''
+          AND COALESCE(NULLIF(BTRIM(u.student_full_name), ''), NULLIF(BTRIM(u.full_name), '')) ILIKE i.pattern ESCAPE '\\'
         LIMIT (SELECT lim FROM input)
       ),
       title_hits AS (
@@ -1326,14 +1315,14 @@ export class AdminRepository {
       )
       SELECT kind::text, value::text, label::text, meta::text
       FROM (
-        SELECT * FROM student_id_hits
+        SELECT * FROM student_hits
         UNION ALL
         SELECT * FROM title_hits
       ) all_hits
       WHERE value IS NOT NULL AND BTRIM(value) <> ''
-      LIMIT $3::int
+      LIMIT $2::int
       `,
-      [pattern, normalizedPrefix, safeLimit],
+      [pattern, safeLimit],
     );
     return result.rows;
   }

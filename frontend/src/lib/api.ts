@@ -581,7 +581,7 @@ export interface AdminSubmissionDetailPayload {
 }
 
 export type AdminSearchSuggestionKind =
-  | "student_id"
+  | "student"
   | "title";
 
 export interface AdminSearchSuggestion {

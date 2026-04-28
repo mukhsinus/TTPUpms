@@ -18,8 +18,34 @@ import { Input } from "../components/ui/Input";
 import { Table } from "../components/ui/Table";
 import { TableSkeleton } from "../components/ui/PageSkeletons";
 
-const PAGE_SIZE = 7;
+const PAGE_SIZE = 10;
 const SEARCH_DEBOUNCE_MS = 300;
+type PaginationItem = number | "ellipsis-left" | "ellipsis-right";
+
+function buildPaginationItems(currentPage: number, totalPages: number): PaginationItem[] {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1);
+  }
+
+  const result: PaginationItem[] = [1];
+  const left = Math.max(2, currentPage - 1);
+  const right = Math.min(totalPages - 1, currentPage + 1);
+
+  if (left > 2) {
+    result.push("ellipsis-left");
+  }
+
+  for (let pageNumber = left; pageNumber <= right; pageNumber += 1) {
+    result.push(pageNumber);
+  }
+
+  if (right < totalPages - 1) {
+    result.push("ellipsis-right");
+  }
+
+  result.push(totalPages);
+  return result;
+}
 
 function formatDate(value: string | null | undefined): string {
   if (!value) return "—";
@@ -195,6 +221,7 @@ export function UsersPage(): ReactElement {
   }, [selectedStudentId, semester, toast]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const paginationItems = useMemo(() => buildPaginationItems(page, totalPages), [page, totalPages]);
   const dirty = useMemo(() => {
     if (!selected) {
       return false;
@@ -359,6 +386,24 @@ export function UsersPage(): ReactElement {
                 <Button type="button" variant="ghost" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
                   Previous
                 </Button>
+                {paginationItems.map((item) =>
+                  typeof item === "number" ? (
+                    <Button
+                      key={item}
+                      type="button"
+                      variant="ghost"
+                      className={`admin-page-number-btn${item === page ? " is-active" : ""}`}
+                      aria-current={item === page ? "page" : undefined}
+                      onClick={() => setPage(item)}
+                    >
+                      {item}
+                    </Button>
+                  ) : (
+                    <span key={item} className="admin-pagination-ellipsis" aria-hidden>
+                      ...
+                    </span>
+                  ),
+                )}
                 <Button
                   type="button"
                   variant="ghost"

@@ -217,7 +217,7 @@ export class ReviewsService {
     await this.audit.insert({
       actorUserId: user.id,
       targetUserId: submission.userId,
-      entityTable: "submissions",
+      entityTable: "",
       entityId: submissionId,
       action: body.decision === "approved" ? "moderation_submission_approved" : "moderation_submission_rejected",
       newValues: {

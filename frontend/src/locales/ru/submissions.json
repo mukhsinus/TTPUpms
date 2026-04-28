@@ -1,7 +1,7 @@
 {
   "title": "Заявки",
   "subtitleAdmin": "Очередь модерации для быстрой проверки и приоритизации.",
-  "searchPlaceholderAdmin": "Поиск: студент, ID или название…",
+  "searchPlaceholderAdmin": "Поиск: студент или название…",
   "adminFilterAllStatuses": "Все",
   "filterSemesterActive": "Семестр: текущий",
   "filterSemesterFirst": "Семестр: первый",
