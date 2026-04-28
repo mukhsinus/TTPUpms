@@ -42,6 +42,10 @@ const MSG_PROOF_STEP =
   "• Screenshots of results\n\n" +
   "The file should clearly support your title and description.";
 
+const MSG_SINGLE_FILE_ONLY =
+  "❌ You can upload only ONE file at a time (PDF/PNG/JPG, up to 10 MB).\n\n" +
+  "Please send a single file again.";
+
 const MSG_LINK_STEP =
   "🔗 Related link (optional)\n\n" +
   "Send an https:// link, or tap Skip.\n\n" +
@@ -526,6 +530,11 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
     // 5 — file
     async (ctx) => {
       if (await handleGlobalSubmitFlowActions(ctx, upms)) {
+        return;
+      }
+
+      if (ctx.message && "media_group_id" in ctx.message && ctx.message.media_group_id) {
+        await ctx.reply(MSG_SINGLE_FILE_ONLY);
         return;
       }
 
