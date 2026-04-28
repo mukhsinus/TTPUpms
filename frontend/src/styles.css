@@ -2264,6 +2264,15 @@ body {
   grid-template-columns: minmax(260px, 1.9fr) repeat(3, minmax(150px, 1fr)) minmax(170px, 1fr) auto;
 }
 
+.students-controls {
+  padding: 18px;
+  box-shadow: var(--shadow-sm);
+}
+
+.students-controls .moderation-queue-toolbar {
+  grid-template-columns: minmax(260px, 1.9fr) repeat(3, minmax(150px, 1fr)) minmax(170px, 1fr) auto;
+}
+
 .admin-submissions-table-card {
   padding: 0;
   overflow: hidden;
@@ -2500,6 +2509,15 @@ body {
   justify-content: flex-end;
 }
 
+.students-table-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.students-table-card .ui-table-wrap {
+  overflow-x: auto;
+}
+
 .students-degree-control {
   position: relative;
 }
@@ -2561,12 +2579,25 @@ body {
     padding: 14px;
   }
 
+  .students-controls {
+    padding: 14px;
+  }
+
   .admin-submissions-controls .moderation-queue-toolbar {
     grid-template-columns: 1fr;
     gap: 10px;
   }
 
+  .students-controls .moderation-queue-toolbar {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
   .admin-submissions-controls .moderation-queue-toolbar .ui-button {
+    width: 100%;
+  }
+
+  .students-controls .moderation-queue-toolbar .ui-button {
     width: 100%;
   }
 
@@ -2600,7 +2631,7 @@ body {
   }
 
   .admin-submissions-table-card .ui-table td {
-    font-size: 0.86rem;
+    font-size: calc(0.86rem - 1px);
   }
 
   .admin-submissions-table-card .ui-table th:nth-child(3),
@@ -2626,7 +2657,7 @@ body {
   .admin-submissions-table-card .ui-table th:nth-child(2),
   .admin-submissions-table-card .ui-table td:nth-child(2) {
     width: 30%;
-    font-size: 0.82rem;
+    font-size: calc(0.82rem - 1px);
   }
 
   .admin-submissions-table-card .ui-table th:nth-child(9),
@@ -2647,11 +2678,15 @@ body {
 
   .admin-student-info strong {
     max-width: 100%;
-    font-size: 0.9rem;
+    font-size: calc(0.9rem - 1px);
   }
 
   .admin-student-info .muted {
-    font-size: 0.78rem;
+    font-size: calc(0.78rem - 1px);
+  }
+
+  .admin-review-btn {
+    font-size: calc(0.86rem - 1px);
   }
 
   .admin-pagination {
@@ -2671,6 +2706,30 @@ body {
     -webkit-overflow-scrolling: touch;
   }
 
+  .students-table-card .ui-table-wrap {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .students-table-card .ui-table {
+    min-width: 0;
+    table-layout: auto;
+  }
+
+  .students-table-card .ui-table th,
+  .students-table-card .ui-table td {
+    padding: 10px 12px;
+    vertical-align: top;
+  }
+
+  .students-table-card .ui-table th {
+    font-size: 0.8rem;
+    line-height: 1.2;
+  }
+
+  .students-table-card .ui-table td {
+    font-size: 0.86rem;
+  }
+
   .students-table th:nth-child(3),
   .students-table td:nth-child(3),
   .students-table th:nth-child(4),
@@ -2688,17 +2747,18 @@ body {
 
   .students-table th:nth-child(1),
   .students-table td:nth-child(1) {
-    width: 48%;
+    width: 46%;
   }
 
   .students-table th:nth-child(2),
   .students-table td:nth-child(2) {
-    width: 32%;
+    width: 30%;
+    font-size: 0.82rem;
   }
 
   .students-table th:nth-child(9),
   .students-table td:nth-child(9) {
-    width: 20%;
+    width: 24%;
     text-align: right;
   }
 
@@ -2819,6 +2879,10 @@ body {
   }
 
   .admin-submissions-controls {
+    padding: 12px;
+  }
+
+  .students-controls {
     padding: 12px;
   }
 

@@ -269,7 +269,7 @@ export function UsersPage(): ReactElement {
 
   return (
     <section className="dashboard-stack">
-      <Card>
+      <Card className="students-controls">
         <div className="table-toolbar moderation-queue-toolbar">
           <Input
             value={searchInput}
@@ -341,7 +341,7 @@ export function UsersPage(): ReactElement {
         {error ? <p className="error">{error}</p> : null}
       </Card>
 
-      <Card>
+      <Card className="students-table-card">
         {loading ? (
           <TableSkeleton rows={8} cols={10} />
         ) : rows.length === 0 ? (
