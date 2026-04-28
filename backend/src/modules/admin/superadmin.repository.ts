@@ -845,6 +845,8 @@ export class SuperadminRepository {
           WHEN aal.action_type = 'moderation_item_rejected' THEN 'Item rejected'
           WHEN aal.action_type = 'moderation_item_score_changed' THEN 'Item score changed'
           WHEN aal.action_type = 'moderation_item_comment_changed' THEN 'Item comment changed'
+          WHEN aal.action_type = 'admin_override_status' THEN 'Admin Override Status'
+          WHEN aal.action_type = 'admin_override_score' THEN 'Admin Override Score'
           ELSE initcap(replace(aal.action_type, '_', ' '))
         END AS action_type,
         aal.entity_type,
@@ -871,6 +873,20 @@ export class SuperadminRepository {
           )
           WHEN aal.action_type IN ('project_phase_changed', 'project_deadlines_changed', 'academic_semester_changed')
             THEN 'Project settings'
+          WHEN aal.entity_type = 'submission_items' THEN COALESCE(
+            NULLIF(BTRIM(aal.new_value->>'itemTitle'), ''),
+            NULLIF(BTRIM(aal.metadata->>'itemTitle'), ''),
+            NULLIF(BTRIM(si.title), ''),
+            NULLIF(BTRIM(parent_submission.title), ''),
+            'Submission item'
+          )
+          WHEN aal.entity_type = 'submissions' THEN COALESCE(
+            NULLIF(BTRIM(aal.new_value->>'submissionTitle'), ''),
+            NULLIF(BTRIM(aal.metadata->>'submissionTitle'), ''),
+            NULLIF(BTRIM(parent_submission.title), ''),
+            NULLIF(BTRIM(aal.entity_label), ''),
+            'Submission'
+          )
           ELSE COALESCE(NULLIF(BTRIM(aal.entity_label), ''), 'System event')
         END AS entity_label,
         CASE
@@ -958,7 +974,31 @@ export class SuperadminRepository {
             ' -> ',
             COALESCE(NULLIF(aal.new_value->>'status', ''), '—')
           )
+          WHEN aal.action_type = 'admin_override_status' AND aal.entity_type = 'submission_items' THEN CONCAT(
+            'Status: ',
+            COALESCE(NULLIF(aal.old_value->>'status', ''), '—'),
+            ' -> ',
+            COALESCE(NULLIF(aal.new_value->>'status', ''), '—')
+          )
+          WHEN aal.action_type = 'admin_override_status' AND aal.entity_type = 'submissions' THEN CONCAT(
+            'Status: ',
+            COALESCE(NULLIF(aal.old_value->>'status', ''), '—'),
+            ' -> ',
+            COALESCE(NULLIF(aal.new_value->>'status', ''), '—')
+          )
           WHEN aal.action_type = 'moderation_submission_score_overridden' THEN CONCAT(
+            'Score: ',
+            COALESCE(NULLIF(aal.old_value->>'totalPoints', ''), '—'),
+            ' -> ',
+            COALESCE(NULLIF(aal.new_value->>'totalPoints', ''), '—')
+          )
+          WHEN aal.action_type = 'admin_override_score' AND aal.entity_type = 'submission_items' THEN CONCAT(
+            'Approved score: ',
+            COALESCE(NULLIF(aal.old_value->>'approvedScore', ''), '—'),
+            ' -> ',
+            COALESCE(NULLIF(aal.new_value->>'approvedScore', ''), '—')
+          )
+          WHEN aal.action_type = 'admin_override_score' AND aal.entity_type = 'submissions' THEN CONCAT(
             'Score: ',
             COALESCE(NULLIF(aal.old_value->>'totalPoints', ''), '—'),
             ' -> ',
@@ -993,6 +1033,20 @@ export class SuperadminRepository {
         END AS details
       FROM ${sourceSql}
       LEFT JOIN public.users u ON u.id = aal.admin_id
+      LEFT JOIN public.submission_items si
+        ON aal.entity_type = 'submission_items'
+        AND aal.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+        AND si.id = aal.entity_id::uuid
+      LEFT JOIN public.submissions parent_submission
+        ON (
+          aal.entity_type = 'submissions'
+          AND aal.entity_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+          AND parent_submission.id = aal.entity_id::uuid
+        )
+        OR (
+          aal.entity_type = 'submission_items'
+          AND si.submission_id = parent_submission.id
+        )
       WHERE ${where.join(" AND ")}
       ORDER BY aal.created_at DESC, aal.id DESC
       `;
