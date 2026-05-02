@@ -21,6 +21,26 @@ function setSessionFromLinkedUser(
   ctx.session.profileComplete = linkedUser.role !== "student" || Boolean(linkedUser.isProfileCompleted);
 }
 
+function isStartCommand(ctx: BotContext): boolean {
+  if (!ctx.message || !("text" in ctx.message)) {
+    return false;
+  }
+  const text = ctx.message.text.trim();
+  return text === "/start" || text.startsWith("/start ");
+}
+
+async function abortActiveWizardFlow(ctx: BotContext): Promise<void> {
+  if (ctx.scene?.current) {
+    await ctx.scene.leave();
+  }
+  const sceneSession = (ctx.session as { __scenes?: Record<string, unknown> }).__scenes;
+  if (sceneSession) {
+    sceneSession.state = {};
+    sceneSession.current = undefined;
+    sceneSession.cursor = undefined;
+  }
+}
+
 function formatBotPhaseBanner(input: {
   phase: "submission" | "evaluation";
   semester?: "first" | "second";
@@ -94,6 +114,12 @@ export function createBot(upmsService: UpmsService): Telegraf<BotContext> {
   const stage = new Scenes.Stage<BotContext>([submitScene, onboardingScene]);
 
   bot.use(session());
+  bot.use(async (ctx, next) => {
+    if (isStartCommand(ctx)) {
+      await abortActiveWizardFlow(ctx);
+    }
+    return next();
+  });
   bot.use(stage.middleware());
   bot.use(profileIncompleteGate());
 

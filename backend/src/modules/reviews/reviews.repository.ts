@@ -420,7 +420,7 @@ export class ReviewsRepository {
     submissionId: string;
     itemId: string;
     reviewerId: string;
-    score: number;
+    score?: number;
     comment?: string;
     decision: "approved" | "rejected";
   }): Promise<ReviewSubmissionItemEntity> {
@@ -490,7 +490,7 @@ export class ReviewsRepository {
         `,
         [
           input.itemId,
-          input.score,
+          input.decision === "approved" && input.score !== undefined ? input.score : null,
           input.comment ?? null,
           input.decision,
           input.reviewerId,

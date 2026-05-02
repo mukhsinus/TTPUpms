@@ -251,7 +251,7 @@ export function AdminSubmissionDetailPage(): ReactElement {
     }
     const draft = itemDrafts[item.id];
     const score = Number(draft?.score ?? "");
-    const requiresScore = forceMode ? decision === "approved" : true;
+    const requiresScore = decision === "approved";
     if (requiresScore) {
       const cap = resolveCategoryCap(item, categoryCaps);
       if (Number.isNaN(score) || score < 1) {
@@ -301,7 +301,7 @@ export function AdminSubmissionDetailPage(): ReactElement {
         }
         const updated = await api.reviewSubmissionLineItem({
           itemId: item.id,
-          approved_score: score,
+          approved_score: decision === "approved" ? score : undefined,
           status: decision,
           reviewer_comment: normalizedComment || undefined,
         });

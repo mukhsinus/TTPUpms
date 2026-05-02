@@ -53,7 +53,7 @@ export function mapPgErrorToClient(error: unknown): {
       return {
         status: 409,
         code: "SUBMISSION_LIMIT_EXCEEDED",
-        message: "Maximum of 3 active submissions per user.",
+        message: "Submission request is blocked by a database policy.",
       };
     }
     return {

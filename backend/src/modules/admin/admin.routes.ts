@@ -150,13 +150,19 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
 
     r.post(
       "/submissions/:id/approve",
-      { config: { rateLimit: { max: 50, timeWindow: "1 minute" } } },
+      {
+        preHandler: [requireActiveAdminForSensitiveAction],
+        config: { rateLimit: { max: 50, timeWindow: "1 minute" } },
+      },
       moderationController.approveSubmission,
     );
 
     r.post(
       "/submissions/:id/reject",
-      { config: { rateLimit: { max: 50, timeWindow: "1 minute" } } },
+      {
+        preHandler: [requireActiveAdminForSensitiveAction],
+        config: { rateLimit: { max: 50, timeWindow: "1 minute" } },
+      },
       moderationController.rejectSubmission,
     );
 

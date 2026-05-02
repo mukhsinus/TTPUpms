@@ -228,13 +228,15 @@ export function SubmissionDetailPage(): ReactElement {
     const draft = itemDrafts[item.id];
     const cap = resolveCategoryCap(item, categoryCaps);
     const score = Number(draft?.score ?? "");
-    if (Number.isNaN(score) || score < 1) {
-      setActionError("Enter a valid score for this item.");
-      return;
-    }
-    if (cap !== undefined && score > cap) {
-      setActionError(`Allowed range: 1-${cap}`);
-      return;
+    if (decision === "approved") {
+      if (Number.isNaN(score) || score < 1) {
+        setActionError("Enter a valid score for this item.");
+        return;
+      }
+      if (cap !== undefined && score > cap) {
+        setActionError(`Allowed range: 1-${cap}`);
+        return;
+      }
     }
     const normalizedComment = draft?.comment?.trim() ?? "";
     if (decision === "rejected" && normalizedComment.length === 0) {
@@ -247,7 +249,7 @@ export function SubmissionDetailPage(): ReactElement {
       setSavingItemId(item.id);
       const updated = await api.patchReviewItem({
         itemId: item.id,
-        approved_score: score,
+        approved_score: decision === "approved" ? score : undefined,
         status: decision,
         reviewer_comment: normalizedComment || undefined,
       });
@@ -459,7 +461,7 @@ export function SubmissionDetailPage(): ReactElement {
                         </small>
                       </label>
                       <label className="item-review-field">
-                        <span>Comment</span>
+                        <span>Comment (required for reject)</span>
                         <textarea
                           className="ui-input item-review-comment"
                           rows={3}

@@ -17,7 +17,6 @@ import {
   normalizeMetadata,
 } from "../scoring/scoring-metadata";
 import type { SubmissionsRepository } from "../submissions/submissions.repository";
-import { MAX_ACTIVE_SUBMISSIONS_PER_USER } from "../submissions/submission-quota";
 import type { SubmissionsService } from "../submissions/submissions.service";
 import type { UsersRepository } from "../users/users.repository";
 import type { SystemPhaseService } from "../system/system-phase.service";
@@ -683,15 +682,6 @@ export class BotApiService {
 
     const auth = toAuthUser(user);
     await this.usersRepository.assertStudentProfileCompleteForSubmission(user.id);
-
-    const active = await this.submissionsRepository.countActiveSubmissionsForUser(user.id);
-    if (active >= MAX_ACTIVE_SUBMISSIONS_PER_USER) {
-      throw new BotApiHttpError(
-        409,
-        `You can have at most ${MAX_ACTIVE_SUBMISSIONS_PER_USER} active submissions (draft, submitted, in review, or awaiting revision).`,
-        "QUOTA_EXCEEDED",
-      );
-    }
 
     await this.antiFraud.assertNoDuplicateSubmission({
       userId: user.id,

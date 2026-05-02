@@ -4,7 +4,7 @@ export function userFacingUpmsMessage(error: unknown, fallback: string): string 
   if (error instanceof UpmsApiError) {
     switch (error.code) {
       case "SUBMISSION_LIMIT_EXCEEDED":
-        return "You already have 3 active submissions (draft, submitted, or under review). Finish or withdraw one in UPMS before starting another from Telegram.";
+        return "Submission is temporarily blocked by server policy. Please try again, and contact support if it keeps happening.";
       case "UNAUTHORIZED":
         return "UPMS rejected this request (bot API key). If you manage the server, ensure BOT_API_KEY matches between the bot and backend.";
       case "VALIDATION_ERROR":

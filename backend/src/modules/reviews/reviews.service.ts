@@ -78,13 +78,6 @@ export class ReviewsService {
     }
 
     const finalScore = body.score;
-    if (finalScore === undefined || !Number.isFinite(finalScore)) {
-      throw new ServiceError(
-        400,
-        "score is required for item moderation",
-        "VALIDATION_ERROR",
-      );
-    }
     const normalizedComment = body.comment?.trim();
     if (body.decision === "rejected" && (!normalizedComment || normalizedComment.length === 0)) {
       throw new ServiceError(
@@ -94,7 +87,16 @@ export class ReviewsService {
       );
     }
 
-    await this.assertValidItemScore(item, finalScore);
+    if (body.decision === "approved") {
+      if (finalScore === undefined || !Number.isFinite(finalScore)) {
+        throw new ServiceError(
+          400,
+          "score is required when approving an item",
+          "VALIDATION_ERROR",
+        );
+      }
+      await this.assertValidItemScore(item, finalScore);
+    }
 
     if (submission.status === "submitted") {
       assertValidTransition("submitted", "review");
@@ -106,7 +108,7 @@ export class ReviewsService {
       submissionId,
       itemId,
       reviewerId: user.id,
-      score: finalScore,
+      score: body.decision === "approved" ? finalScore : undefined,
       comment: normalizedComment,
       decision: body.decision,
     });
@@ -217,7 +219,7 @@ export class ReviewsService {
     await this.audit.insert({
       actorUserId: user.id,
       targetUserId: submission.userId,
-      entityTable: "",
+      entityTable: "submissions",
       entityId: submissionId,
       action: body.decision === "approved" ? "moderation_submission_approved" : "moderation_submission_rejected",
       newValues: {

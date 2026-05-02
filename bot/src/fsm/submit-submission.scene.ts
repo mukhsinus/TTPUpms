@@ -17,6 +17,7 @@ import { botFlowStep } from "../utils/structured-log";
 import { buildCategoryIntroMessage, categoryRequiresPlacementMetadata } from "../config/category-registry";
 
 const TEN_MB = 10 * 1024 * 1024;
+const MAX_ITEMS_PER_SUBMISSION = 25;
 
 const NO_CATEGORIES_MSG = "No categories available. Please try later.";
 
@@ -149,6 +150,44 @@ function isProbablyUrl(text: string): boolean {
   try {
     const u = new URL(text.trim());
     return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+const DIRECT_FILE_EXTENSIONS = new Set([
+  "pdf",
+  "doc",
+  "docx",
+  "xls",
+  "xlsx",
+  "ppt",
+  "pptx",
+  "jpg",
+  "jpeg",
+  "png",
+  "gif",
+  "webp",
+  "zip",
+  "rar",
+  "7z",
+  "mp3",
+  "mp4",
+]);
+
+function isDirectFileUrl(text: string): boolean {
+  try {
+    const u = new URL(text.trim());
+    const pathname = u.pathname.trim().toLowerCase();
+    if (!pathname || pathname.endsWith("/")) {
+      return false;
+    }
+    const lastSegment = pathname.split("/").pop() ?? "";
+    if (!lastSegment || !lastSegment.includes(".")) {
+      return false;
+    }
+    const ext = lastSegment.split(".").pop() ?? "";
+    return DIRECT_FILE_EXTENSIONS.has(ext);
   } catch {
     return false;
   }
@@ -630,6 +669,12 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
           await ctx.reply("Please send a full link starting with https:// or tap Skip.");
           return;
         }
+        if (isDirectFileUrl(raw)) {
+          await ctx.reply(
+            "Only website links are accepted here. Direct file links (PDF, DOC, image, archive, etc.) are not allowed.",
+          );
+          return;
+        }
         externalLink = raw;
       } else {
         await ctx.reply("Paste a link, or tap Skip if you don’t have one.");
@@ -674,6 +719,14 @@ export function createSubmitSubmissionScene(upms: UpmsService): Scenes.WizardSce
 
       if (data === "flow_add_more") {
         await ctx.answerCbQuery();
+        const currentItems = st(ctx).pendingItems?.length ?? 0;
+        if (currentItems >= MAX_ITEMS_PER_SUBMISSION) {
+          await ctx.reply(
+            `You can add up to ${MAX_ITEMS_PER_SUBMISSION} achievements in one submission. Please preview and submit this batch.`,
+            addAnotherItemKeyboard(),
+          );
+          return;
+        }
         const ok = await presentCategoryStep(ctx, upms);
         if (!ok) {
           await leaveWithMenu(ctx);

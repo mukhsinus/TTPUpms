@@ -4,7 +4,6 @@ import type { AuditLogRepository } from "../audit/audit-log.repository";
 import type { NotificationService } from "../notifications/notification.service";
 import type { AntiFraudService } from "../validation/anti-fraud.service";
 import { assertStudentMaySubmitFromStatus } from "./submission-transitions";
-import { MAX_ACTIVE_SUBMISSIONS_PER_USER } from "./submission-quota";
 import type { UsersRepository } from "../users/users.repository";
 import type { SystemPhaseService } from "../system/system-phase.service";
 import type { SubmissionsRepository, SubmissionEntity } from "./submissions.repository";
@@ -29,8 +28,6 @@ export class SubmissionsService {
     }
 
     await this.users.assertStudentProfileCompleteForSubmission(targetUserId);
-
-    await this.assertActiveSubmissionQuota(targetUserId, user.role);
 
     await this.antiFraud.assertNoDuplicateSubmission({
       userId: targetUserId,
@@ -123,21 +120,6 @@ export class SubmissionsService {
     });
 
     return updated;
-  }
-
-  private async assertActiveSubmissionQuota(targetUserId: string, actorRole: AuthUser["role"]): Promise<void> {
-    if (isAdminPanelOperator(actorRole)) {
-      return;
-    }
-
-    const count = await this.repository.countActiveSubmissionsForUser(targetUserId);
-    if (count >= MAX_ACTIVE_SUBMISSIONS_PER_USER) {
-      throw new ServiceError(
-        409,
-        `You can have at most ${MAX_ACTIVE_SUBMISSIONS_PER_USER} active submissions (draft, submitted, in review, or awaiting revision).`,
-        "QUOTA_EXCEEDED",
-      );
-    }
   }
 
   private async requireSubmission(submissionId: string): Promise<SubmissionEntity> {

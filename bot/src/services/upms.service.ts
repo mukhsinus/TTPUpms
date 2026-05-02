@@ -349,18 +349,6 @@ export class UpmsService {
       try {
         envelope = parseEnvelopeFromText(rawText, response.status, path) as ApiEnvelope<T>;
       } catch (err) {
-        // Draft 409 without body is almost always active-submission quota from Postgres.
-        if (
-          err instanceof UpmsApiError &&
-          err.code === "EMPTY_RESPONSE" &&
-          response.status === 409 &&
-          path === "/api/bot/submissions/draft"
-        ) {
-          throw new UpmsApiError("Maximum of 3 active submissions per user.", {
-            code: "SUBMISSION_LIMIT_EXCEEDED",
-            httpStatus: 409,
-          });
-        }
         lastError = err;
         if (shouldRetryUnreadableResponse(err, attempt, MAX_UPMS_PARSE_ATTEMPTS)) {
           continue;
