@@ -33,7 +33,7 @@ async function abortActiveWizardFlow(ctx: BotContext): Promise<void> {
   if (ctx.scene?.current) {
     await ctx.scene.leave();
   }
-  const sceneSession = (ctx.session as { __scenes?: Record<string, unknown> }).__scenes;
+  const sceneSession = (ctx.session as { __scenes?: Record<string, unknown> } | undefined)?.__scenes;
   if (sceneSession) {
     sceneSession.state = {};
     sceneSession.current = undefined;
